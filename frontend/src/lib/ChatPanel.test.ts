@@ -76,6 +76,17 @@ describe('ChatPanel', () => {
     expect(await within(log).findByText('Partial answer.')).toBeInTheDocument()
   })
 
+  it('shows no chip on a question about the open page, only on one about a spot', async () => {
+    const { topic, context, panel } = setup()
+    topic.chat.push(
+      { id: 'q1', role: 'user', text: 'About the page', context: { ...context, point: undefined } },
+      { id: 'q2', role: 'user', text: 'About the spot', context },
+    )
+    const log = await panel.findByRole('log')
+    expect(within(log).getAllByRole('button', { name: 'p. 10' })).toHaveLength(1)
+    expect(log.querySelectorAll('.message')[0].querySelector('.chip')).toBeNull()
+  })
+
   it('shows answers as Markdown with typeset maths, and questions as typed', async () => {
     const { topic, panel } = setup()
     topic.chat.push(

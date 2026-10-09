@@ -21,8 +21,10 @@ Trust the images over the extracted text: the text is often missing (scanned pag
 (equations, tables, figures). When they clicked something, answer about the marked thing.
 
 Explain in a way that helps them understand, not only what the answer is. Refer to pages as \
-(p. N) using the page numbers you are given. The chat shows plain text: do not use Markdown or \
-LaTeX. Write maths with Unicode, such as x², √(a+b), ∑, ∫, σ and →."""
+(p. N) using the page numbers you are given. The chat renders Markdown, so use it where it helps \
+(short paragraphs, lists, **bold** for key terms), but keep answers conversational rather than \
+report-like. Write all maths in LaTeX: $...$ inline and $$...$$ on its own line for display \
+equations. Write a literal dollar sign as \\$."""
 
 
 class Point(BaseModel):

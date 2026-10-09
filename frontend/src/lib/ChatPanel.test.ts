@@ -73,4 +73,17 @@ describe('ChatPanel', () => {
     finish()
     expect(await within(log).findByText('Partial answer.')).toBeInTheDocument()
   })
+
+  it('shows answers as Markdown with typeset maths, and questions as typed', async () => {
+    const { topic, panel } = setup()
+    topic.chat.push(
+      { id: 'q', role: 'user', text: 'What is **this** $x$?' },
+      { id: 'a', role: 'assistant', text: 'It is **the variance**:\n\n$$\\sigma^2 = E[(X-\\mu)^2]$$' },
+    )
+    const log = await panel.findByRole('log')
+    expect(log.querySelector('.user')).toHaveTextContent('What is **this** $x$?')
+    expect(log.querySelector('.assistant strong')).toHaveTextContent('the variance')
+    expect(log.querySelector('.assistant .katex-display')).not.toBeNull()
+  })
 })
+

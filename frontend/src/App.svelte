@@ -1,5 +1,6 @@
 <script lang="ts">
   import { tick } from 'svelte'
+  import { chatReserve } from './lib/chatWidth'
   import ChatPanel from './lib/ChatPanel.svelte'
   import DocPane from './lib/DocPane.svelte'
   import type { PageContext, Pick } from './lib/context'
@@ -300,6 +301,7 @@
               active={id === doc?.id}
               controlsTarget={controlsEl}
               marker={markerFor(id)}
+              reserve={chatOpen ? 0 : chatReserve()}
               onpick={(p) => onPick(id, p)}
               onmarkerclick={() => {
                 const topic = workspace.topicOf(id)

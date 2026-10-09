@@ -24,15 +24,19 @@ The whole-document and topic layers never send whole PDFs. Each PDF is indexed w
 
 A collapsible sidebar lists **topics**, like the conversation list in a chat app. A topic collects the PDFs studied together, such as lecture notes and the course book, and each one opens as a tab in that topic. Opening a PDF with no topic selected starts a topic named after the file.
 
-Open PDF (as a tab in a topic) → read → click on the thing you are stuck on (or select text) → the chat opens with that spot attached as context → type your question → a streaming answer appears in the side panel → citations jump back into the PDF.
+Open PDF (as a tab in a topic) → read → right-click the thing you are stuck on (or select text and right-click it) and pick Ask, or just click it with the Click to ask tool → the chat opens with that spot attached as context → type your question → a streaming answer appears in the side panel → citations jump back into the PDF.
 
 ## Step 3b. Click to ask: how a question reaches the model
 
 ### The interaction
 
-A **plain left click on page content** attaches what is under it to the chat. A drag still selects text as before, and a selection attaches exactly that text when you release the mouse.
+Two **tools** sit in the PDF toolbar, to the right of zoom, and decide what a left click does. The choice is the same in every tab and remembered in the browser; it starts on Select.
+- **Select** (an arrow) works like any PDF reader: click, drag, select and copy text. Nothing goes to the chat. To ask about something, right-click it and pick **Ask** (Step 3e).
+- **Click to ask** (a pointing hand) makes a **plain left click on page content** attach what is under it to the chat, and the pointer is a hand over the pages. A drag still selects text as before, and a selection attaches exactly that text when you release the mouse.
 
-1. You click an equation. A marker appears at the spot, and the chat opens with the composer focused.
+Ask in the right-click menu does exactly what a click does with Click to ask, with either tool.
+
+1. You click an equation (or right-click it and pick Ask). A marker appears at the spot, and the chat opens with the composer focused.
 2. Above the composer sits a **context chip**: a small thumbnail of the clicked area and "p. 12", plus the first words of the text there when the PDF has any.
 3. You type the question and press Enter. The question and the attached context are sent together, and the chip moves onto the sent message.
 
@@ -87,13 +91,16 @@ A click plus the model's vision covers what box-select was for: the model sees t
 
 ## Step 3e. Right-click and the chat's modes
 
-A **right-click on page content** (or on the selected text) opens a small menu instead of the browser's. Margins and links keep the browser's own menu.
+A **right-click on page content** (or on the selected text) opens a small menu instead of the browser's, the same with either tool. On selected text its items are about that text; anywhere else on the content they are about the spot, since equations, figures and scanned pages cannot be selected as text. Margins and links keep the browser's own menu.
+
+- **Ask** attaches the text or spot to the chat and opens it, like a click with Click to ask (Step 3b).
+- **Copy** is there when you right-click selected text.
 
 - The chat has two **modes**, picked from a menu on the left below the question box (the model menu is on the right): **Normal** answers questions; **Socratic** has the model ask you questions that lead you to the answer instead of explaining. In Socratic mode the question box takes on a purple shade and the model's messages get a purple edge; your own messages look as always.
 - **Socratic** in the right-click menu switches to Socratic mode and starts a session about what you right-clicked: the model asks the first question straight away. You answer, and it replies with a line of feedback and the next question, giving hints rather than the answer when you are stuck. When you have the key idea it sums up what you worked out. The question you were typing and any attached spot stay as they are.
-- **A left click (or selection) on the page switches back to Normal**, since pointing at something is for asking about it. New chat goes back to Normal.
+- **Ask, or a left click (or selection) with Click to ask, switches back to Normal**, since pointing at something is for asking about it. New chat goes back to Normal.
 - The model knows which turns are Socratic because each one is marked `[Socratic]`, and the system prompt says how to tutor; unmarked turns are ordinary questions.
-- **Quiz me** is in the right-click menu but greyed out ("Coming soon").
+- **Quiz me** is in the right-click menu but greyed out ("Coming soon"). The menu reads Ask, Socratic, Quiz me, then Copy below a line.
 
 ## Step 4. Architecture that survives the move to Mac
 
@@ -110,7 +117,7 @@ Defaults I picked (easy to change): Python backend rather than Node, and v1 runs
 - Open a local PDF, with page navigation, zoom and text selection
 - A collapsible topics sidebar, with each topic's PDFs as tabs that keep their place
 - Side panel chat with streaming answers
-- Click on anything (text, equation, figure, scanned page) or select text to attach it as context, then type the question
+- Right-click anything (text, equation, figure, scanned page) or selected text and pick Ask, or click it with the Click to ask tool, to attach it as context, then type the question
 - A Socratic mode, from a menu or a right-click, where the model asks the questions
 - Whole-document and whole-topic context, with clickable citations to a PDF and page
 - Topics, their PDFs and each topic's chat history saved, so they are still there after a reload
@@ -130,14 +137,14 @@ Defaults I picked (easy to change): Python backend rather than Node, and v1 runs
    - **Topics:** collapsible sidebar of topics, with PDFs as tabs. Kept in memory until step 4.
 2. **Ask:** in two pieces, each usable on its own.
    - **2a. Answers:** typed question → `/api/ask` → streaming answer in the chat, with the current page's image and text as context.
-   - **2b. Click to ask:** click or selection → anchor, marker, marked page image, context chip; the chip on sent messages jumps back.
+   - **2b. Click to ask:** click or selection (or Ask in the right-click menu) → anchor, marker, marked page image, context chip; the chip on sent messages jumps back.
 3. **Whole topic:** index each PDF on upload, give the model a map of the topic and tools to search and read pages (Step 3d), and measure cost and whether it finds the right pages. Then citations that switch tab and jump.
 4. **Persistence:** topics, their PDFs and each topic's chat history (with anchors) in IndexedDB.
 5. **Long documents:** largely covered by step 3, since nothing sends a whole PDF; revisit if evaluations show gaps.
 
 Each step works on its own, so steps 1 and 2 already give a usable tool.
 
-Status (October 2026): steps 1 to 3 are built. A citation in an answer is a link that switches to its PDF's tab and goes to the page. The chat has a Normal/Socratic mode and a right-click menu that starts a Socratic session (Step 3e); Quiz me is a placeholder. Persistence (step 4) is not started; it should keep a topic's mode and the messages' Socratic marks with its chat.
+Status (October 2026): steps 1 to 3 are built. A citation in an answer is a link that switches to its PDF's tab and goes to the page. The PDF toolbar has Select and Click to ask tools (Step 3b). The chat has a Normal/Socratic mode, and a right-click menu asks about a spot or selection or starts a Socratic session on it (Step 3e); Quiz me is a placeholder. Persistence (step 4) is not started; it should keep a topic's mode and the messages' Socratic marks with its chat.
 
 ## Step 7. How we know v1 works
 

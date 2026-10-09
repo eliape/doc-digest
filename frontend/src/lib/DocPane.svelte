@@ -2,6 +2,7 @@
   import type { Pick } from './context'
   import { formatScale, parsePageInput } from './pages'
   import PdfViewer from './PdfViewer.svelte'
+  import { type Tool, TOOLS } from './tools'
 
   type Props = {
     /** The PDF's bytes. */
@@ -14,13 +15,28 @@
     marker?: Pick
     /** Pixels the chat will take beside the PDF when it opens (see PdfViewer). */
     reserve?: number
+    /** What a left click on the PDF does (see PdfViewer). The controls switch it for every tab. */
+    tool?: Tool
+    ontoolchange?: (tool: Tool) => void
     onpick?: (pick: Pick) => void
     oncontextpick?: (pick: Pick, at: { x: number; y: number }) => void
     onmarkerclick?: () => void
     onerror?: (error: unknown) => void
   }
 
-  let { data, active = true, controlsTarget, marker, reserve, onpick, oncontextpick, onmarkerclick, onerror }: Props = $props()
+  let {
+    data,
+    active = true,
+    controlsTarget,
+    marker,
+    reserve,
+    tool,
+    ontoolchange,
+    onpick,
+    oncontextpick,
+    onmarkerclick,
+    onerror,
+  }: Props = $props()
 
   // Each tab has its own page and zoom, which its controls show while it is open.
   let viewer = $state<PdfViewer>()
@@ -128,6 +144,24 @@
         <svg class="chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" /></svg>
       </label>
     </div>
+
+    <span class="divider" aria-hidden="true"></span>
+
+    <!-- The open tool is shaded, like the open tab. -->
+    <div class="group tools" role="group" aria-label="Tool">
+      {#each TOOLS as t (t.value)}
+        <button
+          type="button"
+          class="chrome-button"
+          aria-label={t.label}
+          aria-pressed={tool === t.value}
+          title={t.title}
+          onclick={() => ontoolchange?.(t.value)}
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d={t.icon} /></svg>
+        </button>
+      {/each}
+    </div>
   </div>
 {/if}
 
@@ -141,6 +175,7 @@
     bind:scale
     {marker}
     {reserve}
+    {tool}
     {onpick}
     {oncontextpick}
     {onmarkerclick}
@@ -244,6 +279,15 @@
     stroke-width: 1.6;
     stroke-linecap: round;
     stroke-linejoin: round;
+  }
+
+  .tools .chrome-button {
+    color: var(--muted);
+  }
+  .tools .chrome-button:hover,
+  .tools .chrome-button[aria-pressed='true'] {
+    background: var(--hover);
+    color: inherit;
   }
 
   .viewer-area {

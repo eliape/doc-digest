@@ -5,8 +5,9 @@
   import ContextMenu, { type MenuItem } from './lib/ContextMenu.svelte'
   import DocPane from './lib/DocPane.svelte'
   import type { PageContext, Pick } from './lib/context'
-  import { SOCRATIC_ICON } from './lib/modes'
+  import { ASK_ICON, SOCRATIC_ICON } from './lib/modes'
   import { isPdfFile } from './lib/pages'
+  import { savedTool, saveTool, type Tool } from './lib/tools'
   import TopicsSidebar from './lib/TopicsSidebar.svelte'
   import { Workspace } from './lib/workspace.svelte'
 
@@ -17,6 +18,14 @@
   // Every load starts with the topics open and the chat closed.
   let sidebarOpen = $state(true)
   let chatOpen = $state(false)
+
+  // What a left click on the PDF does, the same in every tab and remembered in this browser.
+  let tool = $state<Tool>(savedTool())
+
+  function setTool(value: Tool) {
+    tool = value
+    saveTool(value)
+  }
 
   let chatToggle = $state<HTMLButtonElement>()
   let chatPanel = $state<ChatPanel>()
@@ -71,9 +80,9 @@
   // Read at call time: bind:this fills `panes` after the tab mounts.
   const pane = (): DocPane | undefined => (doc ? panes[doc.id] : undefined)
 
-  // Clicking a spot (or selecting text) attaches it to the topic's chat and
-  // opens the chat. Its images render in the background; a question sent
-  // meanwhile waits for them.
+  // Asking about a spot (or selected text), by a click with the Click to ask tool or
+  // from the right-click menu, attaches it to the topic's chat and opens the chat.
+  // Its images render in the background; a question sent meanwhile waits for them.
   // Per topic, so a pick in another topic can't drop this one's images.
   const latestPick: Record<string, number> = {}
   const capturing: Record<string, Promise<unknown>> = {}
@@ -96,7 +105,7 @@
       .catch(() => {})
   }
 
-  // Right-clicking a spot (or the selection) opens a menu of ways to study it.
+  // Right-clicking a spot (or the selection) opens a menu of ways to study it, with either tool.
   type MenuTarget = { docId: string; pick: Pick; x: number; y: number }
   let menu = $state.raw<MenuTarget>()
 
@@ -117,18 +126,30 @@
     })
   }
 
-  /** What the menu offers for a right-clicked spot. Quiz me is still to come. */
+  /** Put text on the clipboard, as the browser's own Copy would. */
+  async function copy(text: string) {
+    try {
+      await navigator.clipboard.writeText(text)
+    } catch {
+      // No clipboard API (a page served over plain http): copy the selection the old way.
+      document.execCommand('copy')
+    }
+  }
+
+  /**
+   * What the menu offers for a right-clicked spot or selection. Ask does what a click does
+   * with the Click to ask tool. Quiz me is still to come.
+   */
   function menuItems({ docId, pick }: MenuTarget): MenuItem[] {
     const topic = workspace.topicOf(docId)
     // A session starts with the model's question, which has to wait for the answer still arriving.
     const busy = !!topic && workspace.isAnswering(topic.id)
-    return [
+    const items: MenuItem[] = [
       {
-        label: 'Quiz me',
-        hint: 'Coming soon',
-        // A list of ticked boxes.
-        icon: 'M10 6h10M10 12h10M10 18h10M4 6l1.5 1.5L8 5M4 12l1.5 1.5L8 11M4 18l1.5 1.5L8 17',
-        disabled: true,
+        label: 'Ask',
+        icon: ASK_ICON,
+        hint: 'Attach it to the chat to ask about it',
+        onselect: () => onPick(docId, pick),
       },
       {
         label: 'Socratic',
@@ -137,7 +158,25 @@
         disabled: busy,
         onselect: () => startSocratic(docId, pick),
       },
+      {
+        label: 'Quiz me',
+        hint: 'Coming soon',
+        // A list of ticked boxes.
+        icon: 'M10 6h10M10 12h10M10 18h10M4 6l1.5 1.5L8 5M4 12l1.5 1.5L8 11M4 18l1.5 1.5L8 17',
+        disabled: true,
+      },
     ]
+    const text = pick.selection
+    if (text) {
+      items.push({
+        label: 'Copy',
+        divider: true,
+        // Two sheets, one on top of the other.
+        icon: 'M10 9h9a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1zM15 9V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h4',
+        onselect: () => copy(text),
+      })
+    }
+    return items
   }
 
   /** The topic's open page as context, for a question asked without clicking anything. */
@@ -356,6 +395,8 @@
               controlsTarget={controlsEl}
               marker={markerFor(id)}
               reserve={chatOpen ? 0 : chatReserve()}
+              {tool}
+              ontoolchange={setTool}
               onpick={(p) => onPick(id, p)}
               oncontextpick={(pick, at) => (menu = { docId: id, pick, ...at })}
               onmarkerclick={() => {

@@ -6,6 +6,7 @@
   import { attachZoomGestures, type Origin } from './gestures'
   import { assetOptions, loadPdfjs } from './pdfjs'
   import { isClick, isOnSelection, NOT_PICKABLE, pickAtPoint, pickSelection } from './picking'
+  import type { Tool } from './tools'
 
   type Props = {
     /** The PDF's bytes. A new value opens a new document. */
@@ -22,7 +23,12 @@
      * the chat does not resize the page.
      */
     reserve?: number
-    /** Called when the reader clicks a spot on a page or selects text, to ask about it. */
+    /**
+     * What a left click does: with `ask`, clicking a spot or selecting text calls `onpick`;
+     * with `select`, clicks and selections are the browser's own.
+     */
+    tool?: Tool
+    /** Called with the Click to ask tool when the reader clicks a spot on a page or selects text, to ask about it. */
     onpick?: (pick: Pick) => void
     /**
      * Called when the reader right-clicks a spot or their selection, with where in the window,
@@ -41,6 +47,7 @@
     scale = $bindable(1),
     marker,
     reserve = 0,
+    tool = 'select',
     onpick,
     oncontextpick,
     onmarkerclick,
@@ -102,8 +109,8 @@
 
   $effect(() => () => clearTimeout(targetTimer))
 
-  // A press and release in the same place on a page is a click, which picks the
-  // spot under it; a release that leaves text selected picks that text.
+  // With the Click to ask tool, a press and release in the same place on a page is a
+  // click, which picks the spot under it; a release that leaves text selected picks that text.
   let down: { x: number; y: number; focused: boolean } | undefined
 
   // The selection a right-click (or a Mac's ctrl+click) lands on, read before the press
@@ -124,7 +131,7 @@
   function onPointerUp(event: PointerEvent) {
     const start = down
     down = undefined
-    if (!start || event.button !== 0 || !(event.target instanceof Element)) return
+    if (tool !== 'ask' || !start || event.button !== 0 || !(event.target instanceof Element)) return
     if (event.target.closest(NOT_PICKABLE)) return
     const selected = pickSelection(window.getSelection(), container)
     if (selected) return onpick?.(selected)
@@ -134,7 +141,7 @@
     if (pick) onpick?.(pick)
   }
 
-  // A right-click on a spot or on the selection opens a menu for it instead of the browser's.
+  // With either tool, a right-click on a spot or on the selection opens a menu for it instead of the browser's.
   function onContextMenu(event: MouseEvent) {
     const selected = rightClickedSelection
     rightClickedSelection = undefined
@@ -278,6 +285,7 @@
 
 <div
   class="viewer-container"
+  class:ask={tool === 'ask'}
   bind:this={container}
   data-testid="pdf-viewer"
   role="presentation"
@@ -297,6 +305,12 @@
     background: var(--viewer-bg);
     /* Scrolling stays native, but pinches go to us instead of zooming the page. */
     touch-action: pan-x pan-y;
+  }
+
+  /* With Click to ask, the pointer is a hand over the pages (text too), so the tool shows where it acts. */
+  .viewer-container.ask :global(.page),
+  .viewer-container.ask :global(.textLayer :is(span, br)) {
+    cursor: pointer;
   }
 
   /* Markers are added inside PDF.js's page boxes, outside this component's markup. */

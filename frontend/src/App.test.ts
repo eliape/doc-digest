@@ -6,6 +6,7 @@ import App from './App.svelte'
 vi.mock('./lib/pdfjs', () => ({ loadPdfjs: () => new Promise(() => {}) }))
 
 afterEach(() => {
+  vi.restoreAllMocks()
   vi.unstubAllGlobals()
   localStorage.clear()
 })
@@ -24,6 +25,21 @@ function renderOffline() {
 
 async function pick(file: File) {
   await fireEvent.change(screen.getByTestId('file-input'), { target: { files: [file] } })
+}
+
+/** PDF.js does not run here, so stand in a rendered page for it in the open viewer. */
+function standInPage(n: number) {
+  const page = document.createElement('div')
+  page.className = 'page'
+  page.dataset.pageNumber = String(n)
+  page.getBoundingClientRect = () => ({ left: 0, top: 0, width: 400, height: 600 }) as DOMRect
+  screen.getByTestId('pdf-viewer').querySelector('.pdfViewer')!.appendChild(page)
+  return page
+}
+
+async function leftClick(target: Element, clientX: number, clientY: number) {
+  await fireEvent.pointerDown(target, { button: 0, clientX, clientY, isPrimary: true })
+  await fireEvent.pointerUp(target, { button: 0, clientX, clientY })
 }
 
 describe('App', () => {
@@ -447,17 +463,55 @@ describe('App', () => {
     expect(handle).toHaveAttribute('aria-valuenow', '384')
   })
 
+  it('offers Select and Click to ask in the toolbar, starts on Select and remembers the pick', async () => {
+    const { unmount } = renderOffline()
+    await pick(pdf('slides.pdf'))
+    const toolbar = within(await screen.findByRole('toolbar', { name: 'PDF controls' }))
+    const tools = within(toolbar.getByRole('group', { name: 'Tool' }))
+    expect(tools.getByRole('button', { name: 'Select', pressed: true })).toBeInTheDocument()
+    expect(tools.getByRole('button', { name: 'Click to ask', pressed: false })).toBeInTheDocument()
+    // To the right of the zoom controls.
+    const zoom = toolbar.getByRole('group', { name: 'Zoom' })
+    expect(zoom.compareDocumentPosition(tools.getByRole('button', { name: 'Select' })) & 4).toBeTruthy()
+
+    await fireEvent.click(tools.getByRole('button', { name: 'Click to ask' }))
+    expect(tools.getByRole('button', { name: 'Click to ask', pressed: true })).toBeInTheDocument()
+    expect(tools.getByRole('button', { name: 'Select', pressed: false })).toBeInTheDocument()
+    expect(screen.getByTestId('pdf-viewer')).toHaveClass('ask')
+
+    unmount()
+    renderOffline()
+    await pick(pdf('slides.pdf'))
+    expect(await screen.findByRole('button', { name: 'Click to ask', pressed: true })).toBeInTheDocument()
+  })
+
+  it('attaches nothing on a left click with Select, and the clicked spot with Click to ask', async () => {
+    renderOffline()
+    await pick(pdf('slides.pdf'))
+    await screen.findByRole('tab', { name: 'slides.pdf' })
+    const page = standInPage(3)
+    const panel = screen.getByRole('complementary', { name: 'Chat' }) as HTMLElement & { inert: boolean }
+
+    await leftClick(page, 100, 300)
+    expect(page.querySelector('.context-marker')).toBeNull()
+    expect(panel.inert).toBe(true)
+
+    // Pressing a button focuses it, so the window has focus and the next click is not just bringing it to the front.
+    const askTool = screen.getByRole('button', { name: 'Click to ask' })
+    askTool.focus()
+    await fireEvent.click(askTool)
+    await leftClick(page, 100, 300)
+    expect(page.querySelector('.context-marker')).not.toBeNull()
+    expect(panel.inert).toBe(false)
+    expect(within(panel).getByLabelText('Ask a question')).toHaveAttribute('placeholder', 'Ask about p. 3…')
+  })
+
   it('opens a menu on a right-click on the page, whose Socratic starts a session in the chat', async () => {
     renderOffline()
     await pick(pdf('slides.pdf'))
     await screen.findByRole('tab', { name: 'slides.pdf' })
-    // PDF.js does not run here, so stand in a rendered page for it.
     const viewer = screen.getByTestId('pdf-viewer')
-    const page = document.createElement('div')
-    page.className = 'page'
-    page.dataset.pageNumber = '3'
-    page.getBoundingClientRect = () => ({ left: 0, top: 0, width: 400, height: 600 }) as DOMRect
-    viewer.querySelector('.pdfViewer')!.appendChild(page)
+    const page = standInPage(3)
 
     // Off the page, the browser's own menu shows.
     expect(await fireEvent.contextMenu(viewer, { clientX: 500, clientY: 100 })).toBe(true)
@@ -465,6 +519,11 @@ describe('App', () => {
 
     expect(await fireEvent.contextMenu(page, { clientX: 200, clientY: 150 })).toBe(false)
     const menu = screen.getByRole('menu', { name: 'Study this' })
+    // Copy is only there for selected text.
+    const labels = within(menu)
+      .getAllByRole('menuitem')
+      .map((item) => item.querySelector('.text > span')?.textContent)
+    expect(labels).toEqual(['Ask', 'Socratic', 'Quiz me'])
     expect(within(menu).getByRole('menuitem', { name: /^Quiz me/ })).toHaveAttribute('aria-disabled', 'true')
     await fireEvent.click(within(menu).getByRole('menuitem', { name: /^Socratic/ }))
     expect(screen.queryByRole('menu')).not.toBeInTheDocument()
@@ -475,11 +534,73 @@ describe('App', () => {
     expect(within(panel).getByRole('button', { name: 'Mode: Socratic' })).toBeInTheDocument()
     expect(within(panel).getByLabelText('Ask a question')).toHaveValue('')
 
-    // The old left click attaches the spot and switches back to normal answers.
-    page.querySelector('.canvasWrapper')?.remove()
-    await fireEvent.pointerDown(page, { button: 0, clientX: 100, clientY: 300, isPrimary: true })
-    await fireEvent.pointerUp(page, { button: 0, clientX: 100, clientY: 300 })
+    // A left click with Click to ask attaches the spot and switches back to normal answers.
+    await fireEvent.click(screen.getByRole('button', { name: 'Click to ask' }))
+    await leftClick(page, 100, 300)
     expect(within(panel).getByRole('button', { name: 'Mode: Normal' })).toBeInTheDocument()
+  })
+
+  it('asks about a right-clicked spot from the menu, as a click with Click to ask would', async () => {
+    renderOffline()
+    await pick(pdf('slides.pdf'))
+    await screen.findByRole('tab', { name: 'slides.pdf' })
+    const page = standInPage(3)
+    const panel = screen.getByRole('complementary', { name: 'Chat' }) as HTMLElement & { inert: boolean }
+    const box = within(panel).getByLabelText('Ask a question')
+    await fireEvent.input(box, { target: { value: 'Why is this' } })
+    await fireEvent.click(within(panel).getByRole('button', { name: /^Mode:/ }))
+    await fireEvent.click(within(panel).getByRole('menuitemradio', { name: 'Socratic' }))
+
+    await fireEvent.contextMenu(page, { clientX: 200, clientY: 150 })
+    await fireEvent.click(screen.getByRole('menuitem', { name: /^Ask/ }))
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+    expect(panel.inert).toBe(false)
+    expect(page.querySelector('.context-marker')).not.toBeNull()
+    expect(box).toHaveAttribute('placeholder', 'Ask about p. 3…')
+    // What was typed stays, and asking about something goes back to normal answers.
+    expect(box).toHaveValue('Why is this')
+    expect(within(panel).getByRole('button', { name: 'Mode: Normal' })).toBeInTheDocument()
+  })
+
+  it('offers Copy for right-clicked selected text, and asks about that text', async () => {
+    renderOffline()
+    await pick(pdf('slides.pdf'))
+    await screen.findByRole('tab', { name: 'slides.pdf' })
+    const page = standInPage(3)
+    const text = page.appendChild(document.createTextNode('the chain rule'))
+    const line = { left: 50, top: 100, width: 120, height: 20, right: 170, bottom: 120 } as DOMRect
+    vi.spyOn(window, 'getSelection').mockReturnValue({
+      isCollapsed: false,
+      rangeCount: 1,
+      toString: () => 'the chain rule',
+      getRangeAt: () => ({ startContainer: text, getClientRects: () => [line] }),
+    } as unknown as Selection)
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+
+    try {
+      // With Select, making the selection attaches nothing.
+      await leftClick(page, 60, 110)
+      expect(page.querySelector('.context-marker')).toBeNull()
+
+      await fireEvent.pointerDown(page, { button: 2, clientX: 100, clientY: 110 })
+      await fireEvent.contextMenu(page, { clientX: 100, clientY: 110 })
+      const menu = screen.getByRole('menu', { name: 'Study this' })
+      expect(within(menu).getByRole('separator').nextElementSibling).toBe(within(menu).getByRole('menuitem', { name: 'Copy' }))
+      await fireEvent.click(within(menu).getByRole('menuitem', { name: 'Copy' }))
+      expect(writeText).toHaveBeenCalledWith('the chain rule')
+      expect(page.querySelector('.context-marker')).toBeNull()
+
+      await fireEvent.pointerDown(page, { button: 2, clientX: 100, clientY: 110 })
+      await fireEvent.contextMenu(page, { clientX: 100, clientY: 110 })
+      await fireEvent.click(screen.getByRole('menuitem', { name: /^Ask/ }))
+      const panel = within(screen.getByRole('complementary', { name: 'Chat' }))
+      expect(panel.getByLabelText('Ask a question')).toHaveAttribute('placeholder', 'Ask about p. 3…')
+      expect(panel.getByLabelText('Attached to your question')).toHaveTextContent('“the chain rule”')
+      expect(page.querySelector('.context-marker.box')).not.toBeNull()
+    } finally {
+      delete (navigator as { clipboard?: unknown }).clipboard
+    }
   })
 
   it('swaps the chat icon for the close button in the same corner, with just the topic name as title', async () => {

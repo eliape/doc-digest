@@ -11,31 +11,9 @@
   let error = $state('')
   let dragging = $state(false)
 
-  // Whether the sidebar and the chat panel are showing is remembered across reloads.
-  const SIDEBAR_KEY = 'doc-digest.sidebarOpen'
-  const CHAT_KEY = 'doc-digest.chatOpen'
-  let sidebarOpen = $state(readFlag(SIDEBAR_KEY, true))
-  let chatOpen = $state(readFlag(CHAT_KEY, false))
-
-  function readFlag(key: string, fallback: boolean) {
-    try {
-      const value = localStorage.getItem(key)
-      return value === null ? fallback : value === 'true'
-    } catch {
-      return fallback
-    }
-  }
-
-  function saveFlag(key: string, value: boolean) {
-    try {
-      localStorage.setItem(key, String(value))
-    } catch {
-      // Storage can be unavailable (private windows); the default is fine.
-    }
-  }
-
-  $effect(() => saveFlag(SIDEBAR_KEY, sidebarOpen))
-  $effect(() => saveFlag(CHAT_KEY, chatOpen))
+  // Every load starts with the topics open and the chat closed.
+  let sidebarOpen = $state(true)
+  let chatOpen = $state(false)
 
   let chatToggle = $state<HTMLButtonElement>()
   let chatPanel = $state<ChatPanel>()
@@ -162,6 +140,8 @@
       return
     }
     error = ''
+    // Get the topics out of the way of the new PDF.
+    sidebarOpen = false
     const added = workspace.addDoc(file.name, new Uint8Array(await file.arrayBuffer()))
     // Index it in the background, so the whole topic can be searched, opened or not.
     if (!workspace.indexing[added.id]) workspace.index(added.id)
@@ -345,6 +325,7 @@
 
 <style>
   .app {
+    position: relative;
     display: flex;
     height: 100vh;
   }
@@ -356,11 +337,13 @@
     color: #82071e;
   }
 
+  /* The sidebar floats over this, so it only makes room for its collapsed strip. */
   .main {
     display: flex;
     flex-direction: column;
     flex: 1;
     min-width: 0;
+    margin-left: var(--sidebar-strip);
   }
 
   .tabrow {

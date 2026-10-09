@@ -10,6 +10,11 @@ afterEach(() => {
   localStorage.clear()
 })
 
+/** Adding a PDF folds the sidebar away; open it again to use the topics. */
+async function showTopics() {
+  await fireEvent.click(screen.getByRole('button', { name: 'Show topics' }))
+}
+
 const pdf = (name: string, body = '%PDF-1.7') => new File([body], name, { type: 'application/pdf' })
 
 function renderOffline() {
@@ -64,6 +69,7 @@ describe('App', () => {
     await screen.findByRole('tab', { name: 'Lecture 4.pdf' })
     await pick(pdf('Course book.pdf', '%PDF-1.7 book'))
     const book = await screen.findByRole('tab', { name: 'Course book.pdf' })
+    await showTopics()
 
     const topics = within(screen.getByRole('complementary', { name: 'Topics' }))
     expect(topics.getByRole('button', { name: /^Lecture 4/ })).toHaveAttribute('aria-current', 'true')
@@ -103,6 +109,7 @@ describe('App', () => {
     expect(await screen.findByRole('tab', { name: 'stats.pdf' })).toBeInTheDocument()
     expect(screen.queryByRole('tab', { name: 'slides.pdf' })).not.toBeInTheDocument()
 
+    await showTopics()
     await fireEvent.click(screen.getByRole('button', { name: /^slides/ }))
     expect(screen.getByRole('tab', { name: 'slides.pdf' })).toHaveAttribute('aria-selected', 'true')
   })
@@ -112,6 +119,7 @@ describe('App', () => {
     vi.stubGlobal('confirm', vi.fn().mockReturnValue(true))
     await pick(pdf('slides.pdf'))
     await screen.findByRole('tab', { name: 'slides.pdf' })
+    await showTopics()
     await fireEvent.click(screen.getByRole('button', { name: 'Delete slides' }))
     expect(confirm).toHaveBeenCalledWith('Delete “slides” and close its PDF?')
     expect(screen.queryByRole('tab')).not.toBeInTheDocument()
@@ -125,7 +133,6 @@ describe('App', () => {
     expect(toggle).toHaveAttribute('aria-expanded', 'true')
     await fireEvent.click(toggle)
 
-    expect(localStorage.getItem('doc-digest.sidebarOpen')).toBe('false')
     expect(within(sidebar).queryByRole('heading', { name: 'doc-digest' })).not.toBeInTheDocument()
     expect(within(sidebar).queryByRole('heading', { name: 'Topics' })).not.toBeInTheDocument()
     expect(within(sidebar).getByRole('button', { name: 'Show topics' })).toHaveAttribute('aria-expanded', 'false')
@@ -133,6 +140,51 @@ describe('App', () => {
 
     await fireEvent.click(within(sidebar).getByRole('button', { name: 'Show topics' }))
     expect(within(sidebar).getByRole('heading', { name: 'Topics' })).toBeInTheDocument()
+  })
+
+  it('starts every load with the sidebar open and the chat closed, whatever an earlier visit left', () => {
+    localStorage.setItem('doc-digest.sidebarOpen', 'false')
+    localStorage.setItem('doc-digest.chatOpen', 'true')
+    renderOffline()
+    expect(screen.getByRole('button', { name: 'Hide topics' })).toHaveAttribute('aria-expanded', 'true')
+    expect((screen.getByRole('complementary', { name: 'Chat' }) as HTMLElement & { inert: boolean }).inert).toBe(true)
+  })
+
+  it('folds the sidebar away when a PDF is added, every time', async () => {
+    renderOffline()
+    expect(screen.getByRole('button', { name: 'Hide topics' })).toBeInTheDocument()
+    await pick(pdf('a.pdf', 'a'))
+    expect(screen.getByRole('button', { name: 'Show topics' })).toHaveAttribute('aria-expanded', 'false')
+
+    await showTopics()
+    await pick(pdf('b.pdf', 'b'))
+    expect(screen.getByRole('button', { name: 'Show topics' })).toBeInTheDocument()
+  })
+
+  it('leaves the sidebar open when the file is not a PDF', async () => {
+    renderOffline()
+    await pick(new File(['hello'], 'notes.txt', { type: 'text/plain' }))
+    expect(screen.getByRole('button', { name: 'Hide topics' })).toBeInTheDocument()
+  })
+
+  it('folds the sidebar away once a new topic is named, but not when a topic is only renamed', async () => {
+    renderOffline()
+    const sidebar = within(screen.getByRole('complementary', { name: 'Topics' }))
+    await fireEvent.click(sidebar.getByRole('button', { name: 'New topic' }))
+    // Still open while the name is being typed.
+    const name = sidebar.getByLabelText('Topic name')
+    expect(sidebar.getByRole('button', { name: 'Hide topics' })).toBeInTheDocument()
+    await fireEvent.input(name, { target: { value: 'Statistics' } })
+    await fireEvent.submit(name)
+    expect(sidebar.getByRole('button', { name: 'Show topics' })).toBeInTheDocument()
+
+    await showTopics()
+    await fireEvent.click(sidebar.getByRole('button', { name: 'Rename Statistics' }))
+    const again = sidebar.getByLabelText('Topic name')
+    await fireEvent.input(again, { target: { value: 'Stats' } })
+    await fireEvent.submit(again)
+    expect(sidebar.getByRole('button', { name: /^Stats/ })).toBeInTheDocument()
+    expect(sidebar.getByRole('button', { name: 'Hide topics' })).toBeInTheDocument()
   })
 
   it('expands the sidebar when New topic is pressed while it is collapsed', async () => {
@@ -208,7 +260,6 @@ describe('App', () => {
     await fireEvent.click(toggle)
     expect(panel.inert).toBe(false)
     expect(toggle).toHaveAttribute('aria-expanded', 'true')
-    expect(localStorage.getItem('doc-digest.chatOpen')).toBe('true')
 
     const box = within(panel).getByLabelText('Ask a question')
     await fireEvent.input(box, { target: { value: 'What is on slide 3?' } })
@@ -241,11 +292,13 @@ describe('App', () => {
 
     // A half-typed question stays with its topic too.
     await fireEvent.input(panel.getByLabelText('Ask a question'), { target: { value: 'half typed' } })
+    await showTopics()
     await fireEvent.click(screen.getByRole('button', { name: 'New topic' }))
     await fireEvent.submit(screen.getByLabelText('Topic name'))
     expect(panel.getByRole('log', { name: 'Chat in New topic' })).not.toHaveTextContent('Compare the two')
     expect(panel.getByLabelText('Ask a question')).toHaveValue('')
 
+    await showTopics()
     await fireEvent.click(screen.getByRole('button', { name: /^slides/ }))
     expect(panel.getByRole('log')).toHaveTextContent('Compare the two')
     expect(panel.getByLabelText('Ask a question')).toHaveValue('half typed')

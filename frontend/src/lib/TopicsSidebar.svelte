@@ -21,8 +21,14 @@
     renameInput?.select()
   }
 
+  // The topic whose first name is being typed. Naming it is the last step of creating it.
+  let creatingId: string | undefined
+
   function finishRename(save: boolean) {
     if (renamingId && save) workspace.renameTopic(renamingId, draft)
+    // A new topic is ready once it is named: get out of the way of the PDF.
+    if (renamingId && renamingId === creatingId) open = false
+    creatingId = undefined
     renamingId = undefined
   }
 
@@ -36,6 +42,7 @@
     // The list (and so the name box) is hidden while collapsed.
     open = true
     const topic = workspace.createTopic()
+    creatingId = topic.id
     await startRename(topic.id, topic.name)
   }
 </script>
@@ -121,20 +128,31 @@
     display: flex;
     flex-direction: column;
     gap: 0.25rem;
+    /* Floats over the page rather than pushing it: the page only keeps room for the collapsed strip. */
+    position: absolute;
+    inset: 0 auto 0 0;
+    z-index: 30;
     width: 15rem;
-    flex-shrink: 0;
     box-sizing: border-box;
     padding: 0.5rem 0.375rem;
     border-right: 1px solid var(--border);
-    background: var(--sidebar-bg);
+    /* Slightly see-through and blurred, so it reads as lying on top of the PDF. */
+    background: color-mix(in srgb, var(--sidebar-bg) 82%, transparent);
+    backdrop-filter: blur(14px);
+    box-shadow: var(--sidebar-shadow);
     overflow: hidden auto;
     white-space: nowrap;
     /* Slides like the chat panel. */
-    transition: width 0.2s ease;
+    transition:
+      width 0.2s ease,
+      box-shadow 0.2s ease;
   }
   /* Just wide enough for the two buttons. (Not named .sidebar: PDF.js's stylesheet styles that globally.) */
   .topics-sidebar.collapsed {
-    width: 3rem;
+    width: var(--sidebar-strip);
+    background: var(--sidebar-bg);
+    backdrop-filter: none;
+    box-shadow: none;
   }
   @media (prefers-reduced-motion: reduce) {
     .topics-sidebar {

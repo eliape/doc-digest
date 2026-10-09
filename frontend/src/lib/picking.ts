@@ -101,5 +101,12 @@ export function pickSelection(selection: Selection | null, container: Element): 
   return { page, box, selection: text }
 }
 
+/** Whether a point in the window is on a selection's text. */
+export function isOnSelection(selection: Selection | null, x: number, y: number): boolean {
+  if (!selection || selection.isCollapsed || selection.rangeCount === 0) return false
+  const rects = Array.from(selection.getRangeAt(0).getClientRects())
+  return rects.some((r) => x >= r.left && x <= r.right && y >= r.top && y <= r.bottom)
+}
+
 /** Clicks on these do their own thing (follow a link, press a button), so they never pick. */
 export const NOT_PICKABLE = 'a, button, input, select, textarea, .linkAnnotation, .context-marker'

@@ -2,6 +2,7 @@
   import { tick } from 'svelte'
   import { chatReserve } from './lib/chatWidth'
   import ChatPanel from './lib/ChatPanel.svelte'
+  import ContextMenu, { type MenuItem } from './lib/ContextMenu.svelte'
   import DocPane from './lib/DocPane.svelte'
   import type { PageContext, Pick } from './lib/context'
   import { isPdfFile } from './lib/pages'
@@ -92,6 +93,43 @@
         }
       })
       .catch(() => {})
+  }
+
+  // Right-clicking a spot (or the selection) opens a menu of ways to study it.
+  type MenuTarget = { docId: string; pick: Pick; x: number; y: number }
+  let menu = $state.raw<MenuTarget>()
+
+  /**
+   * Start a Socratic session about a right-clicked spot: the chat opens and the model asks
+   * the first question. Its images render while the question is on its way.
+   */
+  function startSocratic(docId: string, pick: Pick) {
+    const picked = workspace.docs[docId]
+    const topic = workspace.topicOf(docId)
+    if (!picked || !topic) return
+    chatOpen = true
+    tick().then(() => chatPanel?.focus())
+    const about = { docId, docName: picked.name }
+    workspace.startSocratic(topic.id, { ...pick, ...about, pageTexts: [] }, async () => {
+      const captured = await panes[docId]?.capture(pick)
+      return captured && { ...captured, ...about }
+    })
+  }
+
+  /** What the menu offers for a right-clicked spot. Quiz me is still to come. */
+  function menuItems({ docId, pick }: MenuTarget): MenuItem[] {
+    const topic = workspace.topicOf(docId)
+    // A session starts with the model's question, which has to wait for the answer still arriving.
+    const busy = !!topic && workspace.isAnswering(topic.id)
+    return [
+      { label: 'Quiz me', hint: 'Coming soon', disabled: true },
+      {
+        label: 'Socratic',
+        hint: busy ? 'Wait for the answer to finish' : 'Work it out by answering questions',
+        disabled: busy,
+        onselect: () => startSocratic(docId, pick),
+      },
+    ]
   }
 
   /** The topic's open page as context, for a question asked without clicking anything. */
@@ -309,6 +347,7 @@
               marker={markerFor(id)}
               reserve={chatOpen ? 0 : chatReserve()}
               onpick={(p) => onPick(id, p)}
+              oncontextpick={(pick, at) => (menu = { docId: id, pick, ...at })}
               onmarkerclick={() => {
                 const topic = workspace.topicOf(id)
                 if (topic) workspace.clearContext(topic.id)
@@ -350,6 +389,10 @@
     onsend={send}
     onreveal={reveal}
   />
+
+  {#if menu}
+    <ContextMenu x={menu.x} y={menu.y} label="Study this" items={menuItems(menu)} onclose={() => (menu = undefined)} />
+  {/if}
 </div>
 
 <style>

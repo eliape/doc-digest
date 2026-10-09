@@ -5,7 +5,7 @@
   import { type Capture, capture as captureContext, type Pick } from './context'
   import { attachZoomGestures, type Origin } from './gestures'
   import { assetOptions, loadPdfjs } from './pdfjs'
-  import { isClick, NOT_PICKABLE, pickAtPoint, pickSelection } from './picking'
+  import { isClick, isOnSelection, NOT_PICKABLE, pickAtPoint, pickSelection } from './picking'
 
   type Props = {
     /** The PDF's bytes. A new value opens a new document. */
@@ -24,6 +24,11 @@
     reserve?: number
     /** Called when the reader clicks a spot on a page or selects text, to ask about it. */
     onpick?: (pick: Pick) => void
+    /**
+     * Called when the reader right-clicks a spot or their selection, with where in the window,
+     * to show a menu of things to do with it. Elsewhere the browser's own menu shows.
+     */
+    oncontextpick?: (pick: Pick, at: { x: number; y: number }) => void
     /** Called when the reader clicks the marker, to take it off the chat. */
     onmarkerclick?: () => void
     onerror?: (error: unknown) => void
@@ -37,6 +42,7 @@
     marker,
     reserve = 0,
     onpick,
+    oncontextpick,
     onmarkerclick,
     onerror,
   }: Props = $props()
@@ -100,11 +106,19 @@
   // spot under it; a release that leaves text selected picks that text.
   let down: { x: number; y: number; focused: boolean } | undefined
 
+  // The selection a right-click (or a Mac's ctrl+click) lands on, read before the press
+  // itself can change it: on a Mac, right-clicking a word selects it.
+  let rightClickedSelection: Pick | undefined
+
   function onPointerDown(event: PointerEvent) {
     down =
       event.button === 0 && event.isPrimary
         ? { x: event.clientX, y: event.clientY, focused: document.hasFocus() }
         : undefined
+    const selection = window.getSelection()
+    const secondary = event.button === 2 || (event.button === 0 && event.ctrlKey)
+    rightClickedSelection =
+      secondary && isOnSelection(selection, event.clientX, event.clientY) ? pickSelection(selection, container) : undefined
   }
 
   function onPointerUp(event: PointerEvent) {
@@ -118,6 +132,19 @@
     if (!start.focused || !isClick(start, { x: event.clientX, y: event.clientY })) return
     const pick = pickAtPoint(event.target, event.clientX, event.clientY)
     if (pick) onpick?.(pick)
+  }
+
+  // A right-click on a spot or on the selection opens a menu for it instead of the browser's.
+  function onContextMenu(event: MouseEvent) {
+    const selected = rightClickedSelection
+    rightClickedSelection = undefined
+    // On a Mac, ctrl+click opens this menu too; the release that follows is not a click.
+    down = undefined
+    if (!oncontextpick || !(event.target instanceof Element) || event.target.closest(NOT_PICKABLE)) return
+    const pick = selected ?? pickAtPoint(event.target, event.clientX, event.clientY)
+    if (!pick) return
+    event.preventDefault()
+    oncontextpick(pick, { x: event.clientX, y: event.clientY })
   }
 
   // Markers: the attached spot, and a short flash where a chip in the chat points.
@@ -256,6 +283,7 @@
   role="presentation"
   onpointerdown={onPointerDown}
   onpointerup={onPointerUp}
+  oncontextmenu={onContextMenu}
 >
   <div class="pdfViewer"></div>
 </div>

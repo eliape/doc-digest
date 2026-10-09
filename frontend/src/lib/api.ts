@@ -3,6 +3,8 @@ export type AskTurn = {
   role: 'user' | 'assistant'
   text: string
   context?: Record<string, unknown>
+  /** Set on the reader's turns in a Socratic session, where the model asks the questions. */
+  mode?: 'socratic'
 }
 
 export type AskRequest = {

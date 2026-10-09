@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { boxOnPage, isBlank, isClick, pointOnPage } from './picking'
+import { boxOnPage, isBlank, isClick, isOnSelection, pointOnPage } from './picking'
 
 const page = { left: 100, top: 50, width: 400, height: 600 }
 
@@ -25,6 +25,16 @@ describe('picking', () => {
     expect(box && box.x + box.width).toBeCloseTo(1)
     expect(box && box.y + box.height).toBeCloseTo(100 / 600)
     expect(boxOnPage(page, [])).toBeUndefined()
+  })
+
+  it('tells whether a right-click is on the selected text', () => {
+    const rect = { left: 100, top: 50, right: 300, bottom: 70 }
+    const selection = (isCollapsed: boolean) =>
+      ({ isCollapsed, rangeCount: 1, getRangeAt: () => ({ getClientRects: () => [rect] }) }) as unknown as Selection
+    expect(isOnSelection(selection(false), 150, 60)).toBe(true)
+    expect(isOnSelection(selection(false), 150, 90)).toBe(false)
+    expect(isOnSelection(selection(true), 150, 60)).toBe(false)
+    expect(isOnSelection(null, 150, 60)).toBe(false)
   })
 
   it('treats near-white pixels as blank', () => {

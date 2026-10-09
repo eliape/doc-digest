@@ -63,6 +63,35 @@ describe('App', () => {
     expect(screen.getByText('Open a PDF to start reading.')).toBeInTheDocument()
   })
 
+  it('opens several picked PDFs at once as tabs in one topic, on the first, and folds the sidebar away', async () => {
+    renderOffline()
+    await fireEvent.change(screen.getByTestId('file-input'), {
+      target: { files: [pdf('Lecture 4.pdf'), pdf('Course book.pdf', '%PDF-1.7 book'), pdf('Old exam.pdf', '%PDF-1.7 exam')] },
+    })
+    await screen.findByRole('tab', { name: 'Old exam.pdf' })
+    expect(screen.getAllByRole('tab').map((t) => t.textContent?.trim())).toEqual(
+      expect.arrayContaining(['Lecture 4.pdf', 'Course book.pdf', 'Old exam.pdf']),
+    )
+    expect(screen.getByRole('tab', { name: 'Lecture 4.pdf', selected: true })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Show topics' })).toBeInTheDocument()
+    await showTopics()
+    expect(screen.getAllByRole('button', { name: /^Rename / })).toHaveLength(1)
+  })
+
+  it('opens the PDFs in a mixed pick and names the ones that are not PDFs', async () => {
+    renderOffline()
+    await fireEvent.change(screen.getByTestId('file-input'), {
+      target: { files: [pdf('a.pdf'), new File(['x'], 'notes.txt', { type: 'text/plain' })] },
+    })
+    expect(await screen.findByRole('tab', { name: 'a.pdf' })).toBeInTheDocument()
+    expect(screen.getByRole('alert')).toHaveTextContent('notes.txt is not a PDF.')
+  })
+
+  it('lets the file picker choose more than one file', () => {
+    renderOffline()
+    expect(screen.getByTestId('file-input')).toHaveAttribute('multiple')
+  })
+
   it('opens PDFs as tabs in a topic named after the first file', async () => {
     renderOffline()
     await pick(pdf('Lecture 4.pdf'))

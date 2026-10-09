@@ -257,12 +257,15 @@
     if (e.relatedTarget === null) dragging = false
   }}
   ondrop={onDrop}
+  onpointerdown={(e) => {
+    // Pressing anywhere but the sidebar (the PDF, the tabs, the chat) folds the topics away.
+    // A pointer shortcut: the menu button does the same by keyboard.
+    if (!(e.target as Element).closest('#topics-sidebar')) sidebarOpen = false
+  }}
 >
   <TopicsSidebar {workspace} bind:open={sidebarOpen} />
 
-  <!-- Pressing anywhere in the content folds the topics away (a pointer shortcut: the menu button does the same by keyboard). -->
-  <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="main" onpointerdown={() => (sidebarOpen = false)}>
+  <div class="main">
     <input
       bind:this={fileInput}
       type="file"

@@ -358,5 +358,29 @@ describe('App', () => {
     await fireEvent.dblClick(handle)
     expect(handle).toHaveAttribute('aria-valuenow', '384')
   })
+
+  it('swaps the chat icon for the close button in the same corner, with just the topic name as title', async () => {
+    renderOffline()
+    await pick(pdf('slides.pdf'))
+    const toggle = await screen.findByRole('button', { name: 'Show chat' })
+    // An icon, not a word, and out of the way of the tab row while the chat is closed.
+    expect(toggle).toHaveClass('icon-button')
+    expect(toggle).toHaveTextContent('')
+    expect(toggle.querySelector('svg')).not.toBeNull()
+    expect(toggle).not.toHaveClass('hidden')
+
+    await fireEvent.click(toggle)
+    expect(toggle).toHaveClass('hidden')
+    expect((toggle as HTMLElement & { inert: boolean }).inert).toBe(true)
+    const panel = within(screen.getByRole('complementary', { name: 'Chat' }))
+    expect(panel.getByRole('button', { name: 'Close chat' })).toHaveClass('icon-button')
+    // The title is the topic's name, not the word Chat.
+    expect(panel.getByRole('heading', { name: 'slides' })).toBeInTheDocument()
+    expect(panel.queryByRole('heading', { name: 'Chat' })).not.toBeInTheDocument()
+    expect(panel.getByRole('button', { name: 'New chat' })).toHaveTextContent('New chat')
+
+    await fireEvent.click(panel.getByRole('button', { name: 'Close chat' }))
+    expect(toggle).not.toHaveClass('hidden')
+  })
 })
 

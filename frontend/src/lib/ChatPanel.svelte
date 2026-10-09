@@ -237,10 +237,8 @@
   ></div>
   <div class="inner">
     <div class="top">
-      <div class="title">
-        <h2>Chat</h2>
-        {#if topic}<span class="topic" title={topic.name}>{topic.name}</span>{/if}
-      </div>
+      <!-- Just the topic's name: the panel is already labelled Chat. -->
+      {#if topic}<h2 title={topic.name}>{topic.name}</h2>{/if}
       <div class="actions">
         <button
           type="button"
@@ -253,7 +251,10 @@
             focus()
           }}>New chat</button
         >
-        <button type="button" class="close" aria-label="Close chat" title="Close chat (Esc)" onclick={close}>×</button>
+        <!-- In the window's top right corner, exactly where the Chat icon is while the chat is closed. -->
+        <button type="button" class="icon-button" aria-label="Close chat" title="Close chat (Esc)" onclick={close}>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+        </button>
       </div>
     </div>
 
@@ -365,6 +366,10 @@
   /* In the layout (not floating), so the PDF narrows and nothing is covered. */
   .chat-panel {
     position: relative;
+    display: flex;
+    /* Anchored to the right edge, so the panel is revealed from the right and its top right
+       corner (the close button) is there from the first frame. */
+    justify-content: flex-end;
     flex-shrink: 0;
     width: 0;
     height: 100vh;
@@ -407,12 +412,13 @@
 
   /* Fixed width while the outer box animates, so the text does not reflow as it slides. */
   .inner {
+    flex-shrink: 0;
     width: var(--width);
     height: 100%;
     box-sizing: border-box;
     display: flex;
     flex-direction: column;
-    padding: 0.5rem 0.75rem 0.75rem;
+    padding: 0 0.75rem 0.75rem;
     gap: 0.5rem;
   }
 
@@ -440,29 +446,23 @@
     }
   }
 
+  /* As tall as the tab row beside it, so the two bottom borders line up. */
   .top {
     display: flex;
     align-items: center;
-    justify-content: space-between;
     gap: 0.5rem;
-  }
-
-  .title {
-    display: flex;
-    align-items: baseline;
-    gap: 0.5rem;
-    min-width: 0;
+    height: var(--bar-height);
+    margin: 0 -0.75rem;
+    padding: 0 0.5rem 0 0.75rem;
+    border-bottom: 1px solid var(--border);
   }
 
   h2 {
-    font-size: 1rem;
+    flex: 1;
+    min-width: 0;
     margin: 0;
-  }
-
-  .topic {
-    color: var(--muted);
-    font-size: 0.85rem;
     overflow: hidden;
+    font-size: 0.95rem;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
@@ -475,13 +475,14 @@
   }
 
   .new-chat {
+    height: 1.75rem;
+    padding: 0 0.75rem;
     border: 1px solid var(--border);
-    border-radius: 0.375rem;
+    border-radius: var(--radius);
     background: var(--surface);
     color: inherit;
     font: inherit;
-    font-size: 0.85rem;
-    padding: 0.125rem 0.5rem;
+    font-size: 0.9rem;
     cursor: pointer;
   }
   .new-chat:hover:not(:disabled) {
@@ -490,21 +491,6 @@
   .new-chat:disabled {
     color: var(--muted);
     cursor: default;
-  }
-
-  .close {
-    border: none;
-    background: none;
-    color: inherit;
-    font: inherit;
-    font-size: 1.25rem;
-    line-height: 1;
-    padding: 0.25rem 0.5rem;
-    border-radius: 0.375rem;
-    cursor: pointer;
-  }
-  .close:hover {
-    background: var(--hover);
   }
 
   .messages {

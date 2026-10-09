@@ -257,6 +257,16 @@ describe('App', () => {
     expect(screen.getByRole('tab', { name: 'slides.pdf' })).toBeInTheDocument()
   })
 
+  it('folds the sidebar away when the content is pressed', async () => {
+    renderOffline()
+    await pick(pdf('slides.pdf'))
+    await screen.findByRole('tab', { name: 'slides.pdf' })
+    await showTopics()
+    expect(screen.getByRole('button', { name: 'Hide topics' })).toBeInTheDocument()
+    await fireEvent.pointerDown(screen.getByTestId('pdf-viewer'))
+    expect(screen.getByRole('button', { name: 'Show topics' })).toBeInTheDocument()
+  })
+
   it('folds the sidebar away when a topic is clicked', async () => {
     renderOffline()
     await pick(pdf('slides.pdf'))

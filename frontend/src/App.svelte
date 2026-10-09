@@ -44,6 +44,22 @@
     if (open.length !== mounted.length) mounted = open
   })
 
+  // The row the open tab's controls are shown in, and the tabs that scroll next to it.
+  let controlsEl = $state<HTMLElement>()
+  let tabsEl = $state<HTMLElement>()
+
+  // Keep the open tab in view when there are more tabs than fit.
+  $effect(() => {
+    if (!doc) return
+    tabsEl?.querySelector('[aria-selected="true"]')?.scrollIntoView?.({ inline: 'nearest', block: 'nearest' })
+  })
+
+  // A mouse wheel only scrolls up and down, so let it scroll the tabs sideways.
+  function scrollTabs(event: WheelEvent) {
+    if (event.deltaX !== 0 || event.ctrlKey || !tabsEl) return
+    tabsEl.scrollLeft += event.deltaY
+  }
+
   // Read at call time: bind:this fills `panes` after the tab mounts.
   const pane = (): DocPane | undefined => (doc ? panes[doc.id] : undefined)
 
@@ -121,28 +137,38 @@
     {/if}
 
     {#if workspace.activeTopic && workspace.activeTopic.docIds.length > 0}
-      <div class="tabs" role="tablist" aria-label={`PDFs in ${workspace.activeTopic.name}`}>
-        {#each workspace.activeTopic.docIds as id (id)}
-          {@const tab = workspace.docs[id]}
-          <div class="tab" class:active={id === doc?.id}>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={id === doc?.id}
-              title={tab.name}
-              onclick={() => workspace.selectDoc(id)}>{tab.name}</button
-            >
-            <button type="button" class="close" aria-label={`Close ${tab.name}`} onclick={() => workspace.closeDoc(id)}
-              >×</button
-            >
-          </div>
-        {/each}
+      <!-- One row: the tabs scroll sideways when there are many, the controls never shrink. -->
+      <div class="tabrow">
+        <div
+          class="tabs"
+          role="tablist"
+          aria-label={`PDFs in ${workspace.activeTopic.name}`}
+          bind:this={tabsEl}
+          onwheel={scrollTabs}
+        >
+          {#each workspace.activeTopic.docIds as id (id)}
+            {@const tab = workspace.docs[id]}
+            <div class="tab" class:active={id === doc?.id}>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={id === doc?.id}
+                title={tab.name}
+                onclick={() => workspace.selectDoc(id)}>{tab.name}</button
+              >
+              <button type="button" class="close" aria-label={`Close ${tab.name}`} onclick={() => workspace.closeDoc(id)}
+                >×</button
+              >
+            </div>
+          {/each}
+        </div>
         <button
           type="button"
           class="add-tab"
           aria-label={`Add a PDF to ${workspace.activeTopic.name}`}
           onclick={() => fileInput.click()}>+</button
         >
+        <div class="controls-slot" bind:this={controlsEl}></div>
       </div>
     {/if}
 
@@ -154,6 +180,8 @@
             <DocPane
               bind:this={panes[id]}
               data={d.data}
+              active={id === doc?.id}
+              controlsTarget={controlsEl}
               onerror={() => {
                 error = `Could not open ${d.name}. Is it a valid PDF?`
                 workspace.closeDoc(id)
@@ -203,17 +231,34 @@
     min-width: 0;
   }
 
+  .tabrow {
+    display: flex;
+    align-items: flex-end;
+    padding: 0.25rem 0.5rem 0;
+    border-bottom: 1px solid var(--border);
+    background: var(--sidebar-bg);
+  }
+
   .tabs {
     display: flex;
     align-items: stretch;
     gap: 0.125rem;
-    padding: 0.25rem 0.5rem 0;
-    border-bottom: 1px solid var(--border);
-    background: var(--sidebar-bg);
+    /* Tabs shrink and scroll; the controls beside them keep their size. */
+    flex: 0 1 auto;
+    min-width: 0;
     overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .controls-slot {
+    flex-shrink: 0;
+    margin-left: auto;
+    align-self: center;
+    margin-bottom: 0.25rem;
   }
 
   .tab {
+    flex-shrink: 0;
     display: flex;
     align-items: center;
     max-width: 14rem;
@@ -253,6 +298,7 @@
   }
 
   .add-tab {
+    flex-shrink: 0;
     padding: 0.25rem 0.625rem;
     color: var(--muted);
   }

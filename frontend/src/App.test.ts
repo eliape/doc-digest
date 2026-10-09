@@ -233,8 +233,10 @@ describe('App', () => {
       'Zoom in',
       'Zoom level',
     ])
-    expect(toolbar.getByLabelText('Previous page')).toHaveTextContent('↑')
-    expect(toolbar.getByLabelText('Next page')).toHaveTextContent('↓')
+    // Up arrow for the previous page (the line runs up to its head), down arrow for the next.
+    const arrow = (name: string) => toolbar.getByLabelText(name).querySelector('path')?.getAttribute('d')
+    expect(arrow('Previous page')).toBe('M12 19V5M5 12l7-7 7 7')
+    expect(arrow('Next page')).toBe('M12 5v14M19 12l-7 7-7-7')
   })
 
   it('moves the controls to whichever tab is open', async () => {

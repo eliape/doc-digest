@@ -73,12 +73,24 @@
 {#if active && controlsTarget}
   <div class="controls" role="toolbar" aria-label="PDF controls" use:portal={controlsTarget}>
     <div class="group" role="group" aria-label="Pages">
-      <button type="button" aria-label="Previous page" disabled={page <= 1} onclick={() => viewer?.previousPage()}
-        >↑</button
+      <button
+        type="button"
+        class="chrome-button"
+        aria-label="Previous page"
+        disabled={page <= 1}
+        onclick={() => viewer?.previousPage()}
       >
-      <button type="button" aria-label="Next page" disabled={page >= pageCount} onclick={() => viewer?.nextPage()}
-        >↓</button
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7" /></svg>
+      </button>
+      <button
+        type="button"
+        class="chrome-button"
+        aria-label="Next page"
+        disabled={page >= pageCount}
+        onclick={() => viewer?.nextPage()}
       >
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M19 12l-7 7-7-7" /></svg>
+      </button>
       <form onsubmit={submitPage}>
         <input
           class="page-input"
@@ -91,18 +103,27 @@
       <span class="count">of {pageCount}</span>
     </div>
 
+    <span class="divider" aria-hidden="true"></span>
+
     <div class="group" role="group" aria-label="Zoom">
-      <button type="button" aria-label="Zoom out" onclick={() => viewer?.zoomOut()}>−</button>
-      <button type="button" aria-label="Zoom in" onclick={() => viewer?.zoomIn()}>+</button>
-      <select aria-label="Zoom level" onchange={onZoomSelect} value="">
-        <option value="" disabled hidden>{formatScale(scale)}</option>
-        <option value="page-width">Fit width</option>
-        <option value="page-fit">Fit page</option>
-        <option value="0.5">50%</option>
-        <option value="1">100%</option>
-        <option value="1.5">150%</option>
-        <option value="2">200%</option>
-      </select>
+      <button type="button" class="chrome-button" aria-label="Zoom out" onclick={() => viewer?.zoomOut()}>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14" /></svg>
+      </button>
+      <button type="button" class="chrome-button" aria-label="Zoom in" onclick={() => viewer?.zoomIn()}>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+      </button>
+      <label class="zoom">
+        <select aria-label="Zoom level" onchange={onZoomSelect} value="">
+          <option value="" disabled hidden>{formatScale(scale)}</option>
+          <option value="page-width">Fit width</option>
+          <option value="page-fit">Fit page</option>
+          <option value="0.5">50%</option>
+          <option value="1">100%</option>
+          <option value="1.5">150%</option>
+          <option value="2">200%</option>
+        </select>
+        <svg class="chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" /></svg>
+      </label>
     </div>
   </div>
 {/if}
@@ -126,24 +147,98 @@
   .controls {
     display: flex;
     align-items: center;
-    gap: 0.75rem;
-    padding: 0 0.5rem;
+    gap: 0.5rem;
     white-space: nowrap;
+    font-size: 0.9rem;
   }
 
   .group {
     display: flex;
     align-items: center;
-    gap: 0.25rem;
+    gap: 0.125rem;
   }
 
   .group form {
     display: contents;
   }
 
+  .divider {
+    width: 1px;
+    height: 1rem;
+    background: var(--border);
+  }
+
+  /* Same field as the chat's question box: a frame that lights up in the accent colour. */
   .page-input {
-    width: 3rem;
+    width: 2.5rem;
+    height: 1.75rem;
+    box-sizing: border-box;
+    margin-left: 0.25rem;
+    padding: 0 0.25rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+    color: inherit;
+    font: inherit;
     text-align: center;
+    outline: none;
+    transition:
+      border-color 0.15s,
+      box-shadow 0.15s;
+  }
+  .page-input:focus {
+    border-color: var(--accent);
+    box-shadow: var(--ring);
+  }
+
+  .count {
+    margin-left: 0.25rem;
+    color: var(--muted);
+  }
+
+  /* Like the chat's model menu: no frame, a hover shade and a small chevron. */
+  .zoom {
+    position: relative;
+    display: flex;
+    align-items: center;
+    margin-left: 0.25rem;
+    border-radius: var(--radius);
+    color: var(--muted);
+  }
+  .zoom:hover,
+  .zoom:focus-within {
+    background: var(--hover);
+    color: inherit;
+  }
+  .zoom select {
+    appearance: none;
+    height: 1.75rem;
+    padding: 0 1.5rem 0 0.5rem;
+    border: none;
+    background: none;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+    outline: none;
+  }
+  .zoom select option {
+    color: initial;
+  }
+  .zoom:focus-within {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+  }
+  .chevron {
+    position: absolute;
+    right: 0.4rem;
+    width: 0.75rem;
+    height: 0.75rem;
+    pointer-events: none;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.6;
+    stroke-linecap: round;
+    stroke-linejoin: round;
   }
 
   .viewer-area {

@@ -29,6 +29,13 @@
   })
   const expanded = $derived(open || lingering)
 
+  // The topic whose actions menu (the three dots) is open.
+  let menuId = $state<string>()
+
+  function closeMenu(event: Event) {
+    if (menuId && !(event.target as Element | null)?.closest?.('.topic-menu, .dots')) menuId = undefined
+  }
+
   let renamingId = $state<string>()
   let draft = $state('')
   let renameInput = $state<HTMLInputElement>()
@@ -65,6 +72,8 @@
     await startRename(topic.id, topic.name)
   }
 </script>
+
+<svelte:window onpointerdown={closeMenu} onkeydown={(e) => e.key === 'Escape' && (menuId = undefined)} />
 
 <aside class="topics-sidebar" class:collapsed={!expanded} class:closed={!open} id="topics-sidebar" aria-label="Topics">
   <div class="top">
@@ -124,16 +133,43 @@
               </button>
               <button
                 type="button"
-                class="icon"
-                aria-label={`Rename ${topic.name}`}
-                onclick={() => startRename(topic.id, topic.name)}>✎</button
+                class="dots"
+                aria-label={`Actions for ${topic.name}`}
+                aria-haspopup="menu"
+                aria-expanded={menuId === topic.id}
+                onclick={() => (menuId = menuId === topic.id ? undefined : topic.id)}
               >
-              <button
-                type="button"
-                class="icon"
-                aria-label={`Delete ${topic.name}`}
-                onclick={() => remove(topic.id, topic.name)}>×</button
-              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <circle cx="12" cy="5" r="1.4" /><circle cx="12" cy="12" r="1.4" /><circle cx="12" cy="19" r="1.4" />
+                </svg>
+              </button>
+              {#if menuId === topic.id}
+                <div class="topic-menu" role="menu" aria-label={`Actions for ${topic.name}`}>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onclick={() => {
+                      menuId = undefined
+                      startRename(topic.id, topic.name)
+                    }}
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z" /></svg>
+                    Rename
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    class="danger"
+                    onclick={() => {
+                      menuId = undefined
+                      remove(topic.id, topic.name)
+                    }}
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v5M14 11v5" /></svg>
+                    Delete
+                  </button>
+                </div>
+              {/if}
             {/if}
           </li>
         {/each}
@@ -290,6 +326,7 @@
     background: none;
     color: inherit;
     font: inherit;
+    font-size: 0.85rem;
     text-align: left;
     cursor: pointer;
   }
@@ -304,20 +341,93 @@
   .count {
     color: var(--muted);
     font-weight: normal;
-    font-size: 0.85rem;
+    font-size: 0.75rem;
   }
 
-  .icon {
+  .dots {
+    display: grid;
+    place-items: center;
+    flex-shrink: 0;
+    width: 1.5rem;
+    height: 1.5rem;
+    margin-right: 0.25rem;
+    padding: 0;
     border: none;
+    border-radius: var(--radius);
     background: none;
     color: var(--muted);
     cursor: pointer;
-    padding: 0.25rem 0.375rem;
     visibility: hidden;
   }
-  li:hover .icon,
-  li.active .icon,
-  .icon:focus-visible {
+  .dots svg {
+    width: 1rem;
+    height: 1rem;
+    fill: currentColor;
+  }
+  .dots:hover,
+  .dots[aria-expanded='true'] {
+    background: color-mix(in srgb, var(--muted) 18%, transparent);
+    color: inherit;
+  }
+  li:hover .dots,
+  li.active .dots,
+  .dots:focus-visible,
+  .dots[aria-expanded='true'] {
     visibility: visible;
+  }
+  .dots:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+  }
+
+  /* Opens under the dots, like the chat's model menu. */
+  li {
+    position: relative;
+  }
+  .topic-menu {
+    position: absolute;
+    top: calc(100% + 0.125rem);
+    right: 0.25rem;
+    z-index: 5;
+    display: flex;
+    flex-direction: column;
+    min-width: 8rem;
+    padding: 0.25rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+    box-shadow: 0 6px 20px rgb(0 0 0 / 0.18);
+    font-size: 0.85rem;
+    font-weight: normal;
+  }
+  .topic-menu button {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.3rem 0.5rem;
+    border: none;
+    border-radius: var(--radius);
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+  .topic-menu button:hover,
+  .topic-menu button:focus-visible {
+    background: var(--hover);
+    outline: none;
+  }
+  .topic-menu .danger {
+    color: var(--danger);
+  }
+  .topic-menu svg {
+    width: 0.95rem;
+    height: 0.95rem;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
   }
 </style>

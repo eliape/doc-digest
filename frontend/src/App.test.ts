@@ -75,7 +75,7 @@ describe('App', () => {
     expect(screen.getByRole('tab', { name: 'Lecture 4.pdf', selected: true })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Show topics' })).toBeInTheDocument()
     await showTopics()
-    expect(screen.getAllByRole('button', { name: /^Rename / })).toHaveLength(1)
+    expect(screen.getAllByRole('button', { name: /^Actions for / })).toHaveLength(1)
   })
 
   it('opens the PDFs in a mixed pick and names the ones that are not PDFs', async () => {
@@ -149,7 +149,8 @@ describe('App', () => {
     await pick(pdf('slides.pdf'))
     await screen.findByRole('tab', { name: 'slides.pdf' })
     await showTopics()
-    await fireEvent.click(screen.getByRole('button', { name: 'Delete slides' }))
+    await fireEvent.click(screen.getByRole('button', { name: 'Actions for slides' }))
+    await fireEvent.click(screen.getByRole('menuitem', { name: 'Delete' }))
     expect(confirm).toHaveBeenCalledWith('Delete “slides” and close its PDF?')
     expect(screen.queryByRole('tab')).not.toBeInTheDocument()
     expect(screen.getByText('Open a PDF to start reading.')).toBeInTheDocument()
@@ -209,12 +210,35 @@ describe('App', () => {
     expect(sidebar.getByRole('button', { name: 'Show topics' })).toBeInTheDocument()
 
     await showTopics()
-    await fireEvent.click(sidebar.getByRole('button', { name: 'Rename Statistics' }))
+    await fireEvent.click(sidebar.getByRole('button', { name: 'Actions for Statistics' }))
+    await fireEvent.click(sidebar.getByRole('menuitem', { name: 'Rename' }))
     const again = sidebar.getByLabelText('Topic name')
     await fireEvent.input(again, { target: { value: 'Stats' } })
     await fireEvent.submit(again)
     expect(sidebar.getByRole('button', { name: /^Stats/ })).toBeInTheDocument()
     expect(sidebar.getByRole('button', { name: 'Hide topics' })).toBeInTheDocument()
+  })
+
+  it('puts rename and delete in a three-dot menu on each topic that closes on Escape or an outside click', async () => {
+    renderOffline()
+    await pick(pdf('slides.pdf'))
+    await screen.findByRole('tab', { name: 'slides.pdf' })
+    await showTopics()
+    expect(screen.queryByRole('button', { name: /^(Rename|Delete) / })).not.toBeInTheDocument()
+    const dots = screen.getByRole('button', { name: 'Actions for slides' })
+    expect(dots).toHaveAttribute('aria-expanded', 'false')
+    await fireEvent.click(dots)
+    expect(dots).toHaveAttribute('aria-expanded', 'true')
+    const items = screen.getAllByRole('menuitem')
+    expect(items.map((i) => i.textContent?.trim())).toEqual(['Rename', 'Delete'])
+    expect(items.every((i) => i.querySelector('svg'))).toBe(true)
+    expect(items[1]).toHaveClass('danger')
+
+    await fireEvent.keyDown(window, { key: 'Escape' })
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+    await fireEvent.click(dots)
+    await fireEvent.pointerDown(document.body)
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument()
   })
 
   it('expands the sidebar when New topic is pressed while it is collapsed', async () => {

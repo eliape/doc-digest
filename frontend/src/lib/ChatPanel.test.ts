@@ -129,5 +129,15 @@ describe('ChatPanel', () => {
     expect(localStorage.getItem('doc-digest.model')).toBe('claude-sonnet-5-5')
     localStorage.removeItem('doc-digest.model')
   })
-})
 
+  it("shows the page an answer cites when its citation is clicked", async () => {
+    const { workspace, topic, onreveal, panel } = setup()
+    const notes = topic.docIds[0]
+    topic.chat.push({ id: 'q', role: 'user', text: 'Where?' })
+    topic.chat.push({ id: 'a', role: 'assistant', text: 'It is defined in (notes.pdf, p. 7).', status: 'done' })
+    const citation = await panel.findByRole('link', { name: /^notes\.pdf,\sp\.\s7$/ })
+    await fireEvent.click(citation)
+    expect(onreveal).toHaveBeenCalledWith({ docId: notes, page: 7 })
+    expect(workspace.docs[notes]).toBeDefined()
+  })
+})

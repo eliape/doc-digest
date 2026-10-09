@@ -126,7 +126,7 @@ Defaults I picked (easy to change): Python backend rather than Node, and v1 runs
 
 Each step works on its own, so steps 1 and 2 already give a usable tool.
 
-Status (October 2026): steps 1 to 3 are built, except citations you can click; they are plain text in the answer for now. Persistence (step 4) is not started.
+Status (October 2026): steps 1 to 3 are built. A citation in an answer is a link that switches to its PDF's tab and goes to the page. Persistence (step 4) is not started.
 
 ## Step 7. How we know v1 works
 

@@ -144,23 +144,54 @@ describe('App', () => {
     expect(sidebar.getByRole('button', { name: 'Hide topics' })).toBeInTheDocument()
   })
 
-  it('has no Open PDF button, and puts the PDF controls inside each tab', async () => {
+  it('has no Open PDF button, and shows the open tab\'s controls in the tab row', async () => {
     renderOffline()
     expect(screen.queryByRole('button', { name: 'Open PDF' })).not.toBeInTheDocument()
     await pick(pdf('a.pdf', 'a'))
     await pick(pdf('b.pdf', 'b'))
     await screen.findByRole('tab', { name: 'b.pdf' })
 
+    // One toolbar only (the open tab's), in the same row as the tabs.
+    const toolbar = await screen.findByRole('toolbar', { name: 'PDF controls' })
+    const tablist = screen.getByRole('tablist')
+    expect(tablist.parentElement).toBe(toolbar.parentElement?.parentElement)
+    expect(screen.getAllByLabelText('Page number')).toHaveLength(1)
     const sidebar = within(screen.getByRole('complementary', { name: 'Topics' }))
     expect(sidebar.queryByLabelText('Page number')).not.toBeInTheDocument()
-    expect(sidebar.queryByLabelText('Zoom in')).not.toBeInTheDocument()
 
-    // Only the open tab's controls are reachable; the other tab is inert.
-    const panel = screen.getByRole('tabpanel', { name: 'b.pdf' })
-    expect(within(panel).getByLabelText('Page number')).toBeInTheDocument()
-    expect(within(panel).getByLabelText('Zoom in')).toBeInTheDocument()
-    // `inert` keeps keyboard focus and screen readers out of the hidden tab.
-    expect((screen.getByLabelText('a.pdf', { selector: '[role=tabpanel]' }) as HTMLElement & { inert: boolean }).inert).toBe(true)
-    expect((panel as HTMLElement & { inert: boolean }).inert).toBeFalsy()
+    // The other tab is inert, so keyboard focus and screen readers skip it.
+    const hidden = screen.getByLabelText('a.pdf', { selector: '[role=tabpanel]' }) as HTMLElement & { inert: boolean }
+    expect(hidden.inert).toBe(true)
+    expect((screen.getByRole('tabpanel', { name: 'b.pdf' }) as HTMLElement & { inert: boolean }).inert).toBeFalsy()
+  })
+
+  it('pairs the page and zoom buttons to the left of their readouts', async () => {
+    renderOffline()
+    await pick(pdf('a.pdf'))
+    const toolbar = within(await screen.findByRole('toolbar', { name: 'PDF controls' }))
+    const order = (names: string[]) =>
+      names.map((name) => toolbar.getByLabelText(name)).sort((a, b) => (a.compareDocumentPosition(b) & 4 ? -1 : 1))
+    expect(order(['Previous page', 'Next page', 'Page number']).map((e) => e.getAttribute('aria-label'))).toEqual([
+      'Previous page',
+      'Next page',
+      'Page number',
+    ])
+    expect(order(['Zoom out', 'Zoom in', 'Zoom level']).map((e) => e.getAttribute('aria-label'))).toEqual([
+      'Zoom out',
+      'Zoom in',
+      'Zoom level',
+    ])
+    expect(toolbar.getByLabelText('Previous page')).toHaveTextContent('↑')
+    expect(toolbar.getByLabelText('Next page')).toHaveTextContent('↓')
+  })
+
+  it('moves the controls to whichever tab is open', async () => {
+    renderOffline()
+    await pick(pdf('a.pdf', 'a'))
+    await pick(pdf('b.pdf', 'b'))
+    await screen.findByRole('tab', { name: 'b.pdf' })
+    await fireEvent.click(screen.getByRole('tab', { name: 'a.pdf' }))
+    expect(await screen.findAllByRole('toolbar', { name: 'PDF controls' })).toHaveLength(1)
+    expect(within(screen.getByRole('tabpanel', { name: 'a.pdf' })).queryByRole('toolbar')).not.toBeInTheDocument()
   })
 })

@@ -5,12 +5,16 @@
   type Props = {
     /** The PDF's bytes. */
     data: Uint8Array
+    /** Whether this is the open tab. Only the open tab's controls are shown. */
+    active?: boolean
+    /** Where the controls go: a slot in the tab row, so they share its space. */
+    controlsTarget?: HTMLElement
     onerror?: (error: unknown) => void
   }
 
-  let { data, onerror }: Props = $props()
+  let { data, active = true, controlsTarget, onerror }: Props = $props()
 
-  // Each tab has its own page and zoom, and its own controls above the PDF.
+  // Each tab has its own page and zoom, which its controls show while it is open.
   let viewer = $state<PdfViewer>()
   let page = $state(1)
   let pageCount = $state(0)
@@ -37,6 +41,12 @@
     select.value = ''
   }
 
+  /** Move an element into another one (and take it out again when it goes away). */
+  function portal(node: HTMLElement, target: HTMLElement) {
+    target.appendChild(node)
+    return { destroy: () => node.remove() }
+  }
+
   export function zoomIn() {
     viewer?.zoomIn()
   }
@@ -48,11 +58,14 @@
   }
 </script>
 
-<div class="pane">
-  <div class="controls">
-    <nav class="group" aria-label="Pages">
+{#if active && controlsTarget}
+  <div class="controls" role="toolbar" aria-label="PDF controls" use:portal={controlsTarget}>
+    <div class="group" role="group" aria-label="Pages">
       <button type="button" aria-label="Previous page" disabled={page <= 1} onclick={() => viewer?.previousPage()}
-        >‹</button
+        >↑</button
+      >
+      <button type="button" aria-label="Next page" disabled={page >= pageCount} onclick={() => viewer?.nextPage()}
+        >↓</button
       >
       <form onsubmit={submitPage}>
         <input
@@ -63,14 +76,12 @@
           onblur={() => (pageInput = String(page))}
         />
       </form>
-      <span>of {pageCount}</span>
-      <button type="button" aria-label="Next page" disabled={page >= pageCount} onclick={() => viewer?.nextPage()}
-        >›</button
-      >
-    </nav>
+      <span class="count">of {pageCount}</span>
+    </div>
 
     <div class="group" role="group" aria-label="Zoom">
       <button type="button" aria-label="Zoom out" onclick={() => viewer?.zoomOut()}>−</button>
+      <button type="button" aria-label="Zoom in" onclick={() => viewer?.zoomIn()}>+</button>
       <select aria-label="Zoom level" onchange={onZoomSelect} value="">
         <option value="" disabled hidden>{formatScale(scale)}</option>
         <option value="page-width">Fit width</option>
@@ -80,30 +91,22 @@
         <option value="1.5">150%</option>
         <option value="2">200%</option>
       </select>
-      <button type="button" aria-label="Zoom in" onclick={() => viewer?.zoomIn()}>+</button>
     </div>
   </div>
+{/if}
 
-  <div class="viewer-area">
-    <PdfViewer bind:this={viewer} {data} bind:page bind:pageCount bind:scale {onerror} />
-  </div>
+<!-- PdfViewer fills this box (it positions itself absolutely). -->
+<div class="viewer-area">
+  <PdfViewer bind:this={viewer} {data} bind:page bind:pageCount bind:scale {onerror} />
 </div>
 
 <style>
-  .pane {
-    display: flex;
-    flex-direction: column;
-    height: 100%;
-  }
-
   .controls {
     display: flex;
     align-items: center;
-    flex-wrap: wrap;
     gap: 0.75rem;
-    padding: 0.375rem 0.75rem;
-    border-bottom: 1px solid var(--border);
-    background: var(--surface);
+    padding: 0 0.5rem;
+    white-space: nowrap;
   }
 
   .group {
@@ -121,10 +124,8 @@
     text-align: center;
   }
 
-  /* PdfViewer fills this box (it positions itself absolutely). */
   .viewer-area {
-    position: relative;
-    flex: 1;
-    min-height: 0;
+    position: absolute;
+    inset: 0;
   }
 </style>

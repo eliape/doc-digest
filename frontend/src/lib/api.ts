@@ -19,6 +19,8 @@ export type AskRequest = {
   /** The backend's ids of the topic's PDFs, in tab order. */
   docs?: string[]
   messages: AskTurn[]
+  /** Which model answers. The backend's default (ANSWER_MODEL) when left out. */
+  model?: string
 }
 
 /** A piece of an answer's text, or a lookup the model made while answering. */

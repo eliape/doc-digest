@@ -112,5 +112,20 @@ describe('ChatPanel', () => {
     expect(panel.getByRole('button', { name: 'New chat' })).toBeDisabled()
     expect(panel.getByLabelText('Ask a question')).toHaveFocus()
   })
+
+  it('picks the answering model next to the send arrow and remembers it', async () => {
+    localStorage.removeItem('doc-digest.model')
+    const { workspace, panel } = setup()
+    const picker = panel.getByLabelText('Model') as HTMLSelectElement
+    expect(picker.value).toBe('claude-opus-5-5')
+    expect(workspace.answerModel).toBe('claude-opus-5-5')
+    // The menu and the send arrow sit together inside the question box.
+    expect(picker.closest('.controls')).toBe(panel.getByRole('button', { name: 'Send' }).parentElement)
+
+    await fireEvent.change(picker, { target: { value: 'claude-sonnet-5-5' } })
+    expect(workspace.answerModel).toBe('claude-sonnet-5-5')
+    expect(localStorage.getItem('doc-digest.model')).toBe('claude-sonnet-5-5')
+    localStorage.removeItem('doc-digest.model')
+  })
 })
 

@@ -3,6 +3,7 @@
   import { tick } from 'svelte'
   import { contextLabel, type PageContext } from './context'
   import { renderMarkdown } from './markdown'
+  import { MODELS, savedModel, saveModel } from './models'
   import type { Workspace } from './workspace.svelte'
 
   type Props = {
@@ -97,6 +98,25 @@
   )
 
   let answering = $derived(topic ? workspace.isAnswering(topic.id) : false)
+
+  // The model that answers, picked next to the send button and remembered in this browser.
+  let model = $state(savedModel())
+  $effect(() => {
+    workspace.answerModel = model
+    saveModel(model)
+  })
+
+  // The question box grows with its text (up to its max-height, then it scrolls).
+  $effect(() => {
+    void topic?.draft
+    if (!composer) return
+    composer.style.height = 'auto'
+    composer.style.height = `${composer.scrollHeight}px`
+  })
+
+  // The model menu and send button sit inside the box at the end of its last line, so the
+  // text keeps clear of them on every line.
+  let controlsWidth = $state(0)
 
   /**
    * Whether a question was about a spot the reader clicked or selected. Questions
@@ -273,15 +293,37 @@
             >
           </div>
         {/if}
-        <textarea
-          bind:this={composer}
-          bind:value={topic.draft}
-          aria-label="Ask a question"
-          placeholder={topic.context ? `Ask about ${contextLabel(topic.context)}…` : 'Ask a question…'}
-          rows="3"
-          onkeydown={onComposerKeydown}
-        ></textarea>
-        <button type="submit" disabled={!topic.draft.trim() || answering}>Send</button>
+        <div class="input">
+          <textarea
+            bind:this={composer}
+            bind:value={topic.draft}
+            aria-label="Ask a question"
+            placeholder={topic.context ? `Ask about ${contextLabel(topic.context)}…` : 'Ask a question…'}
+            rows="1"
+            style:padding-right={`${controlsWidth + 12}px`}
+            onkeydown={onComposerKeydown}
+          ></textarea>
+          <div class="controls" bind:clientWidth={controlsWidth}>
+            <label class="model" title={MODELS.find((m) => m.id === model)?.hint}>
+              <span class="visually-hidden">Model</span>
+              <select bind:value={model}>
+                {#each MODELS as m (m.id)}
+                  <option value={m.id}>{m.name}</option>
+                {/each}
+              </select>
+              <svg class="chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" /></svg>
+            </label>
+            <button
+              type="submit"
+              class="send"
+              aria-label="Send"
+              title="Send (Enter)"
+              disabled={!topic.draft.trim() || answering}
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 10l-5 5 5 5" /><path d="M20 4v7a4 4 0 0 1-4 4H4" /></svg>
+            </button>
+          </div>
+        </div>
       </form>
     {:else}
       <p class="hint">Open a PDF to start a chat about it.</p>
@@ -639,23 +681,136 @@
     font-size: 0.9rem;
   }
 
+  /* One rounded box holding the attached spot, the question and its controls. */
   .composer {
     display: flex;
     flex-direction: column;
     gap: 0.375rem;
+    padding: 0.375rem;
+    border: 1px solid var(--border);
+    border-radius: 0.75rem;
+    background: var(--surface);
+    transition:
+      border-color 0.15s,
+      box-shadow 0.15s;
+  }
+  .composer:focus-within {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+  }
+
+  .input {
+    position: relative;
   }
 
   textarea {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+    min-height: 2.25rem;
+    max-height: 12rem;
+    overflow-y: auto;
     resize: none;
     font: inherit;
-    padding: 0.5rem;
-    border: 1px solid var(--border);
-    border-radius: 0.375rem;
-    background: var(--surface);
+    line-height: 1.4;
+    padding: 0.4rem 0.5rem;
+    border: none;
+    outline: none;
+    background: none;
     color: inherit;
   }
 
-  .composer button {
-    align-self: flex-end;
+  /* Pinned to the bottom right, so they stay on the last line as the question grows. */
+  .controls {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+  }
+
+  .model {
+    position: relative;
+    display: flex;
+    align-items: center;
+    border-radius: 0.375rem;
+    color: var(--muted);
+  }
+  .model:hover,
+  .model:focus-within {
+    background: var(--hover);
+    color: inherit;
+  }
+  .model select {
+    appearance: none;
+    border: none;
+    background: none;
+    color: inherit;
+    font: inherit;
+    font-size: 0.8rem;
+    padding: 0.3rem 1.25rem 0.3rem 0.5rem;
+    cursor: pointer;
+    outline: none;
+  }
+  .model select option {
+    color: initial;
+  }
+  .chevron {
+    position: absolute;
+    right: 0.35rem;
+    width: 0.75rem;
+    height: 0.75rem;
+    pointer-events: none;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.6;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .send {
+    display: grid;
+    place-items: center;
+    width: 2rem;
+    height: 2rem;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    background: var(--accent);
+    color: #fff;
+    cursor: pointer;
+    transition:
+      background 0.15s,
+      transform 0.1s;
+  }
+  .send:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--accent) 85%, #000);
+  }
+  .send:active:not(:disabled) {
+    transform: scale(0.94);
+  }
+  .send:disabled {
+    background: var(--hover);
+    color: var(--muted);
+    cursor: default;
+  }
+  .send svg {
+    width: 1rem;
+    height: 1rem;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2.2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
   }
 </style>

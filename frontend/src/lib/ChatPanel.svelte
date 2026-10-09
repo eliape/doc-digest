@@ -1,7 +1,7 @@
 <script lang="ts">
   import 'katex/dist/katex.min.css'
   import { tick } from 'svelte'
-  import { contextLabel, type PageContext } from './context'
+  import { contextLabel, type PageContext, type Pick } from './context'
   import { renderMarkdown } from './markdown'
   import { MODELS, savedModel, saveModel } from './models'
   import type { Workspace } from './workspace.svelte'
@@ -14,8 +14,8 @@
     onclose?: () => void
     /** Send the topic's draft. Defaults to asking with only the attached context. */
     onsend?: (topicId: string) => void
-    /** Show where a context chip points: switch to its tab and flash the spot. */
-    onreveal?: (context: PageContext) => void
+    /** Show where a context chip or a citation points: switch to its tab, go to the page and flash the spot. */
+    onreveal?: (target: Pick & { docId: string }) => void
   }
 
   let { workspace, open = $bindable(false), onclose, onsend, onreveal }: Props = $props()
@@ -143,6 +143,19 @@
     tick().then(() => log?.lastElementChild?.scrollIntoView?.({ block: 'end' }))
   })
 
+  /** The topic's PDF names, so answers' citations of them become links. */
+  let docNames = $derived(topic?.docIds.map((id) => workspace.docs[id]?.name).filter((n): n is string => !!n) ?? [])
+
+  /** Show the page a citation in an answer points at, in the topic's PDF of that name. */
+  function onCitationClick(event: MouseEvent) {
+    const citation = (event.target as Element).closest<HTMLElement>('a.citation')
+    if (!citation || !topic) return
+    event.preventDefault()
+    const docId = topic.docIds.find((id) => workspace.docs[id]?.name === citation.dataset.doc)
+    const page = Number(citation.dataset.page)
+    if (docId && page) onreveal?.({ docId, page })
+  }
+
   /** Put the cursor in the question box. */
   export function focus() {
     composer?.focus({ preventScroll: true })
@@ -229,7 +242,9 @@
     </div>
 
     {#if topic}
-      <div class="messages" role="log" aria-label={`Chat in ${topic.name}`} bind:this={log}>
+      <!-- Citations are links inside the answers' HTML, so their clicks are handled here. -->
+      <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
+      <div class="messages" role="log" aria-label={`Chat in ${topic.name}`} bind:this={log} onclick={onCitationClick}>
         {#each topic.chat as message (message.id)}
           <div class="message {message.role}" class:error={message.status === 'error'}>
             {#if message.context && pointedAt(message.context)}
@@ -252,7 +267,7 @@
               <span class="thinking">Thinking…</span>
             {:else if message.role === 'assistant'}
               <!-- Answers are Markdown with LaTeX maths; renderMarkdown sanitizes the HTML. -->
-              <div class="text markdown">{@html renderMarkdown(message.text)}</div>
+              <div class="text markdown">{@html renderMarkdown(message.text, docNames)}</div>
             {:else}
               <span class="text">{message.text}</span>
             {/if}
@@ -554,6 +569,16 @@
   }
   .markdown :global(a) {
     color: var(--accent);
+  }
+  /* A citation reads like a link and shows its page in the PDF. */
+  .markdown :global(.citation) {
+    text-decoration: underline;
+    text-decoration-style: dotted;
+    text-underline-offset: 0.15em;
+    cursor: pointer;
+  }
+  .markdown :global(.citation:hover) {
+    text-decoration-style: solid;
   }
   /* Wide equations scroll sideways instead of overflowing the panel. */
   .markdown :global(.math-display) {

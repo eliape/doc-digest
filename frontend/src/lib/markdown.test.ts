@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { renderMarkdown } from './markdown'
 
-const html = (source: string) => {
+const html = (source: string, docs?: string[]) => {
   const div = document.createElement('div')
-  div.innerHTML = renderMarkdown(source)
+  div.innerHTML = renderMarkdown(source, docs)
   return div
 }
 
@@ -44,5 +44,22 @@ describe('renderMarkdown', () => {
     expect(links[0]).toHaveAttribute('target', '_blank')
     expect(links[0]).toHaveAttribute('rel', 'noopener noreferrer')
     expect(links[1]?.getAttribute('href') ?? '').not.toContain('javascript')
+  })
+
+  it("turns citations of the topic's PDFs into links with the PDF and page", () => {
+    const div = html(
+      'See (book.pdf, p. 41) and **notes, pp. 3–5**; not other.pdf, p. 2, `book.pdf, p. 9` or lecture-notes, p. 7.',
+      ['book.pdf', 'notes.pdf'],
+    )
+    const citations = [...div.querySelectorAll<HTMLAnchorElement>('a.citation')]
+    expect(citations.map((c) => [c.textContent?.replace(/\u00a0/g, ' '), c.dataset.doc, c.dataset.page])).toEqual([
+      ['book.pdf, p. 41', 'book.pdf', '41'],
+      ['notes, pp. 3–5', 'notes.pdf', '3'],
+    ])
+    expect(div.textContent?.replace(/\u00a0/g, ' ')).toContain('See (book.pdf, p. 41) and notes, pp. 3–5; not other.pdf')
+  })
+
+  it('leaves citations as text when no PDFs are given', () => {
+    expect(html('See (book.pdf, p. 41).').querySelector('a')).toBeNull()
   })
 })

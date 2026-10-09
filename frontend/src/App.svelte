@@ -120,12 +120,12 @@
     workspace.ask(topicId, () => openPageContext(topicId))
   }
 
-  /** Show where a chat chip points: its tab, page and spot. */
-  async function reveal(context: PageContext) {
-    if (!workspace.docs[context.docId]) return
-    workspace.selectDoc(context.docId)
+  /** Show where a chat chip or citation points: its tab, page and spot. */
+  async function reveal(target: Pick & { docId: string }) {
+    if (!workspace.docs[target.docId]) return
+    workspace.selectDoc(target.docId)
     await tick()
-    panes[context.docId]?.reveal(context)
+    panes[target.docId]?.reveal(target)
   }
 
   /** The spot attached to a tab's topic, when it is in that tab's PDF. */

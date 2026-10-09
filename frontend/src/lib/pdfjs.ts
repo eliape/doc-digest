@@ -29,3 +29,19 @@ export function loadPdfjs(): Promise<Pdfjs> {
   })()
   return loading
 }
+
+/**
+ * Where PDF.js finds its runtime assets (served by the pdfjs-assets plugin in
+ * vite.config.ts). Without them, pages with JPEG 2000 or JBIG2 images, which
+ * most scanned books use, or with non-embedded fonts render blank.
+ */
+export function assetOptions() {
+  const base = new URL(`${import.meta.env.BASE_URL}pdfjs/`, document.baseURI)
+  const dir = (name: string) => new URL(`${name}/`, base).href
+  return {
+    wasmUrl: dir('wasm'),
+    standardFontDataUrl: dir('standard_fonts'),
+    cMapUrl: dir('cmaps'),
+    iccUrl: dir('iccs'),
+  }
+}

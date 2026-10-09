@@ -2,7 +2,7 @@
   import 'pdfjs-dist/legacy/web/pdf_viewer.css'
   import type { PDFDocumentLoadingTask, PDFDocumentProxy } from 'pdfjs-dist/legacy/build/pdf.mjs'
   import type { PDFViewer } from 'pdfjs-dist/legacy/web/pdf_viewer.mjs'
-  import { loadPdfjs } from './pdfjs'
+  import { assetOptions, loadPdfjs } from './pdfjs'
 
   type Props = {
     /** The PDF's bytes. A new value opens a new document. */
@@ -62,7 +62,7 @@
     const { lib } = await loadPdfjs()
     try {
       // PDF.js transfers the buffer to its worker, so hand it a copy.
-      const task = lib.getDocument({ data: bytes.slice() })
+      const task = lib.getDocument({ data: bytes.slice(), ...assetOptions() })
       const doc = await task.promise
       if (opened !== bytes) {
         task.destroy()

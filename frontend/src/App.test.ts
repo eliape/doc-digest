@@ -447,6 +447,35 @@ describe('App', () => {
     expect(handle).toHaveAttribute('aria-valuenow', '384')
   })
 
+  it('opens a menu on a right-click on the page, whose Socratic starts a session in the chat', async () => {
+    renderOffline()
+    await pick(pdf('slides.pdf'))
+    await screen.findByRole('tab', { name: 'slides.pdf' })
+    // PDF.js does not run here, so stand in a rendered page for it.
+    const viewer = screen.getByTestId('pdf-viewer')
+    const page = document.createElement('div')
+    page.className = 'page'
+    page.dataset.pageNumber = '3'
+    page.getBoundingClientRect = () => ({ left: 0, top: 0, width: 400, height: 600 }) as DOMRect
+    viewer.querySelector('.pdfViewer')!.appendChild(page)
+
+    // Off the page, the browser's own menu shows.
+    expect(await fireEvent.contextMenu(viewer, { clientX: 500, clientY: 100 })).toBe(true)
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+
+    expect(await fireEvent.contextMenu(page, { clientX: 200, clientY: 150 })).toBe(false)
+    const menu = screen.getByRole('menu', { name: 'Study this' })
+    expect(within(menu).getByRole('menuitem', { name: /^Quiz me/ })).toHaveAttribute('aria-disabled', 'true')
+    await fireEvent.click(within(menu).getByRole('menuitem', { name: /^Socratic/ }))
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+
+    const panel = screen.getByRole('complementary', { name: 'Chat' }) as HTMLElement & { inert: boolean }
+    expect(panel.inert).toBe(false)
+    expect(within(panel).getByRole('log')).toHaveTextContent('Socratic session')
+    expect(within(panel).getByLabelText('Socratic session')).toHaveTextContent('p. 3')
+    expect(within(panel).getByLabelText('Ask a question')).toHaveValue('')
+  })
+
   it('swaps the chat icon for the close button in the same corner, with just the topic name as title', async () => {
     renderOffline()
     await pick(pdf('slides.pdf'))

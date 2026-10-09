@@ -7,12 +7,15 @@ export type Doc = { id: string; name: string; data: Uint8Array }
 /**
  * One message in a topic's chat. A question carries the context it was asked
  * about; an answer is `streaming` while it arrives and `error` if it failed.
+ * `mode` marks the messages of a Socratic session; its first question is empty,
+ * since the reader only pointed at something.
  */
 export type ChatMessage = {
   id: string
   role: 'user' | 'assistant'
   text: string
   context?: PageContext
+  mode?: 'socratic'
   status?: 'streaming' | 'done' | 'error'
   /** The lookups the model made while answering, e.g. "Read book.pdf, pp. 4–5". */
   steps?: string[]
@@ -42,6 +45,8 @@ const realIndexApi: IndexApi = { upload: (name, data) => uploadDoc(name, data), 
  * A named group of PDFs that are read and asked about together. Each topic has
  * one chat, shared by all its tabs, and `draft` is the unsent question in it.
  * `context` is the spot the reader last clicked, attached to the next question.
+ * `socratic` is what a Socratic session is about while one is on: the model then
+ * asks the reader questions instead of explaining.
  */
 export type Topic = {
   id: string
@@ -51,6 +56,7 @@ export type Topic = {
   chat: ChatMessage[]
   draft: string
   context?: PageContext
+  socratic?: PageContext
 }
 
 let nextId = 0
@@ -174,15 +180,16 @@ export class Workspace {
   }
 
   /**
-   * Start the topic's chat over: forget its questions and answers and stop an answer that is
-   * still arriving. What belongs to the next question (the draft and the attached spot) stays,
-   * and so do the tabs.
+   * Start the topic's chat over: forget its questions and answers, stop an answer that is
+   * still arriving and end a Socratic session. What belongs to the next question (the draft
+   * and the attached spot) stays, and so do the tabs.
    */
   newChat(topicId: string) {
     const topic = this.topics.find((t) => t.id === topicId)
     if (!topic) return
     this.answering.get(topicId)?.abort()
     topic.chat = []
+    topic.socratic = undefined
   }
 
   /** Whether a topic's latest answer is still arriving. */
@@ -194,7 +201,8 @@ export class Workspace {
    * Send the topic's draft as a question, with the attached context or, when
    * nothing is attached, whatever `fallback` gives (the open page), and stream
    * the answer into the chat. Blank questions are ignored, and so is a new
-   * question while an answer is still arriving.
+   * question while an answer is still arriving. During a Socratic session the
+   * question is the reader's reply in it.
    */
   async ask(
     topicId: string,
@@ -203,17 +211,61 @@ export class Workspace {
   ): Promise<void> {
     const topic = this.topics.find((t) => t.id === topicId)
     if (!topic || !topic.draft.trim() || this.isAnswering(topicId)) return
-    topic.chat.push({ id: newId(), role: 'user', text: topic.draft.trim(), context: topic.context })
-    topic.chat.push({ id: newId(), role: 'assistant', text: '', status: 'streaming' })
+    const { context } = topic
+    const mode = topic.socratic && { mode: 'socratic' as const }
+    const question = { text: topic.draft.trim(), context, ...mode }
+    topic.draft = ''
+    topic.context = undefined
+    await this.converse(topic, question, context ? undefined : fallback, stream)
+  }
+
+  /**
+   * Start a Socratic session about a spot: from now on the model asks the reader questions
+   * about it instead of explaining, until the session is ended. The model asks first, so
+   * this sends at once; `capture` gives the spot with its images once they are rendered.
+   * The draft and the attached spot are left for the reader's own question. Ignored while
+   * an answer is still arriving.
+   */
+  async startSocratic(
+    topicId: string,
+    about: PageContext,
+    capture?: () => Promise<PageContext | undefined>,
+    stream: AnswerStream = fetchAnswer,
+  ): Promise<void> {
+    const topic = this.topics.find((t) => t.id === topicId)
+    if (!topic || this.isAnswering(topicId)) return
+    topic.socratic = about
+    await this.converse(topic, { text: '', context: about, mode: 'socratic' }, capture, stream)
+  }
+
+  /** End the topic's Socratic session: questions get ordinary answers again. */
+  endSocratic(topicId: string) {
+    const topic = this.topics.find((t) => t.id === topicId)
+    if (topic) topic.socratic = undefined
+  }
+
+  /**
+   * Add a question to the chat and stream its answer under it. `fill` gives the
+   * question's context (the open page, or the spot with its images) before it is sent.
+   */
+  private async converse(
+    topic: Topic,
+    asked: Pick<ChatMessage, 'text' | 'context' | 'mode'>,
+    fill: (() => Promise<PageContext | undefined>) | undefined,
+    stream: AnswerStream,
+  ): Promise<void> {
+    const mode = asked.mode && { mode: asked.mode }
+    topic.chat.push({ id: newId(), role: 'user', ...asked })
+    topic.chat.push({ id: newId(), role: 'assistant', text: '', status: 'streaming', ...mode })
     // Read back through the topic, so changes go through Svelte's state.
     const question = topic.chat[topic.chat.length - 2]
     const answer = topic.chat[topic.chat.length - 1]
-    topic.draft = ''
-    topic.context = undefined
+    const topicId = topic.id
     const controller = new AbortController()
     this.answering.set(topicId, controller)
     try {
-      question.context ??= await fallback?.().catch(() => undefined)
+      const filled = await fill?.().catch(() => undefined)
+      if (filled) question.context = filled
       const uploading = topic.docIds.filter((id) => id in this.uploads).map((id) => this.uploads[id])
       if (uploading.length) await Promise.all(uploading)
       const serverId = (id: string) => this.indexing[id]?.serverId
@@ -270,6 +322,7 @@ export function askRequest(
       role: m.role,
       text: m.status === 'error' ? '' : m.text,
       context: m.context && contextForRequest(m.context, i === turns.length - 1, serverId(m.context.docId)),
+      ...(m.role === 'user' && m.mode && { mode: m.mode }),
     })),
   }
 }

@@ -5,7 +5,7 @@
   import { contextLabel, type PageContext, type Pick } from './context'
   import { type CitableDocs, renderMarkdown } from './markdown'
   import { MODELS, savedModel, saveModel } from './models'
-  import type { Workspace } from './workspace.svelte'
+  import type { Topic, Workspace } from './workspace.svelte'
 
   type Props = {
     workspace: Workspace
@@ -111,6 +111,12 @@
   function chipName(context: PageContext) {
     const several = (topic?.docIds.length ?? 0) > 1
     return several ? `${contextLabel(context)} · ${context.docName}` : contextLabel(context)
+  }
+
+  /** What the question box asks for: in a Socratic session, the reader's answers. */
+  function placeholder(t: Topic) {
+    if (t.socratic) return 'Answer, or ask for a hint…'
+    return t.context ? `Ask about ${contextLabel(t.context)}…` : 'Ask a question…'
   }
 
   function chipTitle(context: PageContext) {
@@ -247,7 +253,15 @@
       <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
       <div class="messages" role="log" aria-label={`Chat in ${topic.name}`} bind:this={log} onclick={onCitationClick}>
         {#each topic.chat as message, index (message.id)}
-          <div class="message {message.role}" class:error={message.status === 'error'}>
+          <div
+            class="message {message.role}"
+            class:socratic={message.mode === 'socratic'}
+            class:error={message.status === 'error'}
+          >
+            {#if message.role === 'user' && message.mode === 'socratic' && !message.text}
+              <!-- A session starts from a right-click, with nothing typed. -->
+              <span class="session-start">Socratic session</span>
+            {/if}
             {#if message.context && pointedAt(message.context)}
               <button
                 type="button"
@@ -269,7 +283,7 @@
             {:else if message.role === 'assistant'}
               <!-- Answers are Markdown with LaTeX maths; renderMarkdown sanitizes the HTML. -->
               <div class="text markdown">{@html renderMarkdown(message.text, citable(index))}</div>
-            {:else}
+            {:else if message.text}
               <span class="text">{message.text}</span>
             {/if}
           </div>
@@ -286,6 +300,26 @@
           Indexing {indexingCount === 1 ? '1 PDF' : `${indexingCount} PDFs`}. You can already ask about the open page;
           the rest of the topic becomes searchable as indexing finishes.
         </p>
+      {/if}
+
+      {#if topic.socratic}
+        {@const about = topic.socratic}
+        <div class="session" role="group" aria-label="Socratic session">
+          <span class="session-name">Socratic</span>
+          <button type="button" class="session-spot" title={chipTitle(about)} onclick={() => onreveal?.(about)}
+            >{chipName(about)}</button
+          >
+          <button
+            type="button"
+            class="end"
+            aria-label="End Socratic session"
+            title="End the session: questions get ordinary answers again"
+            onclick={() => {
+              workspace.endSocratic(topic.id)
+              focus()
+            }}>End</button
+          >
+        </div>
       {/if}
 
       <form class="composer" onsubmit={send}>
@@ -311,7 +345,7 @@
             bind:this={composer}
             bind:value={topic.draft}
             aria-label="Ask a question"
-            placeholder={topic.context ? `Ask about ${contextLabel(topic.context)}…` : 'Ask a question…'}
+            placeholder={placeholder(topic)}
             rows="1"
             onkeydown={onComposerKeydown}
           ></textarea>
@@ -591,6 +625,18 @@
     border: 1px solid var(--border);
   }
 
+  /* A Socratic session's messages share a coloured edge, so it is clear where it starts and ends. */
+  .message.socratic {
+    box-shadow: inset 3px 0 0 var(--socratic);
+  }
+  .session-start {
+    display: block;
+    margin-bottom: 0.375rem;
+    color: var(--socratic);
+    font-size: 0.8rem;
+    font-weight: 600;
+  }
+
   .message.error {
     color: var(--error, #82071e);
     background: #ffebe9;
@@ -661,6 +707,60 @@
   .chip.small img {
     width: 3rem;
     max-height: 2.25rem;
+  }
+
+  /* Above the question box while a Socratic session is on, with the way out of it. */
+  .session {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+    min-width: 0;
+    font-size: 0.8rem;
+  }
+  .session-name {
+    flex-shrink: 0;
+    color: var(--socratic);
+    font-weight: 600;
+  }
+  .session-name::before {
+    content: '';
+    display: inline-block;
+    width: 0.5rem;
+    height: 0.5rem;
+    margin-right: 0.375rem;
+    border-radius: 50%;
+    background: var(--socratic);
+  }
+  .session-spot {
+    min-width: 0;
+    overflow: hidden;
+    padding: 0.1rem 0.25rem;
+    border: none;
+    border-radius: var(--radius);
+    background: none;
+    color: var(--muted);
+    font: inherit;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+  .session-spot:hover {
+    background: var(--hover);
+    color: inherit;
+  }
+  .end {
+    flex-shrink: 0;
+    margin-left: auto;
+    padding: 0.1rem 0.6rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+  }
+  .end:hover {
+    background: var(--hover);
   }
 
   .attached {

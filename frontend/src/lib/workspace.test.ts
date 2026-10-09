@@ -285,6 +285,70 @@ describe('Workspace.ask', () => {
     expect(models).toEqual([undefined, 'claude-sonnet-5-5'])
   })
 
+  it('starts a Socratic session with the model asking first, leaving the draft and attached spot alone', async () => {
+    const ws = new Workspace()
+    const doc = ws.addDoc('notes.pdf', bytes(1))
+    const topic = ws.activeTopic!
+    ws.attachContext(topic.id, context(doc.id, 2))
+    topic.draft = 'my own question'
+    const about = { docId: doc.id, docName: 'notes.pdf', page: 5, point: { x: 0.3, y: 0.6 }, pageTexts: [] }
+    const requests: AskRequest[] = []
+    const stream = async function* (request: AskRequest) {
+      requests.push(request)
+      yield { type: 'text' as const, text: 'What does dx stand for?' }
+    }
+    await ws.startSocratic(topic.id, about, async () => context(doc.id, 5), stream)
+
+    expect(topic.socratic?.page).toBe(5)
+    expect(topic.chat.map((m) => [m.role, m.text, m.mode])).toEqual([
+      ['user', '', 'socratic'],
+      ['assistant', 'What does dx stand for?', 'socratic'],
+    ])
+    // The spot's images arrived before the question went out.
+    expect(requests[0].messages).toEqual([
+      { role: 'user', text: '', mode: 'socratic', context: expect.objectContaining({ page: 5, page_image: 'PAGE' }) },
+    ])
+    expect(topic.draft).toBe('my own question')
+    expect(topic.context?.page).toBe(2)
+
+    // The reader's replies belong to the session until it is ended.
+    topic.draft = 'A small change in x?'
+    await ws.ask(topic.id, undefined, stream)
+    expect(requests[1].messages.at(-1)).toMatchObject({ role: 'user', text: 'A small change in x?', mode: 'socratic' })
+    expect(topic.chat.at(-1)?.mode).toBe('socratic')
+
+    ws.endSocratic(topic.id)
+    expect(topic.socratic).toBeUndefined()
+    topic.draft = 'Thanks. What is a derivative?'
+    await ws.ask(topic.id, undefined, stream)
+    expect(requests[2].messages.at(-1)).not.toHaveProperty('mode')
+    expect(topic.chat.at(-1)?.mode).toBeUndefined()
+    // Earlier turns keep their mark, so the model can tell where the session was.
+    expect(requests[2].messages.map((m) => m.mode)).toEqual(['socratic', undefined, 'socratic', undefined, undefined])
+  })
+
+  it('ends a Socratic session with New chat, and does not start one while an answer is arriving', async () => {
+    const ws = new Workspace()
+    const doc = ws.addDoc('notes.pdf', bytes(1))
+    const topic = ws.activeTopic!
+    const about = { docId: doc.id, docName: 'notes.pdf', page: 5, point: { x: 0.3, y: 0.6 }, pageTexts: [] }
+    await ws.startSocratic(topic.id, about, undefined, async function* () {})
+    ws.newChat(topic.id)
+    expect(topic.socratic).toBeUndefined()
+
+    topic.draft = 'first'
+    let finish!: () => void
+    const pending = ws.ask(topic.id, undefined, async function* () {
+      await new Promise<void>((resolve) => (finish = resolve))
+    })
+    await Promise.resolve()
+    await ws.startSocratic(topic.id, about, undefined, async function* () {})
+    expect(topic.socratic).toBeUndefined()
+    expect(topic.chat).toHaveLength(2)
+    finish()
+    await pending
+  })
+
   it('only sends images with the newest question', () => {
     const ws = new Workspace()
     const doc = ws.addDoc('notes.pdf', bytes(1))

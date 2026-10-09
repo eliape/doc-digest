@@ -130,6 +130,36 @@ describe('ChatPanel', () => {
     localStorage.removeItem('doc-digest.model')
   })
 
+  it('shows a Socratic session in the chat and above the question box, until it is ended', async () => {
+    const { workspace, topic, context, onreveal, panel } = setup()
+    vi.spyOn(workspace, 'ask').mockImplementation(async () => {})
+    await workspace.startSocratic(topic.id, context, undefined, async function* () {
+      yield { type: 'text', text: 'What does the integral add up?' }
+    })
+    const log = panel.getByRole('log')
+    const [start, question] = log.querySelectorAll('.message')
+    // The session starts from the right-clicked spot, with nothing typed.
+    expect(start).toHaveClass('socratic')
+    expect(within(start as HTMLElement).getByText('Socratic session')).toBeInTheDocument()
+    expect(within(start as HTMLElement).getByRole('button', { name: 'p. 10' })).toBeInTheDocument()
+    expect(start.querySelector('.text')).toBeNull()
+    expect(question).toHaveClass('socratic')
+    expect(question).toHaveTextContent('What does the integral add up?')
+
+    const session = panel.getByLabelText('Socratic session')
+    expect(panel.getByLabelText('Ask a question')).toHaveAttribute('placeholder', 'Answer, or ask for a hint…')
+    await fireEvent.click(within(session).getByRole('button', { name: 'p. 10' }))
+    expect(onreveal).toHaveBeenLastCalledWith(expect.objectContaining({ page: 12 }))
+
+    await fireEvent.click(within(session).getByRole('button', { name: 'End Socratic session' }))
+    expect(topic.socratic).toBeUndefined()
+    expect(panel.queryByLabelText('Socratic session')).not.toBeInTheDocument()
+    expect(panel.getByLabelText('Ask a question')).toHaveAttribute('placeholder', 'Ask a question…')
+    expect(panel.getByLabelText('Ask a question')).toHaveFocus()
+    // The session's messages keep their mark.
+    expect(log.querySelectorAll('.message.socratic')).toHaveLength(2)
+  })
+
   it("shows the page an answer cites when its citation is clicked", async () => {
     const { workspace, topic, context, onreveal, panel } = setup()
     const notes = topic.docIds[0]

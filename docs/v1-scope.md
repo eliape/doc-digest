@@ -85,6 +85,15 @@ Printed page labels (like "xii" or "41") are kept next to PDF page numbers. Inde
 
 A click plus the model's vision covers what box-select was for: the model sees the whole page with the spot marked and can tell that the click was on Figure 2 or on the right-hand side of equation 3.4. A drag-to-box tool stays out of v1 and comes back only if clicks prove too imprecise in practice.
 
+## Step 3e. Right-click: Socratic, and Quiz me later
+
+A **right-click on page content** (or on the selected text) opens a small menu instead of the browser's. Margins and links keep the browser's own menu.
+
+- **Socratic** starts a session about what you right-clicked. The chat opens and the model asks the first question straight away; you answer, and it replies with a line of feedback and the next question, giving hints rather than the answer when you are stuck. When you have the key idea it sums up what you worked out. The question you were typing and any spot you left-clicked stay as they are.
+- While a session is on, a "Socratic · p. 12" bar above the composer has an **End** button, and the session's messages have a coloured edge. It lasts until End or New chat; starting Socratic on another spot moves the session there.
+- The model knows which turns belong to a session because each one is marked `[Socratic]`, and the system prompt says how to tutor in one. Turns after End are ordinary questions again.
+- **Quiz me** is in the menu but greyed out ("Coming soon").
+
 ## Step 4. Architecture that survives the move to Mac
 
 - **Frontend: Svelte + TypeScript + Vite + PDF.js** (Mozilla's PDF renderer, the same one Firefox uses). It is a plain single-page app rather than SvelteKit, because the Python backend serves the API and a single-page app is the easiest to wrap for Mac. It provides rendering, a selectable text layer and per-page text extraction. The viewer and chat panel live here.
@@ -101,6 +110,7 @@ Defaults I picked (easy to change): Python backend rather than Node, and v1 runs
 - A collapsible topics sidebar, with each topic's PDFs as tabs that keep their place
 - Side panel chat with streaming answers
 - Click on anything (text, equation, figure, scanned page) or select text to attach it as context, then type the question
+- Right-click it for a Socratic session, where the model asks the questions
 - Whole-document and whole-topic context, with clickable citations to a PDF and page
 - Topics, their PDFs and each topic's chat history saved, so they are still there after a reload
 
@@ -126,7 +136,7 @@ Defaults I picked (easy to change): Python backend rather than Node, and v1 runs
 
 Each step works on its own, so steps 1 and 2 already give a usable tool.
 
-Status (October 2026): steps 1 to 3 are built. A citation in an answer is a link that switches to its PDF's tab and goes to the page. Persistence (step 4) is not started.
+Status (October 2026): steps 1 to 3 are built. A citation in an answer is a link that switches to its PDF's tab and goes to the page. The right-click menu has Socratic sessions (Step 3e); Quiz me is a placeholder. Persistence (step 4) is not started; it should keep a topic's Socratic session and the messages' marks with its chat.
 
 ## Step 7. How we know v1 works
 

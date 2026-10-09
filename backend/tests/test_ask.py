@@ -4,7 +4,16 @@ import pytest
 from fastapi.testclient import TestClient
 
 from doc_digest import main
-from doc_digest.ask import AskRequest, Context, Point, Turn, build_messages, describe
+from doc_digest.ask import (
+    SOCRATIC_START,
+    SYSTEM_PROMPT,
+    AskRequest,
+    Context,
+    Point,
+    Turn,
+    build_messages,
+    describe,
+)
 from doc_digest.config import Settings, get_settings
 
 
@@ -96,6 +105,29 @@ def test_failed_answers_do_not_leave_two_questions_in_a_row() -> None:
     assert [b["text"] for b in messages[0]["content"]] == ["one", "two"]
 
 
+def test_a_socratic_session_starts_from_a_spot_and_marks_its_turns() -> None:
+    spot = context(point=Point(x=0.5, y=0.5), page_image="PAGE")
+    request = AskRequest(
+        topic="T",
+        messages=[
+            Turn(role="user", text="", context=spot, mode="socratic"),
+            Turn(role="assistant", text="What does dx stand for here?"),
+            Turn(role="user", text=" A small change in x? ", mode="socratic"),
+            Turn(role="assistant", text="Right. So what is dy/dx?"),
+            Turn(role="user", text="What is a derivative?"),
+        ],
+    )
+    messages = build_messages(request)
+    first, _, reply, _, after = messages
+    # The reader only pointed at something, so the first turn asks for the first question.
+    assert first["content"][0]["text"].startswith("They clicked a spot on p. 12")
+    assert first["content"][-1]["text"] == f"[Socratic] {SOCRATIC_START}"
+    assert reply["content"][-1]["text"] == "[Socratic] A small change in x?"
+    # Once the session is ended, questions go back to being plain questions.
+    assert after["content"][-1]["text"] == "What is a derivative?"
+    assert "[Socratic]" in SYSTEM_PROMPT
+
+
 @pytest.fixture
 def client():
     yield TestClient(main.app)
@@ -170,4 +202,20 @@ def test_ask_uses_the_chosen_model_or_the_default(client: TestClient, monkeypatc
 
     # Only the models offered in the chat are accepted.
     response = client.post("/api/ask", json={**question, "model": "some-other-model"})
+    assert response.status_code == 422
+
+
+def test_ask_accepts_socratic_turns_only(client: TestClient, monkeypatch) -> None:
+    modes: list[str | None] = []
+
+    async def fake_stream(_client, request, _toolbox, _usage, _model):
+        modes.append(request.messages[-1].mode)
+        yield {"type": "done"}
+
+    main.app.dependency_overrides[main.get_client] = lambda: object()
+    monkeypatch.setattr(main, "stream_answer", fake_stream)
+    turn = {"role": "user", "text": ""}
+    client.post("/api/ask", json={"topic": "T", "messages": [{**turn, "mode": "socratic"}]})
+    assert modes == ["socratic"]
+    response = client.post("/api/ask", json={"topic": "T", "messages": [{**turn, "mode": "quiz"}]})
     assert response.status_code == 422

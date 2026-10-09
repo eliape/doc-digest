@@ -49,13 +49,25 @@
 
   // The topic whose first name is being typed. Naming it is the last step of creating it.
   let creatingId: string | undefined
+  // What was open before it, to go back to if the new topic is cancelled.
+  let topicBeforeCreating: string | undefined
 
   function finishRename(save: boolean) {
-    if (renamingId && save) workspace.renameTopic(renamingId, draft)
-    // A new topic is ready once it is named: get out of the way of the PDF.
-    if (renamingId && renamingId === creatingId) open = false
-    creatingId = undefined
+    const id = renamingId
+    // Renaming ends first, so the box going away can't finish it a second time.
     renamingId = undefined
+    const creating = id !== undefined && id === creatingId
+    creatingId = undefined
+    if (!id) return
+    if (creating && !save) {
+      // Cancelling a new topic takes the placeholder away again and leaves the sidebar as it was.
+      workspace.deleteTopic(id)
+      if (topicBeforeCreating) workspace.selectTopic(topicBeforeCreating)
+      return
+    }
+    if (save) workspace.renameTopic(id, draft)
+    // A new topic is ready once it is named: get out of the way of the PDF.
+    if (creating) open = false
   }
 
   function remove(id: string, name: string) {
@@ -67,6 +79,7 @@
   async function newTopic() {
     // The list (and so the name box) is hidden while collapsed.
     open = true
+    topicBeforeCreating = workspace.activeTopicId
     const topic = workspace.createTopic()
     creatingId = topic.id
     await startRename(topic.id, topic.name)
@@ -125,7 +138,11 @@
                 class="topic"
                 aria-current={topic.id === workspace.activeTopicId ? 'true' : undefined}
                 title="Double-click to rename"
-                onclick={() => workspace.selectTopic(topic.id)}
+                onclick={() => {
+                  workspace.selectTopic(topic.id)
+                  // Chosen: get out of the way of its PDF.
+                  open = false
+                }}
                 ondblclick={() => startRename(topic.id, topic.name)}
               >
                 <span class="name">{topic.name}</span>

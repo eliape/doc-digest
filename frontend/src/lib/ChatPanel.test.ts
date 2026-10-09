@@ -57,9 +57,10 @@ describe('ChatPanel', () => {
     let finish!: () => void
     vi.spyOn(workspace, 'ask').mockImplementation((id) =>
       Workspace.prototype.ask.call(workspace, id, undefined, async function* () {
-        yield 'Partial'
+        yield { type: 'step', text: 'Read book.pdf, p. 4' }
+        yield { type: 'text', text: 'Partial' }
         await new Promise<void>((resolve) => (finish = resolve))
-        yield ' answer.'
+        yield { type: 'text', text: ' answer.' }
       }),
     )
     workspace.attachContext(topic.id, context)
@@ -68,6 +69,7 @@ describe('ChatPanel', () => {
 
     const log = panel.getByRole('log')
     expect(await within(log).findByText('Partial')).toBeInTheDocument()
+    expect(within(log).getByText('Read book.pdf, p. 4')).toBeInTheDocument()
     expect(within(log).getByRole('button', { name: 'p. 10' })).toBeInTheDocument()
     expect(panel.getByRole('button', { name: 'Send' })).toBeDisabled()
     finish()

@@ -88,11 +88,14 @@ def test_ask_without_an_api_key_says_how_to_add_one(client: TestClient) -> None:
     assert "ANTHROPIC_API_KEY" in response.json()["detail"]
 
 
-def test_ask_streams_the_answer_as_json_lines(client: TestClient, monkeypatch) -> None:
-    async def fake_stream(_client, request):
+def test_ask_streams_events_as_json_lines(client: TestClient, monkeypatch) -> None:
+    async def fake_stream(_client, request, toolbox, _usage):
         assert request.messages[-1].text == "hi"
-        yield "Hel"
-        yield "lo"
+        assert toolbox.docs == {}
+        yield {"type": "step", "text": "Searched for “x”"}
+        yield {"type": "text", "text": "Hel"}
+        yield {"type": "text", "text": "lo"}
+        yield {"type": "done"}
 
     main.app.dependency_overrides[main.get_client] = lambda: object()
     monkeypatch.setattr(main, "stream_answer", fake_stream)
@@ -101,6 +104,7 @@ def test_ask_streams_the_answer_as_json_lines(client: TestClient, monkeypatch) -
     )
     assert response.status_code == 200
     assert lines(response) == [
+        {"type": "step", "text": "Searched for “x”"},
         {"type": "text", "text": "Hel"},
         {"type": "text", "text": "lo"},
         {"type": "done"},
@@ -108,8 +112,8 @@ def test_ask_streams_the_answer_as_json_lines(client: TestClient, monkeypatch) -
 
 
 def test_ask_reports_a_failure_in_the_stream(client: TestClient, monkeypatch) -> None:
-    async def failing_stream(_client, _request):
-        yield "Par"
+    async def failing_stream(_client, _request, _toolbox, _usage):
+        yield {"type": "text", "text": "Par"}
         raise RuntimeError("boom")
 
     main.app.dependency_overrides[main.get_client] = lambda: object()

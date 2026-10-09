@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { AskRequest } from './api'
+import type { AskRequest, IndexStatus } from './api'
 import type { PageContext } from './context'
 import { Workspace, askRequest, topicNameFor } from './workspace.svelte'
 
@@ -145,13 +145,15 @@ describe('Workspace.ask', () => {
     const requests: AskRequest[] = []
     await ws.ask(topic.id, undefined, async function* (request) {
       requests.push(request)
-      yield 'By '
-      yield 'parts.'
+      yield { type: 'step', text: 'Searched for “parts”' }
+      yield { type: 'text', text: 'By ' }
+      yield { type: 'text', text: 'parts.' }
     })
     expect(topic.chat.map((m) => [m.role, m.text, m.status])).toEqual([
       ['user', 'How is this derived?', undefined],
       ['assistant', 'By parts.', 'done'],
     ])
+    expect(topic.chat[1].steps).toEqual(['Searched for “parts”'])
     expect(topic.chat[0].context?.page).toBe(3)
     expect(topic.context).toBeUndefined()
     expect(topic.draft).toBe('')
@@ -231,6 +233,80 @@ describe('Workspace.ask', () => {
     const [first, , last] = askRequest(topic).messages
     expect(first.context).not.toHaveProperty('page_image')
     expect(last.context).toMatchObject({ page: 2, page_image: 'PAGE' })
+  })
+
+  it('names the PDFs by their backend ids once uploaded', async () => {
+    const ws = new Workspace()
+    const doc = ws.addDoc('notes.pdf', bytes(1))
+    ws.addDoc('book.pdf', bytes(2))
+    const topic = ws.activeTopic!
+    ws.indexing[doc.id] = { serverId: 'abc', status: 'ready', pagesDone: 3, pageCount: 3 }
+    ws.attachContext(topic.id, context(doc.id, 1))
+    topic.draft = 'q'
+    let sent: AskRequest | undefined
+    await ws.ask(topic.id, undefined, async function* (request) {
+      sent = request
+    })
+    // book.pdf has no id yet (its upload never started), so it is left out.
+    expect(sent?.docs).toEqual(['abc'])
+    expect(sent?.messages[0].context).toMatchObject({ doc_id: 'abc' })
+  })
+
+  it('uploads a PDF and follows its indexing until it is ready', async () => {
+    const ws = new Workspace()
+    const doc = ws.addDoc('notes.pdf', bytes(1))
+    const statuses: IndexStatus[] = [
+      { id: 'abc', status: 'indexing', pages_done: 20, page_count: 40 },
+      { id: 'abc', status: 'ready', pages_done: 40, page_count: 40 },
+    ]
+    const seen: string[] = []
+    await ws.index(
+      doc.id,
+      {
+        upload: async (name) => {
+          seen.push(`upload ${name}`)
+          return { id: 'abc', status: 'queued', pages_done: 0, page_count: 40 }
+        },
+        status: async (id) => {
+          seen.push(`status ${id}`)
+          return statuses.shift()!
+        },
+      },
+      0,
+    )
+    expect(seen).toEqual(['upload notes.pdf', 'status abc', 'status abc'])
+    expect(ws.indexing[doc.id]).toMatchObject({ serverId: 'abc', status: 'ready', pagesDone: 40 })
+  })
+
+  it('shows why indexing failed, and stops following a closed tab', async () => {
+    const ws = new Workspace()
+    const doc = ws.addDoc('notes.pdf', bytes(1))
+    await ws.index(doc.id, {
+      upload: async () => {
+        throw new Error('Backend down')
+      },
+      status: async () => ({ id: 'x', status: 'ready', pages_done: 0, page_count: 0 }),
+    })
+    expect(ws.indexing[doc.id]).toMatchObject({ status: 'error', error: 'Backend down' })
+
+    const other = ws.addDoc('other.pdf', bytes(2))
+    let polls = 0
+    const following = ws.index(
+      other.id,
+      {
+        upload: async () => ({ id: 'y', status: 'indexing', pages_done: 0, page_count: 9 }),
+        status: async () => {
+          polls++
+          return { id: 'y', status: 'indexing', pages_done: 1, page_count: 9 }
+        },
+      },
+      5,
+    )
+    await new Promise((resolve) => setTimeout(resolve, 1))
+    ws.closeDoc(other.id)
+    await following
+    expect(polls).toBe(0)
+    expect(ws.indexing[other.id]).toBeUndefined()
   })
 
   it('drops the attached context when its tab closes', () => {

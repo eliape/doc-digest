@@ -219,3 +219,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Uploaded PDFs, indexes and usage logs (doc-digest backend)
+backend/data/

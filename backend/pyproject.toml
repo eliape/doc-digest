@@ -8,6 +8,8 @@ dependencies = [
     "uvicorn[standard]>=0.30",
     "pydantic-settings>=2.4",
     "anthropic>=1.13.0",
+    "pypdfium2>=5.14.0",
+    "pillow>=12.3.0",
 ]
 
 [dependency-groups]

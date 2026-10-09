@@ -133,6 +133,25 @@
     return context?.docId === docId ? context : undefined
   }
 
+  /** A tab's indexing progress in a few words, or nothing once it is ready. */
+  function indexLabel(docId: string): string | undefined {
+    const state = workspace.indexing[docId]
+    if (!state || state.status === 'ready') return undefined
+    if (state.status === 'error') return 'Not indexed'
+    if (state.status === 'indexing' && state.pageCount) {
+      return `Indexing ${Math.round((100 * state.pagesDone) / state.pageCount)}%`
+    }
+    return 'Indexing…'
+  }
+
+  function indexTitle(docId: string): string {
+    const state = workspace.indexing[docId]
+    if (state?.status === 'error') {
+      return `Could not index this PDF (${state.error ?? 'unknown error'}). You can still ask about the open page.`
+    }
+    return 'Indexing so the whole topic can be searched. You can already ask about the open page.'
+  }
+
   let fileInput: HTMLInputElement
 
   async function open(file: File | undefined) {
@@ -142,7 +161,9 @@
       return
     }
     error = ''
-    workspace.addDoc(file.name, new Uint8Array(await file.arrayBuffer()))
+    const added = workspace.addDoc(file.name, new Uint8Array(await file.arrayBuffer()))
+    // Index it in the background, so the whole topic can be searched, opened or not.
+    if (!workspace.indexing[added.id]) workspace.index(added.id)
   }
 
   function onDrop(event: DragEvent) {
@@ -235,6 +256,11 @@
                 title={tab.name}
                 onclick={() => workspace.selectDoc(id)}>{tab.name}</button
               >
+              {#if indexLabel(id)}
+                <span class="index-status" class:failed={workspace.indexing[id]?.status === 'error'} title={indexTitle(id)}
+                  >{indexLabel(id)}</span
+                >
+              {/if}
               <button type="button" class="close" aria-label={`Close ${tab.name}`} onclick={() => workspace.closeDoc(id)}
                 >×</button
               >
@@ -400,6 +426,16 @@
   .tab .close {
     color: var(--muted);
     padding: 0.25rem 0.5rem;
+  }
+
+  .index-status {
+    flex-shrink: 0;
+    font-size: 0.75rem;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+  .index-status.failed {
+    color: #b35900;
   }
 
   .add-tab {

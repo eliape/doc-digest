@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from '@testing-library/svelte'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import App from './App.svelte'
 
@@ -133,8 +133,9 @@ describe('App', () => {
     expect(toggle).toHaveAttribute('aria-expanded', 'true')
     await fireEvent.click(toggle)
 
+    // The contents stay while the sidebar slides shut, then go.
+    await waitFor(() => expect(within(sidebar).queryByRole('heading', { name: 'Topics' })).not.toBeInTheDocument())
     expect(within(sidebar).queryByRole('heading', { name: 'doc-digest' })).not.toBeInTheDocument()
-    expect(within(sidebar).queryByRole('heading', { name: 'Topics' })).not.toBeInTheDocument()
     expect(within(sidebar).getByRole('button', { name: 'Show topics' })).toHaveAttribute('aria-expanded', 'false')
     expect(within(sidebar).getByRole('button', { name: 'New topic' })).toBeInTheDocument()
 

@@ -214,12 +214,10 @@ export class Workspace {
       const uploading = topic.docIds.filter((id) => id in this.uploads).map((id) => this.uploads[id])
       if (uploading.length) await Promise.all(uploading)
       const serverId = (id: string) => this.indexing[id]?.serverId
-      for await (const event of stream(askRequest(topic, serverId))) {
+      for await (const event of stream(askRequest(topic, serverId), controller.signal)) {
+        if (controller.signal.aborted) break
         if (event.type === 'text') answer.text += event.text
         else answer.steps = [...(answer.steps ?? []), event.text]
-      for await (const piece of stream(askRequest(topic), controller.signal)) {
-        if (controller.signal.aborted) break
-        answer.text += piece
       }
       answer.status = 'done'
     } catch (error) {

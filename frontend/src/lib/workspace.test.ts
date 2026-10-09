@@ -230,9 +230,9 @@ describe('Workspace.ask', () => {
     let more!: () => void
     const pending = ws.ask(topic.id, undefined, async function* (_request, s) {
       signal = s
-      yield 'Part one'
+      yield { type: 'text', text: 'Part one' }
       await new Promise<void>((resolve) => (more = resolve))
-      yield ' and part two'
+      yield { type: 'text', text: ' and part two' }
     })
     await new Promise((resolve) => setTimeout(resolve))
     expect(topic.chat.at(-1)?.text).toBe('Part one')

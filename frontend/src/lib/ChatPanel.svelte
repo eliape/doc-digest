@@ -114,9 +114,6 @@
     composer.style.height = `${composer.scrollHeight}px`
   })
 
-  // The model menu and send button sit inside the box at the end of its last line, so the
-  // text keeps clear of them on every line.
-  let controlsWidth = $state(0)
 
   /**
    * Whether a question was about a spot the reader clicked or selected. Questions
@@ -300,19 +297,9 @@
             aria-label="Ask a question"
             placeholder={topic.context ? `Ask about ${contextLabel(topic.context)}…` : 'Ask a question…'}
             rows="1"
-            style:padding-right={`${controlsWidth + 12}px`}
             onkeydown={onComposerKeydown}
           ></textarea>
-          <div class="controls" bind:clientWidth={controlsWidth}>
-            <label class="model" title={MODELS.find((m) => m.id === model)?.hint}>
-              <span class="visually-hidden">Model</span>
-              <select bind:value={model}>
-                {#each MODELS as m (m.id)}
-                  <option value={m.id}>{m.name}</option>
-                {/each}
-              </select>
-              <svg class="chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" /></svg>
-            </label>
+          <div class="controls">
             <button
               type="submit"
               class="send"
@@ -325,6 +312,18 @@
           </div>
         </div>
       </form>
+      <!-- Below the box, so it never takes room from the question's lines. -->
+      <div class="below">
+        <label class="model" title={MODELS.find((m) => m.id === model)?.hint}>
+          <span class="visually-hidden">Model</span>
+          <select bind:value={model}>
+            {#each MODELS as m (m.id)}
+              <option value={m.id}>{m.name}</option>
+            {/each}
+          </select>
+          <svg class="chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" /></svg>
+        </label>
+      </div>
     {:else}
       <p class="hint">Open a PDF to start a chat about it.</p>
     {/if}
@@ -713,21 +712,27 @@
     resize: none;
     font: inherit;
     line-height: 1.4;
-    padding: 0.4rem 0.5rem;
+    /* Room for the send arrow at the right. */
+    padding: 0.4rem 2.5rem 0.4rem 0.5rem;
     border: none;
     outline: none;
     background: none;
     color: inherit;
   }
 
-  /* Pinned to the bottom right, so they stay on the last line as the question grows. */
+  /* Pinned to the bottom right, so the arrow stays on the last line as the question grows. */
   .controls {
     position: absolute;
     right: 0;
     bottom: 0;
     display: flex;
     align-items: center;
-    gap: 0.25rem;
+  }
+
+  /* A slim row under the box. Negative margin pulls it close, so it reads as part of the box. */
+  .below {
+    display: flex;
+    margin-top: -0.25rem;
   }
 
   .model {
@@ -748,8 +753,9 @@
     background: none;
     color: inherit;
     font: inherit;
-    font-size: 0.8rem;
-    padding: 0.3rem 1.25rem 0.3rem 0.5rem;
+    font-size: 0.75rem;
+    line-height: 1.2;
+    padding: 0.15rem 1.2rem 0.15rem 0.4rem;
     cursor: pointer;
     outline: none;
   }

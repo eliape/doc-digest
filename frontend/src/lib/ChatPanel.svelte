@@ -17,6 +17,65 @@
   let log = $state<HTMLElement>()
   let panel = $state<HTMLElement>()
 
+  // The panel's width in pixels. Drag its left edge to change it; it is remembered across reloads.
+  const WIDTH_KEY = 'doc-digest.chatWidth'
+  const DEFAULT_WIDTH = 384
+  const MIN_WIDTH = 280
+  let width = $state(clampWidth(readWidth()))
+  let resizing = $state(false)
+
+  /** Keep the panel between a usable minimum and leaving room for the PDF. */
+  function clampWidth(px: number) {
+    const max = Math.max(MIN_WIDTH, Math.min(window.innerWidth * 0.7, window.innerWidth - 320))
+    return Math.round(Math.min(max, Math.max(MIN_WIDTH, px)))
+  }
+
+  function readWidth() {
+    try {
+      return Number(localStorage.getItem(WIDTH_KEY)) || DEFAULT_WIDTH
+    } catch {
+      return DEFAULT_WIDTH
+    }
+  }
+
+  function setWidth(px: number) {
+    width = clampWidth(px)
+    try {
+      localStorage.setItem(WIDTH_KEY, String(width))
+    } catch {
+      // Storage can be unavailable (private windows); the width just isn't remembered.
+    }
+  }
+
+  function startResize(event: PointerEvent) {
+    if (event.button !== 0) return
+    event.preventDefault()
+    const handle = event.currentTarget as HTMLElement
+    handle.setPointerCapture?.(event.pointerId)
+    const startX = event.clientX
+    const startWidth = width
+    resizing = true
+    const move = (e: PointerEvent) => setWidth(startWidth + startX - e.clientX)
+    const stop = () => {
+      resizing = false
+      handle.removeEventListener('pointermove', move)
+      handle.removeEventListener('pointerup', stop)
+      handle.removeEventListener('pointercancel', stop)
+    }
+    handle.addEventListener('pointermove', move)
+    handle.addEventListener('pointerup', stop)
+    handle.addEventListener('pointercancel', stop)
+  }
+
+  function onHandleKeydown(event: KeyboardEvent) {
+    // The left edge moves with the arrow keys: left widens the panel, right narrows it.
+    const step = event.shiftKey ? 64 : 16
+    if (event.key === 'ArrowLeft') setWidth(width + step)
+    else if (event.key === 'ArrowRight') setWidth(width - step)
+    else return
+    event.preventDefault()
+  }
+
   // Focus the question box when the panel opens or the topic changes under it.
   $effect(() => {
     if (open && topic) tick().then(() => composer?.focus({ preventScroll: true }))
@@ -54,6 +113,7 @@
 </script>
 
 <svelte:window
+  onresize={() => (width = clampWidth(width))}
   onkeydown={(e) => {
     // Escape closes the panel while focus is in it.
     if (e.key === 'Escape' && open && panel?.contains(document.activeElement)) close()
@@ -64,11 +124,28 @@
 <aside
   class="chat-panel"
   class:open
+  class:resizing
+  style:--width={`${width}px`}
   id="chat-panel"
   aria-label="Chat"
   inert={!open}
   bind:this={panel}
 >
+  <!-- A focusable separator is an interactive widget (like a slider), which Svelte's check does not know. -->
+  <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
+  <div
+    class="resize-handle"
+    role="separator"
+    aria-label="Resize chat"
+    aria-orientation="vertical"
+    aria-valuenow={width}
+    aria-valuemin={MIN_WIDTH}
+    tabindex="0"
+    title="Drag to resize. Double-click to reset."
+    onpointerdown={startResize}
+    ondblclick={() => setWidth(DEFAULT_WIDTH)}
+    onkeydown={onHandleKeydown}
+  ></div>
   <div class="inner">
     <div class="top">
       <div class="title">
@@ -113,7 +190,7 @@
 <style>
   /* In the layout (not floating), so the PDF narrows and nothing is covered. */
   .chat-panel {
-    --width: 24rem;
+    position: relative;
     flex-shrink: 0;
     width: 0;
     height: 100vh;
@@ -127,6 +204,31 @@
   .chat-panel.open {
     width: var(--width);
     border-left-color: var(--border);
+  }
+
+  /* No animation while dragging, so the edge follows the pointer. */
+  .chat-panel.resizing {
+    transition: none;
+    user-select: none;
+  }
+
+  /* A thin strip on the left edge, highlighted when hovered or dragged. */
+  .resize-handle {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: 6px;
+    z-index: 1;
+    cursor: col-resize;
+    touch-action: none;
+  }
+  .resize-handle:hover,
+  .resize-handle:focus-visible,
+  .resizing .resize-handle {
+    background: var(--accent);
+    opacity: 0.5;
+    outline: none;
   }
 
   /* Fixed width while the outer box animates, so the text does not reflow as it slides. */
@@ -158,9 +260,9 @@
     .chat-panel:not(.open) {
       box-shadow: none;
     }
-    .chat-panel,
+    .chat-panel.open,
     .inner {
-      --width: min(24rem, 100vw);
+      width: min(var(--width), 100vw);
     }
   }
 

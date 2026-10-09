@@ -274,5 +274,33 @@ describe('App', () => {
     await fireEvent.keyDown(document.body, { key: 'Enter' })
     expect(within(panel).getByLabelText('Ask a question')).toHaveFocus()
   })
+
+  it('resizes the chat by dragging or with the arrow keys, and remembers the width', async () => {
+    renderOffline()
+    await pick(pdf('slides.pdf'))
+    await fireEvent.click(await screen.findByRole('button', { name: 'Show chat' }))
+    const panel = screen.getByRole('complementary', { name: 'Chat' })
+    const handle = within(panel).getByRole('separator', { name: 'Resize chat' })
+    expect(handle).toHaveAttribute('aria-valuenow', '384')
+
+    // Dragging the left edge 100px to the left makes the panel 100px wider.
+    await fireEvent.pointerDown(handle, { clientX: 600, button: 0 })
+    await fireEvent.pointerMove(handle, { clientX: 500 })
+    await fireEvent.pointerUp(handle)
+    expect(handle).toHaveAttribute('aria-valuenow', '484')
+    expect(panel.style.getPropertyValue('--width')).toBe('484px')
+
+    await fireEvent.keyDown(handle, { key: 'ArrowRight' })
+    expect(handle).toHaveAttribute('aria-valuenow', '468')
+    expect(localStorage.getItem('doc-digest.chatWidth')).toBe('468')
+
+    // It never gets narrower than the minimum, and double-click resets it.
+    await fireEvent.pointerDown(handle, { clientX: 500, button: 0 })
+    await fireEvent.pointerMove(handle, { clientX: 1000 })
+    await fireEvent.pointerUp(handle)
+    expect(handle).toHaveAttribute('aria-valuenow', '280')
+    await fireEvent.dblClick(handle)
+    expect(handle).toHaveAttribute('aria-valuenow', '384')
+  })
 })
 

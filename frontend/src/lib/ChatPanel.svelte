@@ -2,7 +2,7 @@
   import 'katex/dist/katex.min.css'
   import { tick } from 'svelte'
   import { contextLabel, type PageContext, type Pick } from './context'
-  import { renderMarkdown } from './markdown'
+  import { type CitableDocs, renderMarkdown } from './markdown'
   import { MODELS, savedModel, saveModel } from './models'
   import type { Workspace } from './workspace.svelte'
 
@@ -146,6 +146,22 @@
   /** The topic's PDF names, so answers' citations of them become links. */
   let docNames = $derived(topic?.docIds.map((id) => workspace.docs[id]?.name).filter((n): n is string => !!n) ?? [])
 
+  // The backend calls the uploaded PDFs D1, D2, … in tab order, and the model sometimes cites them that way.
+  let aliases = $derived(
+    Object.fromEntries(
+      (topic?.docIds ?? [])
+        .filter((id) => workspace.indexing[id]?.serverId && workspace.docs[id])
+        .map((id, i) => [`D${i + 1}`, workspace.docs[id].name]),
+    ),
+  )
+
+  /** What an answer's citations can point at; a bare "(p. 12)" means the PDF its question was asked in. */
+  function citable(index: number): CitableDocs {
+    const asked = topic?.chat.findLast((m, i) => i < index && m.role === 'user')?.context?.docName
+    const current = asked && docNames.includes(asked) ? asked : docNames.length === 1 ? docNames[0] : undefined
+    return { names: docNames, aliases, current }
+  }
+
   /** Show the page a citation in an answer points at, in the topic's PDF of that name. */
   function onCitationClick(event: MouseEvent) {
     const citation = (event.target as Element).closest<HTMLElement>('a.citation')
@@ -245,7 +261,7 @@
       <!-- Citations are links inside the answers' HTML, so their clicks are handled here. -->
       <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
       <div class="messages" role="log" aria-label={`Chat in ${topic.name}`} bind:this={log} onclick={onCitationClick}>
-        {#each topic.chat as message (message.id)}
+        {#each topic.chat as message, index (message.id)}
           <div class="message {message.role}" class:error={message.status === 'error'}>
             {#if message.context && pointedAt(message.context)}
               <button
@@ -267,7 +283,7 @@
               <span class="thinking">Thinking…</span>
             {:else if message.role === 'assistant'}
               <!-- Answers are Markdown with LaTeX maths; renderMarkdown sanitizes the HTML. -->
-              <div class="text markdown">{@html renderMarkdown(message.text, docNames)}</div>
+              <div class="text markdown">{@html renderMarkdown(message.text, citable(index))}</div>
             {:else}
               <span class="text">{message.text}</span>
             {/if}

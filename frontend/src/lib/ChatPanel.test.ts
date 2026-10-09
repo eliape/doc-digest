@@ -131,13 +131,15 @@ describe('ChatPanel', () => {
   })
 
   it("shows the page an answer cites when its citation is clicked", async () => {
-    const { workspace, topic, onreveal, panel } = setup()
+    const { workspace, topic, context, onreveal, panel } = setup()
     const notes = topic.docIds[0]
-    topic.chat.push({ id: 'q', role: 'user', text: 'Where?' })
-    topic.chat.push({ id: 'a', role: 'assistant', text: 'It is defined in (notes.pdf, p. 7).', status: 'done' })
-    const citation = await panel.findByRole('link', { name: /^notes\.pdf,\sp\.\s7$/ })
-    await fireEvent.click(citation)
-    expect(onreveal).toHaveBeenCalledWith({ docId: notes, page: 7 })
+    topic.chat.push({ id: 'q', role: 'user', text: 'Where?', context })
+    topic.chat.push({ id: 'a', role: 'assistant', text: 'It is defined in (notes.pdf, p. 7), see also (p. 8).', status: 'done' })
+    await fireEvent.click(await panel.findByRole('link', { name: /^notes\.pdf,\sp\.\s7$/ }))
+    expect(onreveal).toHaveBeenLastCalledWith({ docId: notes, page: 7 })
+    // A page alone points into the PDF the question was asked in.
+    await fireEvent.click(panel.getByRole('link', { name: /^p\.\s8$/ }))
+    expect(onreveal).toHaveBeenLastCalledWith({ docId: notes, page: 8 })
     expect(workspace.docs[notes]).toBeDefined()
   })
 })

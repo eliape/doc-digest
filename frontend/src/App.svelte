@@ -2,6 +2,8 @@
   import { fetchHealth } from './lib/api'
   import { formatScale, isPdfFile, parsePageInput } from './lib/pages'
   import PdfViewer from './lib/PdfViewer.svelte'
+  import TopicsSidebar from './lib/TopicsSidebar.svelte'
+  import { Workspace } from './lib/workspace.svelte'
 
   let backend = $state<'checking' | 'ok' | 'down'>('checking')
 
@@ -11,19 +13,63 @@
       .catch(() => (backend = 'down'))
   })
 
-  let doc = $state.raw<{ name: string; data: Uint8Array }>()
+  const workspace = new Workspace()
   let error = $state('')
   let dragging = $state(false)
 
-  let viewer = $state<PdfViewer>()
-  let page = $state(1)
-  let pageCount = $state(0)
-  let scale = $state(1)
+  const SIDEBAR_KEY = 'doc-digest.sidebarOpen'
+  let sidebarOpen = $state(readSidebarOpen())
+
+  function readSidebarOpen() {
+    try {
+      return localStorage.getItem(SIDEBAR_KEY) !== 'false'
+    } catch {
+      return true
+    }
+  }
+
+  $effect(() => {
+    try {
+      localStorage.setItem(SIDEBAR_KEY, String(sidebarOpen))
+    } catch {
+      // Storage can be unavailable (private windows); the default is fine.
+    }
+  })
+
+  // Each tab keeps its own page and zoom. Tabs stay mounted once opened, so
+  // switching back to one keeps its scroll position without re-rendering.
+  type View = { page: number; pageCount: number; scale: number }
+  let views = $state<Record<string, View>>({})
+  let mounted = $state<string[]>([])
+  const viewers: Record<string, PdfViewer> = {}
+
+  let doc = $derived(workspace.activeDoc)
+  let view = $derived(doc ? views[doc.id] : undefined)
+
+  $effect(() => {
+    if (doc && !mounted.includes(doc.id)) {
+      views[doc.id] = { page: 1, pageCount: 0, scale: 1 }
+      mounted.push(doc.id)
+    }
+  })
+
+  // Unmount the viewers of closed tabs and deleted topics.
+  $effect(() => {
+    const open = mounted.filter((id) => id in workspace.docs)
+    if (open.length !== mounted.length) {
+      for (const id of mounted) if (!open.includes(id)) delete views[id]
+      mounted = open
+    }
+  })
+
+  // Read at call time: bind:this fills `viewers` after the tab mounts.
+  const viewer = (): PdfViewer | undefined => (doc ? viewers[doc.id] : undefined)
+
   let pageInput = $state('1')
 
-  // Keep the page box in sync while scrolling.
+  // Keep the page box in sync while scrolling and switching tabs.
   $effect(() => {
-    pageInput = String(page)
+    pageInput = String(view?.page ?? 1)
   })
 
   let fileInput: HTMLInputElement
@@ -35,7 +81,7 @@
       return
     }
     error = ''
-    doc = { name: file.name, data: new Uint8Array(await file.arrayBuffer()) }
+    workspace.addDoc(file.name, new Uint8Array(await file.arrayBuffer()))
   }
 
   function onDrop(event: DragEvent) {
@@ -46,34 +92,36 @@
 
   function submitPage(event: SubmitEvent) {
     event.preventDefault()
-    const n = parsePageInput(pageInput, pageCount)
-    if (n === null) pageInput = String(page)
-    else viewer?.goToPage(n)
+    if (!view) return
+    const n = parsePageInput(pageInput, view.pageCount)
+    if (n === null) pageInput = String(view.page)
+    else viewer()?.goToPage(n)
   }
 
   function onKeydown(event: KeyboardEvent) {
-    if (!doc) return
     const mod = event.ctrlKey || event.metaKey
+    if (mod && event.key === 'o') {
+      event.preventDefault()
+      fileInput.click()
+    }
+    if (!doc) return
     // Zoom the PDF rather than the whole page, like browser PDF viewers do.
     if (mod && (event.key === '+' || event.key === '=')) {
       event.preventDefault()
-      viewer?.zoomIn()
+      viewer()?.zoomIn()
     } else if (mod && event.key === '-') {
       event.preventDefault()
-      viewer?.zoomOut()
+      viewer()?.zoomOut()
     } else if (mod && event.key === '0') {
       event.preventDefault()
-      viewer?.setZoom('page-width')
-    } else if (mod && event.key === 'o') {
-      event.preventDefault()
-      fileInput.click()
+      viewer()?.setZoom('page-width')
     }
   }
 
   function onZoomSelect(event: Event) {
     const select = event.currentTarget as HTMLSelectElement
     const value = select.value
-    viewer?.setZoom(value === 'page-width' || value === 'page-fit' ? value : Number(value))
+    viewer()?.setZoom(value === 'page-width' || value === 'page-fit' ? value : Number(value))
     // Go back to showing the current zoom percentage.
     select.value = ''
   }
@@ -94,6 +142,14 @@
   ondrop={onDrop}
 >
   <header class="toolbar">
+    <button
+      type="button"
+      class="sidebar-toggle"
+      aria-label={sidebarOpen ? 'Hide topics' : 'Show topics'}
+      aria-expanded={sidebarOpen}
+      aria-controls={sidebarOpen ? 'topics-sidebar' : undefined}
+      onclick={() => (sidebarOpen = !sidebarOpen)}>☰</button
+    >
     <h1>doc-digest</h1>
     <button type="button" onclick={() => fileInput.click()}>Open PDF</button>
     <input
@@ -108,12 +164,13 @@
       }}
     />
 
-    {#if doc}
-      <span class="filename" title={doc.name}>{doc.name}</span>
-
+    {#if doc && view}
       <nav class="group" aria-label="Pages">
-        <button type="button" aria-label="Previous page" disabled={page <= 1} onclick={() => viewer?.previousPage()}
-          >‹</button
+        <button
+          type="button"
+          aria-label="Previous page"
+          disabled={view.page <= 1}
+          onclick={() => viewer()?.previousPage()}>‹</button
         >
         <form onsubmit={submitPage}>
           <input
@@ -121,22 +178,22 @@
             aria-label="Page number"
             inputmode="numeric"
             bind:value={pageInput}
-            onblur={() => (pageInput = String(page))}
+            onblur={() => (pageInput = String(view?.page ?? 1))}
           />
         </form>
-        <span>of {pageCount}</span>
+        <span>of {view.pageCount}</span>
         <button
           type="button"
           aria-label="Next page"
-          disabled={page >= pageCount}
-          onclick={() => viewer?.nextPage()}>›</button
+          disabled={view.page >= view.pageCount}
+          onclick={() => viewer()?.nextPage()}>›</button
         >
       </nav>
 
       <div class="group" role="group" aria-label="Zoom">
-        <button type="button" aria-label="Zoom out" onclick={() => viewer?.zoomOut()}>−</button>
+        <button type="button" aria-label="Zoom out" onclick={() => viewer()?.zoomOut()}>−</button>
         <select aria-label="Zoom level" onchange={onZoomSelect} value="">
-          <option value="" disabled hidden>{formatScale(scale)}</option>
+          <option value="" disabled hidden>{formatScale(view.scale)}</option>
           <option value="page-width">Fit width</option>
           <option value="page-fit">Fit page</option>
           <option value="0.5">50%</option>
@@ -144,7 +201,7 @@
           <option value="1.5">150%</option>
           <option value="2">200%</option>
         </select>
-        <button type="button" aria-label="Zoom in" onclick={() => viewer?.zoomIn()}>+</button>
+        <button type="button" aria-label="Zoom in" onclick={() => viewer()?.zoomIn()}>+</button>
       </div>
     {/if}
 
@@ -158,32 +215,77 @@
     <p class="error" role="alert">{error}</p>
   {/if}
 
-  <main class="stage">
-    {#if doc}
-      {#key doc}
-        <PdfViewer
-          bind:this={viewer}
-          data={doc.data}
-          bind:page
-          bind:pageCount
-          bind:scale
-          onerror={() => {
-            error = `Could not open ${doc?.name}. Is it a valid PDF?`
-            doc = undefined
-          }}
-        />
-      {/key}
-    {:else}
-      <div class="empty">
-        <p>Open a PDF to start reading.</p>
-        <button type="button" onclick={() => fileInput.click()}>Choose a file</button>
-        <p class="hint">or drop one anywhere in this window</p>
-      </div>
+  <div class="body">
+    {#if sidebarOpen}
+      <TopicsSidebar {workspace} />
     {/if}
-    {#if dragging}
-      <div class="drop-overlay">Drop to open</div>
-    {/if}
-  </main>
+
+    <div class="main">
+      {#if workspace.activeTopic && workspace.activeTopic.docIds.length > 0}
+        <div class="tabs" role="tablist" aria-label={`PDFs in ${workspace.activeTopic.name}`}>
+          {#each workspace.activeTopic.docIds as id (id)}
+            {@const tab = workspace.docs[id]}
+            <div class="tab" class:active={id === doc?.id}>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={id === doc?.id}
+                title={tab.name}
+                onclick={() => workspace.selectDoc(id)}>{tab.name}</button
+              >
+              <button type="button" class="close" aria-label={`Close ${tab.name}`} onclick={() => workspace.closeDoc(id)}
+                >×</button
+              >
+            </div>
+          {/each}
+          <button
+            type="button"
+            class="add-tab"
+            aria-label={`Add a PDF to ${workspace.activeTopic.name}`}
+            onclick={() => fileInput.click()}>+</button
+          >
+        </div>
+      {/if}
+
+      <main class="stage">
+        {#each mounted as id (id)}
+          {@const d = workspace.docs[id]}
+          {#if d && views[id]}
+            <div class="pane" class:active={id === doc?.id} role="tabpanel" aria-label={d.name}>
+              <PdfViewer
+                bind:this={viewers[id]}
+                data={d.data}
+                bind:page={views[id].page}
+                bind:pageCount={views[id].pageCount}
+                bind:scale={views[id].scale}
+                onerror={() => {
+                  error = `Could not open ${d.name}. Is it a valid PDF?`
+                  workspace.closeDoc(id)
+                }}
+              />
+            </div>
+          {/if}
+        {/each}
+
+        {#if !workspace.activeTopic}
+          <div class="empty">
+            <p>Open a PDF to start reading.</p>
+            <button type="button" onclick={() => fileInput.click()}>Choose a file</button>
+            <p class="hint">or drop one anywhere in this window</p>
+          </div>
+        {:else if !doc}
+          <div class="empty">
+            <p>Add a PDF to {workspace.activeTopic.name}.</p>
+            <button type="button" onclick={() => fileInput.click()}>Choose a file</button>
+            <p class="hint">Each PDF in a topic opens as a tab, so you can switch between them.</p>
+          </div>
+        {/if}
+        {#if dragging}
+          <div class="drop-overlay">Drop to open</div>
+        {/if}
+      </main>
+    </div>
+  </div>
 </div>
 
 <style>
@@ -208,12 +310,13 @@
     margin: 0;
   }
 
-  .filename {
-    max-width: 20rem;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    color: var(--muted);
+  .sidebar-toggle {
+    border: none;
+    background: none;
+    color: inherit;
+    font-size: 1.1rem;
+    cursor: pointer;
+    padding: 0.125rem 0.375rem;
   }
 
   .group {
@@ -250,10 +353,87 @@
     color: #82071e;
   }
 
+  .body {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+  }
+
+  .main {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .tabs {
+    display: flex;
+    align-items: stretch;
+    gap: 0.125rem;
+    padding: 0.25rem 0.5rem 0;
+    border-bottom: 1px solid var(--border);
+    background: var(--sidebar-bg);
+    overflow-x: auto;
+  }
+
+  .tab {
+    display: flex;
+    align-items: center;
+    max-width: 14rem;
+    border: 1px solid transparent;
+    border-bottom: none;
+    border-radius: 0.375rem 0.375rem 0 0;
+  }
+  .tab.active {
+    background: var(--surface);
+    border-color: var(--border);
+    margin-bottom: -1px;
+  }
+
+  .tab button,
+  .add-tab {
+    border: none;
+    background: none;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+  }
+
+  .tab [role='tab'] {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    padding: 0.25rem 0.25rem 0.25rem 0.625rem;
+    color: var(--muted);
+  }
+  .tab.active [role='tab'] {
+    color: inherit;
+  }
+
+  .tab .close {
+    color: var(--muted);
+    padding: 0.25rem 0.5rem;
+  }
+
+  .add-tab {
+    padding: 0.25rem 0.625rem;
+    color: var(--muted);
+  }
+
   .stage {
     position: relative;
     flex: 1;
     min-height: 0;
+  }
+
+  /* Inactive tabs stay laid out (so they keep their scroll position) but hidden. */
+  .pane {
+    position: absolute;
+    inset: 0;
+    visibility: hidden;
+  }
+  .pane.active {
+    visibility: visible;
   }
 
   .empty {

@@ -139,7 +139,10 @@ async def test_answers_after_looking_things_up(topic, tmp_path) -> None:
     last = client.requests[-1]["messages"]
     assert [m["role"] for m in last] == ["user", "assistant", "user", "assistant", "user"]
     assert last[-1]["content"][0]["type"] == "tool_result"
-    assert "D2: book.pdf" in client.requests[0]["system"][1]["text"]
+    # The topic map comes with the question, after the cached history, not in the system prompt.
+    first_question = client.requests[0]["messages"][0]["content"]
+    assert "D2: book.pdf" in first_question[0]["text"]
+    assert "D2: book.pdf" not in str(client.requests[0]["system"])
     assert usage.summary()["answer"]["calls"] == 3
 
 

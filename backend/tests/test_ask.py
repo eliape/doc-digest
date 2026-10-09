@@ -64,6 +64,17 @@ def test_the_history_before_the_newest_question_is_cached() -> None:
     assert marked == ["second answer"]
 
 
+def test_long_page_text_is_cut() -> None:
+    page = {"page": 12, "text": "x" * 5000}
+    request = AskRequest(
+        topic="T", messages=[Turn(role="user", text="?", context=context(page_texts=[page]))]
+    )
+    texts = [b["text"] for b in build_messages(request)[0]["content"]]
+    page_text = next(t for t in texts if t.startswith("Text the PDF has on"))
+    assert page_text.endswith("x …")
+    assert len(page_text) < 3100
+
+
 def test_a_question_without_context_is_sent_as_typed() -> None:
     request = AskRequest(topic="T", messages=[Turn(role="user", text="hi")])
     assert build_messages(request) == [

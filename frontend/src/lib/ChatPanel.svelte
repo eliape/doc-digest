@@ -29,6 +29,11 @@
     tick().then(() => log?.lastElementChild?.scrollIntoView?.({ block: 'end' }))
   })
 
+  /** Put the cursor in the question box. */
+  export function focus() {
+    composer?.focus({ preventScroll: true })
+  }
+
   function close() {
     open = false
     onclose?.()

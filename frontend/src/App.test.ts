@@ -250,5 +250,29 @@ describe('App', () => {
     expect(panel.getByRole('log')).toHaveTextContent('Compare the two')
     expect(panel.getByLabelText('Ask a question')).toHaveValue('half typed')
   })
+
+  it('opens the chat with Enter, unless Enter is meant for a button or a text box', async () => {
+    renderOffline()
+    await fireEvent.keyDown(document.body, { key: 'Enter' })
+    const panel = screen.getByRole('complementary', { name: 'Chat' }) as HTMLElement & { inert: boolean }
+    // No topic yet, so there is no chat to open.
+    expect(panel.inert).toBe(true)
+
+    await pick(pdf('slides.pdf'))
+    await screen.findByRole('tab', { name: 'slides.pdf' })
+    await fireEvent.keyDown(screen.getByLabelText('Page number'), { key: 'Enter' })
+    await fireEvent.keyDown(screen.getByRole('button', { name: 'Show chat' }), { key: 'Enter' })
+    expect(panel.inert).toBe(true)
+
+    await fireEvent.keyDown(screen.getByRole('tabpanel', { name: 'slides.pdf' }), { key: 'Enter' })
+    expect(panel.inert).toBe(false)
+    expect(within(panel).getByLabelText('Ask a question')).toHaveFocus()
+
+    // With the panel already open, Enter brings the cursor back to the question box.
+    screen.getByRole('tabpanel', { name: 'slides.pdf' }).focus()
+    ;(document.activeElement as HTMLElement).blur()
+    await fireEvent.keyDown(document.body, { key: 'Enter' })
+    expect(within(panel).getByLabelText('Ask a question')).toHaveFocus()
+  })
 })
 

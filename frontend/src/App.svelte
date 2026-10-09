@@ -36,6 +36,13 @@
   $effect(() => saveFlag(CHAT_KEY, chatOpen))
 
   let chatToggle = $state<HTMLButtonElement>()
+  let chatPanel = $state<ChatPanel>()
+
+  /** Whether a key press belongs to the focused element: typing, or pressing a button or link. */
+  function keyIsForTarget(target: EventTarget | null) {
+    if (!(target instanceof HTMLElement)) return false
+    return target.isContentEditable || !!target.closest('input, textarea, select, button, a[href], [role=button], [role=tab]')
+  }
 
   // Tabs stay mounted once opened, so switching back to one keeps its page,
   // zoom and scroll position without re-rendering.
@@ -96,6 +103,15 @@
     if (mod && event.key === 'o') {
       event.preventDefault()
       fileInput.click()
+    }
+    // Enter opens the chat, ready to type, unless it is meant for whatever has focus.
+    if (event.key === 'Enter' && !mod && !event.shiftKey && !event.altKey && !event.isComposing) {
+      if (workspace.activeTopic && !keyIsForTarget(event.target)) {
+        event.preventDefault()
+        chatOpen = true
+        chatPanel?.focus()
+      }
+      return
     }
     if (!doc) return
     // Zoom the PDF rather than the whole page, like browser PDF viewers do.
@@ -231,7 +247,7 @@
     </main>
   </div>
 
-  <ChatPanel {workspace} bind:open={chatOpen} onclose={() => chatToggle?.focus()} />
+  <ChatPanel bind:this={chatPanel} {workspace} bind:open={chatOpen} onclose={() => chatToggle?.focus()} />
 </div>
 
 <style>

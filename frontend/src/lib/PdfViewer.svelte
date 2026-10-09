@@ -17,6 +17,11 @@
     scale?: number
     /** The spot attached to the chat, marked on its page. */
     marker?: Pick
+    /**
+     * Pixels on the right the chat will take when it opens. Fitting leaves them free, so opening
+     * the chat does not resize the page.
+     */
+    reserve?: number
     /** Called when the reader clicks a spot on a page or selects text, to ask about it. */
     onpick?: (pick: Pick) => void
     /** Called when the reader clicks the marker, to take it off the chat. */
@@ -30,6 +35,7 @@
     pageCount = $bindable(0),
     scale = $bindable(1),
     marker,
+    reserve = 0,
     onpick,
     onmarkerclick,
     onerror,
@@ -48,7 +54,7 @@
       const pdfViewer = new v.PDFViewer({ container, eventBus, linkService })
       linkService.setViewer(pdfViewer)
       // Fit new documents to the window width, like most PDF readers.
-      eventBus.on('pagesinit', () => (pdfViewer.currentScaleValue = 'page-width'))
+      eventBus.on('pagesinit', () => fitWidth(pdfViewer))
       eventBus.on('pagechanging', (e: { pageNumber: number }) => (page = e.pageNumber))
       eventBus.on('scalechanging', (e: { scale: number }) => (scale = e.scale))
       // PDF.js clears its page boxes when it re-renders them (on zoom, or when
@@ -62,6 +68,16 @@
       viewer = undefined
     }
   })
+
+  // PDF.js leaves 40px beside a page that is fitted to the width.
+  const FIT_MARGIN = 40
+
+  /** Fit the page width to the viewer minus `reserve`, so the chat can open beside it later. */
+  function fitWidth(pdfViewer: PDFViewer) {
+    pdfViewer.currentScaleValue = 'page-width'
+    const free = container.clientWidth - reserve - FIT_MARGIN
+    if (reserve > 0 && free > 100) pdfViewer.currentScale = (pdfViewer.currentScale * free) / (container.clientWidth - FIT_MARGIN)
+  }
 
   // PDF.js rounds each zoom step to whole percents, which would swallow the tiny
   // steps a pinch sends. So keep the exact target scale while a gesture lasts.
@@ -78,25 +94,6 @@
 
   $effect(() => attachZoomGestures(container, zoomBy))
 
-  // When the viewer changes size (the chat panel opening, the window resizing),
-  // "Fit width" and "Fit page" should still fit. Once per frame is enough.
-  $effect(() => {
-    if (!viewer || typeof ResizeObserver === 'undefined') return
-    const v = viewer
-    let frame = 0
-    const observer = new ResizeObserver(() => {
-      cancelAnimationFrame(frame)
-      frame = requestAnimationFrame(() => {
-        const preset = v.currentScaleValue
-        if (preset === 'page-width' || preset === 'page-fit' || preset === 'auto') v.currentScaleValue = preset
-      })
-    })
-    observer.observe(container)
-    return () => {
-      observer.disconnect()
-      cancelAnimationFrame(frame)
-    }
-  })
   $effect(() => () => clearTimeout(targetTimer))
 
   // A press and release in the same place on a page is a click, which picks the
@@ -246,7 +243,9 @@
   }
   /** Set zoom to a number (1 = 100%) or a PDF.js preset like 'page-width' or 'page-fit'. */
   export function setZoom(value: number | 'page-width' | 'page-fit' | 'auto') {
-    if (viewer) viewer.currentScaleValue = String(value)
+    if (!viewer) return
+    if (value === 'page-width') fitWidth(viewer)
+    else viewer.currentScaleValue = String(value)
   }
 </script>
 

@@ -1,6 +1,7 @@
 <script lang="ts">
   import 'katex/dist/katex.min.css'
   import { tick } from 'svelte'
+  import { clampWidth, DEFAULT_WIDTH, MIN_WIDTH, readWidth, WIDTH_KEY } from './chatWidth'
   import { contextLabel, type PageContext, type Pick } from './context'
   import { type CitableDocs, renderMarkdown } from './markdown'
   import { MODELS, savedModel, saveModel } from './models'
@@ -26,25 +27,8 @@
   let panel = $state<HTMLElement>()
 
   // The panel's width in pixels. Drag its left edge to change it; it is remembered across reloads.
-  const WIDTH_KEY = 'doc-digest.chatWidth'
-  const DEFAULT_WIDTH = 384
-  const MIN_WIDTH = 280
   let width = $state(clampWidth(readWidth()))
   let resizing = $state(false)
-
-  /** Keep the panel between a usable minimum and leaving room for the PDF. */
-  function clampWidth(px: number) {
-    const max = Math.max(MIN_WIDTH, Math.min(window.innerWidth * 0.7, window.innerWidth - 320))
-    return Math.round(Math.min(max, Math.max(MIN_WIDTH, px)))
-  }
-
-  function readWidth() {
-    try {
-      return Number(localStorage.getItem(WIDTH_KEY)) || DEFAULT_WIDTH
-    } catch {
-      return DEFAULT_WIDTH
-    }
-  }
 
   function setWidth(px: number) {
     width = clampWidth(px)

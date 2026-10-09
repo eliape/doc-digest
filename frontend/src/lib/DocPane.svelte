@@ -12,12 +12,14 @@
     controlsTarget?: HTMLElement
     /** The spot attached to the chat, if it is in this PDF. */
     marker?: Pick
+    /** Pixels the chat will take beside the PDF when it opens (see PdfViewer). */
+    reserve?: number
     onpick?: (pick: Pick) => void
     onmarkerclick?: () => void
     onerror?: (error: unknown) => void
   }
 
-  let { data, active = true, controlsTarget, marker, onpick, onmarkerclick, onerror }: Props = $props()
+  let { data, active = true, controlsTarget, marker, reserve, onpick, onmarkerclick, onerror }: Props = $props()
 
   // Each tab has its own page and zoom, which its controls show while it is open.
   let viewer = $state<PdfViewer>()
@@ -137,6 +139,7 @@
     bind:pageCount
     bind:scale
     {marker}
+    {reserve}
     {onpick}
     {onmarkerclick}
     {onerror}

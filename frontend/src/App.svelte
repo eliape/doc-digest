@@ -227,7 +227,7 @@
 
     {#if workspace.activeTopic}
       <!-- One row: the tabs scroll sideways when there are many, the controls never shrink. -->
-      <div class="tabrow">
+      <div class="tabrow" class:chat-closed={!chatOpen}>
         <div
           class="tabs"
           role="tablist"
@@ -266,17 +266,26 @@
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
         </button>
         <div class="controls-slot" bind:this={controlsEl}></div>
+        <!-- Fixed in the window's top right corner. The chat panel opens over that corner and
+             shows its close button in the same spot, so this fades out while the chat is open. -->
         <button
           type="button"
-          class="chat-toggle"
-          class:pressed={chatOpen}
+          class="icon-button chat-toggle"
+          class:hidden={chatOpen}
+          inert={chatOpen}
           bind:this={chatToggle}
-          aria-label={chatOpen ? 'Hide chat' : 'Show chat'}
+          aria-label="Show chat"
           aria-expanded={chatOpen}
           aria-controls="chat-panel"
-          title={chatOpen ? 'Hide chat' : `Chat about ${workspace.activeTopic.name}`}
-          onclick={() => (chatOpen = !chatOpen)}>Chat</button
+          title={`Chat about ${workspace.activeTopic.name}`}
+          onclick={() => (chatOpen = !chatOpen)}
         >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path
+              d="M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.4 8.4 0 0 1 3.8-.9h.5a8.5 8.5 0 0 1 8 8z"
+            />
+          </svg>
+        </button>
       </div>
     {/if}
 
@@ -324,11 +333,12 @@
     </main>
   </div>
 
+  <!-- The toggle is inert while the chat is open, so focus can only go back once it is not. -->
   <ChatPanel
     bind:this={chatPanel}
     {workspace}
     bind:open={chatOpen}
-    onclose={() => chatToggle?.focus()}
+    onclose={() => tick().then(() => chatToggle?.focus())}
     onsend={send}
     onreveal={reveal}
   />
@@ -365,6 +375,16 @@
     padding: 0.25rem 0.5rem;
     border-bottom: 1px solid var(--border);
     background: var(--sidebar-bg);
+    transition: padding-right 0.2s ease;
+  }
+  /* Room for the chat icon in the corner. With the chat open, the panel takes that corner. */
+  .tabrow.chat-closed {
+    padding-right: calc(0.5rem + 1.75rem + 0.25rem);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .tabrow {
+      transition: none;
+    }
   }
 
   .tabs {
@@ -468,31 +488,16 @@
     color: inherit;
   }
 
-  /* Framed like the chat's "New chat" button, and tinted with the accent while the chat is open. */
   .chat-toggle {
-    flex-shrink: 0;
-    height: 1.75rem;
-    margin-left: 0.25rem;
-    padding: 0 0.75rem;
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    background: var(--surface);
-    color: inherit;
-    font: inherit;
-    font-size: 0.9rem;
-    cursor: pointer;
+    position: fixed;
+    top: 0.25rem;
+    right: 0.5rem;
+    z-index: 5;
+    transition: opacity 0.15s;
   }
-  .chat-toggle:hover {
-    background: var(--hover);
-  }
-  .chat-toggle.pressed {
-    border-color: var(--accent);
-    background: color-mix(in srgb, var(--accent) 10%, var(--surface));
-    color: var(--accent);
-  }
-  .chat-toggle:focus-visible {
-    outline: 2px solid var(--accent);
-    outline-offset: 1px;
+  .chat-toggle.hidden {
+    opacity: 0;
+    pointer-events: none;
   }
 
   .stage {

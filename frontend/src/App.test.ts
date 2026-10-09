@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from '@testing-library/svelte'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import App from './App.svelte'
 
@@ -133,8 +133,9 @@ describe('App', () => {
     expect(toggle).toHaveAttribute('aria-expanded', 'true')
     await fireEvent.click(toggle)
 
+    // The contents stay while the sidebar slides shut, then go.
+    await waitFor(() => expect(within(sidebar).queryByRole('heading', { name: 'Topics' })).not.toBeInTheDocument())
     expect(within(sidebar).queryByRole('heading', { name: 'doc-digest' })).not.toBeInTheDocument()
-    expect(within(sidebar).queryByRole('heading', { name: 'Topics' })).not.toBeInTheDocument()
     expect(within(sidebar).getByRole('button', { name: 'Show topics' })).toHaveAttribute('aria-expanded', 'false')
     expect(within(sidebar).getByRole('button', { name: 'New topic' })).toBeInTheDocument()
 
@@ -233,8 +234,10 @@ describe('App', () => {
       'Zoom in',
       'Zoom level',
     ])
-    expect(toolbar.getByLabelText('Previous page')).toHaveTextContent('↑')
-    expect(toolbar.getByLabelText('Next page')).toHaveTextContent('↓')
+    // Up arrow for the previous page (the line runs up to its head), down arrow for the next.
+    const arrow = (name: string) => toolbar.getByLabelText(name).querySelector('path')?.getAttribute('d')
+    expect(arrow('Previous page')).toBe('M12 19V5M5 12l7-7 7 7')
+    expect(arrow('Next page')).toBe('M12 5v14M19 12l-7 7-7-7')
   })
 
   it('moves the controls to whichever tab is open', async () => {

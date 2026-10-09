@@ -10,6 +10,25 @@
 
   let { workspace, open = $bindable(true) }: Props = $props()
 
+  // On collapse the contents stay until the sidebar has narrowed, so they slide away with it.
+  const SLIDE_MS = 200
+  let lingering = $state(false)
+  let wasOpen = open
+  $effect(() => {
+    if (open) {
+      wasOpen = true
+      lingering = false
+      return
+    }
+    if (!wasOpen) return
+    wasOpen = false
+    const reduced = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
+    lingering = true
+    const timer = setTimeout(() => (lingering = false), reduced ? 0 : SLIDE_MS)
+    return () => clearTimeout(timer)
+  })
+  const expanded = $derived(open || lingering)
+
   let renamingId = $state<string>()
   let draft = $state('')
   let renameInput = $state<HTMLInputElement>()
@@ -47,9 +66,9 @@
   }
 </script>
 
-<aside class="topics-sidebar" class:collapsed={!open} id="topics-sidebar" aria-label="Topics">
+<aside class="topics-sidebar" class:collapsed={!expanded} class:closed={!open} id="topics-sidebar" aria-label="Topics">
   <div class="top">
-    {#if open}<h1>doc-digest</h1>{/if}
+    {#if expanded}<h1>doc-digest</h1>{/if}
     <button
       type="button"
       class="toggle"
@@ -62,10 +81,10 @@
 
   <button type="button" class="new" aria-label="New topic" title="New topic" onclick={newTopic}>
     <span aria-hidden="true">＋</span>
-    {#if open}<span>New topic</span>{/if}
+    {#if expanded}<span>New topic</span>{/if}
   </button>
 
-  {#if open}
+  {#if expanded}
     <div id="topics-list" class="list">
       <h2>Topics</h2>
 
@@ -145,14 +164,16 @@
     /* Slides like the chat panel. */
     transition:
       width 0.2s ease,
+      background-color 0.2s ease,
+      backdrop-filter 0.2s ease,
       box-shadow 0.2s ease;
   }
   /* Just wide enough for the two buttons. (Not named .sidebar: PDF.js's stylesheet styles that globally.) */
-  .topics-sidebar.collapsed {
+  .topics-sidebar.closed {
     width: var(--sidebar-strip);
     background: var(--sidebar-bg);
-    backdrop-filter: none;
-    box-shadow: none;
+    backdrop-filter: blur(0);
+    box-shadow: 6px 0 28px transparent;
   }
   @media (prefers-reduced-motion: reduce) {
     .topics-sidebar {

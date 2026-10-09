@@ -45,10 +45,18 @@
   let controlsEl = $state<HTMLElement>()
   let tabsEl = $state<HTMLElement>()
 
-  // Keep the open tab in view when there are more tabs than fit.
+  // Keep the open tab in view when there are more tabs than fit, also when the row
+  // narrows (the chat opening, the window shrinking).
   $effect(() => {
-    if (!doc) return
-    tabsEl?.querySelector('[aria-selected="true"]')?.scrollIntoView?.({ inline: 'nearest', block: 'nearest' })
+    if (!doc || !tabsEl) return
+    const el = tabsEl
+    const reveal = () =>
+      el.querySelector('[aria-selected="true"]')?.scrollIntoView?.({ inline: 'nearest', block: 'nearest' })
+    reveal()
+    if (typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(reveal)
+    observer.observe(el)
+    return () => observer.disconnect()
   })
 
   // A mouse wheel only scrolls up and down, so let it scroll the tabs sideways.
@@ -242,18 +250,21 @@
                   >{indexLabel(id)}</span
                 >
               {/if}
-              <button type="button" class="close" aria-label={`Close ${tab.name}`} onclick={() => workspace.closeDoc(id)}
-                >×</button
-              >
+              <button type="button" class="close" aria-label={`Close ${tab.name}`} onclick={() => workspace.closeDoc(id)}>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+              </button>
             </div>
           {/each}
         </div>
         <button
           type="button"
-          class="add-tab"
+          class="chrome-button add-tab"
           aria-label={`Add a PDF to ${workspace.activeTopic.name}`}
-          onclick={() => fileInput.click()}>+</button
+          title="Add a PDF"
+          onclick={() => fileInput.click()}
         >
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+        </button>
         <div class="controls-slot" bind:this={controlsEl}></div>
         <button
           type="button"
@@ -346,17 +357,19 @@
     margin-left: var(--sidebar-strip);
   }
 
+  /* The chrome around the PDF shares the sidebar's and the chat's background, shapes and hover shade. */
   .tabrow {
     display: flex;
-    align-items: flex-end;
-    padding: 0.25rem 0.5rem 0;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.25rem 0.5rem;
     border-bottom: 1px solid var(--border);
     background: var(--sidebar-bg);
   }
 
   .tabs {
     display: flex;
-    align-items: stretch;
+    align-items: center;
     gap: 0.125rem;
     /* Tabs shrink and scroll; the controls beside them keep their size. */
     flex: 0 1 auto;
@@ -368,53 +381,78 @@
   .controls-slot {
     flex-shrink: 0;
     margin-left: auto;
-    align-self: center;
-    margin-bottom: 0.25rem;
   }
 
+  /* A tab is a row like the sidebar's topics: no frame, a shade on hover and the open one. */
   .tab {
     flex-shrink: 0;
     display: flex;
     align-items: center;
     max-width: 14rem;
-    border: 1px solid transparent;
-    border-bottom: none;
-    border-radius: 0.375rem 0.375rem 0 0;
+    height: 1.75rem;
+    border-radius: var(--radius);
+    color: var(--muted);
+    font-size: 0.9rem;
+  }
+  .tab:hover,
+  .tab.active {
+    background: var(--hover);
   }
   .tab.active {
-    background: var(--surface);
-    border-color: var(--border);
-    margin-bottom: -1px;
-  }
-
-  .tab button,
-  .add-tab {
-    border: none;
-    background: none;
     color: inherit;
-    font: inherit;
-    cursor: pointer;
   }
 
   .tab [role='tab'] {
     overflow: hidden;
+    height: 100%;
+    padding: 0 0.25rem 0 0.625rem;
+    border: none;
+    border-radius: var(--radius);
+    background: none;
+    color: inherit;
+    font: inherit;
     text-overflow: ellipsis;
     white-space: nowrap;
-    padding: 0.25rem 0.25rem 0.25rem 0.625rem;
-    color: var(--muted);
+    cursor: pointer;
   }
-  .tab.active [role='tab'] {
-    color: inherit;
+  .tab [role='tab']:focus-visible,
+  .tab .close:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
   }
 
   .tab .close {
-    color: var(--muted);
-    padding: 0.25rem 0.5rem;
+    flex-shrink: 0;
+    display: grid;
+    place-items: center;
+    width: 1.25rem;
+    height: 1.25rem;
+    margin-right: 0.25rem;
+    padding: 0;
+    border: none;
+    border-radius: var(--radius);
+    background: none;
+    color: inherit;
+    cursor: pointer;
+    opacity: 0.6;
+  }
+  .tab .close:hover {
+    background: color-mix(in srgb, currentColor 14%, transparent);
+    opacity: 1;
+  }
+  .tab .close svg {
+    width: 0.75rem;
+    height: 0.75rem;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2.2;
+    stroke-linecap: round;
   }
 
   .index-status {
     flex-shrink: 0;
-    font-size: 0.75rem;
+    margin-right: 0.125rem;
+    font-size: 0.7rem;
     color: var(--muted);
     white-space: nowrap;
   }
@@ -424,20 +462,24 @@
 
   .add-tab {
     flex-shrink: 0;
-    padding: 0.25rem 0.625rem;
     color: var(--muted);
   }
+  .add-tab:hover {
+    color: inherit;
+  }
 
+  /* Framed like the chat's "New chat" button, and tinted with the accent while the chat is open. */
   .chat-toggle {
     flex-shrink: 0;
-    align-self: center;
-    margin: 0 0 0.25rem 0.25rem;
-    padding: 0.125rem 0.625rem;
+    height: 1.75rem;
+    margin-left: 0.25rem;
+    padding: 0 0.75rem;
     border: 1px solid var(--border);
-    border-radius: 0.375rem;
+    border-radius: var(--radius);
     background: var(--surface);
     color: inherit;
     font: inherit;
+    font-size: 0.9rem;
     cursor: pointer;
   }
   .chat-toggle:hover {
@@ -445,7 +487,12 @@
   }
   .chat-toggle.pressed {
     border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 10%, var(--surface));
     color: var(--accent);
+  }
+  .chat-toggle:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
   }
 
   .stage {

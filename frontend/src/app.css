@@ -108,3 +108,51 @@ body {
   stroke-linecap: round;
   stroke-linejoin: round;
 }
+
+/*
+ * A small menu that pops up from a button or a right-click, with the look of the
+ * sidebar's topic menu: a framed box of rows that shade on hover, icons optional.
+ */
+.popup-menu {
+  display: flex;
+  flex-direction: column;
+  min-width: 8rem;
+  padding: 0.25rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: 0 6px 20px rgb(0 0 0 / 0.18);
+  font-size: 0.85rem;
+  font-weight: normal;
+  outline: none;
+}
+.popup-menu > button {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.3rem 0.5rem;
+  border: none;
+  border-radius: var(--radius);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+  outline: none;
+}
+/* Focus moves with the arrow keys, so the focused row is shaded like a hovered one. */
+.popup-menu > button:hover:not([aria-disabled='true']),
+.popup-menu > button:focus {
+  background: var(--hover);
+}
+.popup-menu svg {
+  flex-shrink: 0;
+  width: 0.95rem;
+  height: 0.95rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}

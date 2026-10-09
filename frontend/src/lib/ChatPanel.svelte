@@ -3,8 +3,10 @@
   import { tick } from 'svelte'
   import { clampWidth, DEFAULT_WIDTH, MIN_WIDTH, readWidth, WIDTH_KEY } from './chatWidth'
   import { contextLabel, type PageContext, type Pick } from './context'
+  import Dropdown from './Dropdown.svelte'
   import { type CitableDocs, renderMarkdown } from './markdown'
   import { MODELS, savedModel, saveModel } from './models'
+  import { MODES } from './modes'
   import type { Topic, Workspace } from './workspace.svelte'
 
   type Props = {
@@ -113,9 +115,9 @@
     return several ? `${contextLabel(context)} · ${context.docName}` : contextLabel(context)
   }
 
-  /** What the question box asks for: in a Socratic session, the reader's answers. */
+  /** What the question box asks for: once the model has asked a Socratic question, the reader's answer. */
   function placeholder(t: Topic) {
-    if (t.socratic) return 'Answer, or ask for a hint…'
+    if (t.mode === 'socratic' && t.chat.at(-1)?.mode === 'socratic') return 'Answer, or ask for a hint…'
     return t.context ? `Ask about ${contextLabel(t.context)}…` : 'Ask a question…'
   }
 
@@ -191,8 +193,9 @@
 <svelte:window
   onresize={() => (width = clampWidth(width))}
   onkeydown={(e) => {
-    // Escape takes off the attached spot, or else closes the panel, while focus is in it.
-    if (e.key === 'Escape' && open && panel?.contains(document.activeElement)) {
+    // Escape takes off the attached spot, or else closes the panel, while focus is in it
+    // (unless a menu in it took the Escape to close itself).
+    if (e.key === 'Escape' && !e.defaultPrevented && open && panel?.contains(document.activeElement)) {
       if (topic?.context) workspace.clearContext(topic.id)
       else close()
     }
@@ -253,9 +256,10 @@
       <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
       <div class="messages" role="log" aria-label={`Chat in ${topic.name}`} bind:this={log} onclick={onCitationClick}>
         {#each topic.chat as message, index (message.id)}
+          <!-- Only the model's side of a Socratic session is marked; the reader's messages look as always. -->
           <div
             class="message {message.role}"
-            class:socratic={message.mode === 'socratic'}
+            class:socratic={message.role === 'assistant' && message.mode === 'socratic'}
             class:error={message.status === 'error'}
           >
             {#if message.role === 'user' && message.mode === 'socratic' && !message.text}
@@ -302,27 +306,7 @@
         </p>
       {/if}
 
-      {#if topic.socratic}
-        {@const about = topic.socratic}
-        <div class="session" role="group" aria-label="Socratic session">
-          <span class="session-name">Socratic</span>
-          <button type="button" class="session-spot" title={chipTitle(about)} onclick={() => onreveal?.(about)}
-            >{chipName(about)}</button
-          >
-          <button
-            type="button"
-            class="end"
-            aria-label="End Socratic session"
-            title="End the session: questions get ordinary answers again"
-            onclick={() => {
-              workspace.endSocratic(topic.id)
-              focus()
-            }}>End</button
-          >
-        </div>
-      {/if}
-
-      <form class="composer" onsubmit={send}>
+      <form class="composer" class:socratic={topic.mode === 'socratic'} onsubmit={send}>
         {#if topic.context}
           {@const context = topic.context}
           <div class="attached" aria-label="Attached to your question">
@@ -364,15 +348,24 @@
       </form>
       <!-- Below the box, so it never takes room from the question's lines. -->
       <div class="below">
-        <label class="model" title={MODELS.find((m) => m.id === model)?.hint}>
-          <span class="visually-hidden">Model</span>
-          <select bind:value={model}>
-            {#each MODELS as m (m.id)}
-              <option value={m.id}>{m.name}</option>
-            {/each}
-          </select>
-          <svg class="chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" /></svg>
-        </label>
+        <div class="mode" style:--dropdown-color={topic.mode === 'socratic' ? 'var(--socratic)' : undefined}>
+          <Dropdown
+            label="Mode"
+            value={topic.mode}
+            options={MODES}
+            onchange={(mode) => {
+              workspace.setMode(topic.id, mode)
+              focus()
+            }}
+          />
+        </div>
+        <Dropdown
+          label="Model"
+          value={model}
+          options={MODELS.map((m) => ({ value: m.id, label: m.name, title: m.hint }))}
+          onchange={(id) => (model = id)}
+          align="right"
+        />
       </div>
     {:else}
       <p class="hint">Open a PDF to start a chat about it.</p>
@@ -625,16 +618,16 @@
     border: 1px solid var(--border);
   }
 
-  /* A Socratic session's messages share a coloured edge, so it is clear where it starts and ends. */
+  /* The model's Socratic questions have a coloured edge, matching the question box's shade in that mode. */
   .message.socratic {
     box-shadow: inset 3px 0 0 var(--socratic);
   }
+  /* A session started by a right-click has nothing typed, so its message says what it is. */
   .session-start {
     display: block;
     margin-bottom: 0.375rem;
-    color: var(--socratic);
+    color: var(--muted);
     font-size: 0.8rem;
-    font-weight: 600;
   }
 
   .message.error {
@@ -709,60 +702,6 @@
     max-height: 2.25rem;
   }
 
-  /* Above the question box while a Socratic session is on, with the way out of it. */
-  .session {
-    display: flex;
-    align-items: center;
-    gap: 0.375rem;
-    min-width: 0;
-    font-size: 0.8rem;
-  }
-  .session-name {
-    flex-shrink: 0;
-    color: var(--socratic);
-    font-weight: 600;
-  }
-  .session-name::before {
-    content: '';
-    display: inline-block;
-    width: 0.5rem;
-    height: 0.5rem;
-    margin-right: 0.375rem;
-    border-radius: 50%;
-    background: var(--socratic);
-  }
-  .session-spot {
-    min-width: 0;
-    overflow: hidden;
-    padding: 0.1rem 0.25rem;
-    border: none;
-    border-radius: var(--radius);
-    background: none;
-    color: var(--muted);
-    font: inherit;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    cursor: pointer;
-  }
-  .session-spot:hover {
-    background: var(--hover);
-    color: inherit;
-  }
-  .end {
-    flex-shrink: 0;
-    margin-left: auto;
-    padding: 0.1rem 0.6rem;
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    background: var(--surface);
-    color: inherit;
-    font: inherit;
-    cursor: pointer;
-  }
-  .end:hover {
-    background: var(--hover);
-  }
-
   .attached {
     display: flex;
     align-items: center;
@@ -808,6 +747,14 @@
     border-color: var(--accent);
     box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
   }
+  /* In Socratic mode the box takes that mode's colour, so the mode shows where you type. */
+  .composer.socratic {
+    border-color: color-mix(in srgb, var(--socratic) 45%, var(--border));
+  }
+  .composer.socratic:focus-within {
+    border-color: var(--socratic);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--socratic) 22%, transparent);
+  }
 
   .input {
     position: relative;
@@ -840,51 +787,13 @@
     align-items: center;
   }
 
-  /* A slim row under the box. Negative margin pulls it close, so it reads as part of the box. */
+  /* A slim row under the box: the mode on the left, the model on the right. Negative margin
+     pulls it close, so it reads as part of the box. */
   .below {
     display: flex;
-    justify-content: flex-end;
-    margin-top: -0.25rem;
-  }
-
-  .model {
-    position: relative;
-    display: flex;
     align-items: center;
-    border-radius: 0.375rem;
-    color: var(--muted);
-  }
-  .model:hover,
-  .model:focus-within {
-    background: var(--hover);
-    color: inherit;
-  }
-  .model select {
-    appearance: none;
-    border: none;
-    background: none;
-    color: inherit;
-    font: inherit;
-    font-size: 0.75rem;
-    line-height: 1.2;
-    padding: 0.15rem 1.2rem 0.15rem 0.4rem;
-    cursor: pointer;
-    outline: none;
-  }
-  .model select option {
-    color: initial;
-  }
-  .chevron {
-    position: absolute;
-    right: 0.35rem;
-    width: 0.75rem;
-    height: 0.75rem;
-    pointer-events: none;
-    fill: none;
-    stroke: currentColor;
-    stroke-width: 1.6;
-    stroke-linecap: round;
-    stroke-linejoin: round;
+    justify-content: space-between;
+    margin-top: -0.25rem;
   }
 
   .send {
@@ -921,14 +830,5 @@
     stroke-width: 2.2;
     stroke-linecap: round;
     stroke-linejoin: round;
-  }
-
-  .visually-hidden {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip-path: inset(50%);
-    white-space: nowrap;
   }
 </style>

@@ -5,6 +5,7 @@
   import ContextMenu, { type MenuItem } from './lib/ContextMenu.svelte'
   import DocPane from './lib/DocPane.svelte'
   import type { PageContext, Pick } from './lib/context'
+  import { SOCRATIC_ICON } from './lib/modes'
   import { isPdfFile } from './lib/pages'
   import TopicsSidebar from './lib/TopicsSidebar.svelte'
   import { Workspace } from './lib/workspace.svelte'
@@ -131,8 +132,7 @@
       },
       {
         label: 'Socratic',
-        // A speech bubble with a question mark.
-        icon: 'M21 11.5a8.5 8.5 0 0 1-12.3 7.6L3 21l1.9-5.7A8.5 8.5 0 1 1 21 11.5zM10 9.5a2 2 0 1 1 2.8 1.8c-.5.3-.8.7-.8 1.2v.3M12 15.5h.01',
+        icon: SOCRATIC_ICON,
         hint: busy ? 'Wait for the answer to finish' : 'Work it out by answering questions',
         disabled: busy,
         onselect: () => startSocratic(docId, pick),

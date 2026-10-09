@@ -299,7 +299,7 @@ describe('Workspace.ask', () => {
     }
     await ws.startSocratic(topic.id, about, async () => context(doc.id, 5), stream)
 
-    expect(topic.socratic?.page).toBe(5)
+    expect(topic.mode).toBe('socratic')
     expect(topic.chat.map((m) => [m.role, m.text, m.mode])).toEqual([
       ['user', '', 'socratic'],
       ['assistant', 'What does dx stand for?', 'socratic'],
@@ -311,14 +311,14 @@ describe('Workspace.ask', () => {
     expect(topic.draft).toBe('my own question')
     expect(topic.context?.page).toBe(2)
 
-    // The reader's replies belong to the session until it is ended.
+    // The reader's replies are Socratic turns until the mode is switched back.
     topic.draft = 'A small change in x?'
     await ws.ask(topic.id, undefined, stream)
     expect(requests[1].messages.at(-1)).toMatchObject({ role: 'user', text: 'A small change in x?', mode: 'socratic' })
     expect(topic.chat.at(-1)?.mode).toBe('socratic')
 
-    ws.endSocratic(topic.id)
-    expect(topic.socratic).toBeUndefined()
+    ws.setMode(topic.id, 'normal')
+    expect(topic.mode).toBe('normal')
     topic.draft = 'Thanks. What is a derivative?'
     await ws.ask(topic.id, undefined, stream)
     expect(requests[2].messages.at(-1)).not.toHaveProperty('mode')
@@ -327,15 +327,37 @@ describe('Workspace.ask', () => {
     expect(requests[2].messages.map((m) => m.mode)).toEqual(['socratic', undefined, 'socratic', undefined, undefined])
   })
 
-  it('ends a Socratic session with New chat, and does not start one while an answer is arriving', async () => {
+  it('asks typed questions Socratically once the mode is picked, until a spot is clicked', async () => {
+    const ws = new Workspace()
+    const doc = ws.addDoc('notes.pdf', bytes(1))
+    const topic = ws.activeTopic!
+    expect(topic.mode).toBe('normal')
+    const modes: (string | undefined)[] = []
+    const stream = async function* (request: AskRequest) {
+      modes.push(request.messages.at(-1)?.mode)
+    }
+    ws.setMode(topic.id, 'socratic')
+    topic.draft = 'Why is the derivative a limit?'
+    await ws.ask(topic.id, undefined, stream)
+    expect(modes).toEqual(['socratic'])
+
+    // A new chat keeps the mode, like the model.
+    ws.newChat(topic.id)
+    expect(topic.mode).toBe('socratic')
+
+    // Clicking a spot is for asking about it, so it switches back to normal answers.
+    ws.attachContext(topic.id, context(doc.id, 3))
+    expect(topic.mode).toBe('normal')
+    topic.draft = 'What is this?'
+    await ws.ask(topic.id, undefined, stream)
+    expect(modes).toEqual(['socratic', undefined])
+  })
+
+  it('does not start a Socratic session while an answer is arriving', async () => {
     const ws = new Workspace()
     const doc = ws.addDoc('notes.pdf', bytes(1))
     const topic = ws.activeTopic!
     const about = { docId: doc.id, docName: 'notes.pdf', page: 5, point: { x: 0.3, y: 0.6 }, pageTexts: [] }
-    await ws.startSocratic(topic.id, about, undefined, async function* () {})
-    ws.newChat(topic.id)
-    expect(topic.socratic).toBeUndefined()
-
     topic.draft = 'first'
     let finish!: () => void
     const pending = ws.ask(topic.id, undefined, async function* () {
@@ -343,7 +365,7 @@ describe('Workspace.ask', () => {
     })
     await Promise.resolve()
     await ws.startSocratic(topic.id, about, undefined, async function* () {})
-    expect(topic.socratic).toBeUndefined()
+    expect(topic.mode).toBe('normal')
     expect(topic.chat).toHaveLength(2)
     finish()
     await pending

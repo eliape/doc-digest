@@ -472,8 +472,14 @@ describe('App', () => {
     const panel = screen.getByRole('complementary', { name: 'Chat' }) as HTMLElement & { inert: boolean }
     expect(panel.inert).toBe(false)
     expect(within(panel).getByRole('log')).toHaveTextContent('Socratic session')
-    expect(within(panel).getByLabelText('Socratic session')).toHaveTextContent('p. 3')
+    expect(within(panel).getByRole('button', { name: 'Mode: Socratic' })).toBeInTheDocument()
     expect(within(panel).getByLabelText('Ask a question')).toHaveValue('')
+
+    // The old left click attaches the spot and switches back to normal answers.
+    page.querySelector('.canvasWrapper')?.remove()
+    await fireEvent.pointerDown(page, { button: 0, clientX: 100, clientY: 300, isPrimary: true })
+    await fireEvent.pointerUp(page, { button: 0, clientX: 100, clientY: 300 })
+    expect(within(panel).getByRole('button', { name: 'Mode: Normal' })).toBeInTheDocument()
   })
 
   it('swaps the chat icon for the close button in the same corner, with just the topic name as title', async () => {

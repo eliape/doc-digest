@@ -178,7 +178,20 @@
         <h2>Chat</h2>
         {#if topic}<span class="topic" title={topic.name}>{topic.name}</span>{/if}
       </div>
-      <button type="button" class="close" aria-label="Close chat" title="Close chat (Esc)" onclick={close}>×</button>
+      <div class="actions">
+        <button
+          type="button"
+          class="new-chat"
+          title="Clear this topic's chat and start over"
+          disabled={!topic || topic.chat.length === 0}
+          onclick={() => {
+            if (!topic) return
+            workspace.newChat(topic.id)
+            focus()
+          }}>New chat</button
+        >
+        <button type="button" class="close" aria-label="Close chat" title="Close chat (Esc)" onclick={close}>×</button>
+      </div>
     </div>
 
     {#if topic}
@@ -351,6 +364,31 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .actions {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    flex-shrink: 0;
+  }
+
+  .new-chat {
+    border: 1px solid var(--border);
+    border-radius: 0.375rem;
+    background: var(--surface);
+    color: inherit;
+    font: inherit;
+    font-size: 0.85rem;
+    padding: 0.125rem 0.5rem;
+    cursor: pointer;
+  }
+  .new-chat:hover:not(:disabled) {
+    background: var(--hover);
+  }
+  .new-chat:disabled {
+    color: var(--muted);
+    cursor: default;
   }
 
   .close {

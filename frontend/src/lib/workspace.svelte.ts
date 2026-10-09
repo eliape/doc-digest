@@ -45,6 +45,8 @@ export class Workspace {
   // Raw: the PDF bytes should not be wrapped in reactive proxies.
   docs = $state.raw<Record<string, Doc>>({})
   activeTopicId = $state<string>()
+  // Stops each topic's answer that is still arriving. Not state: nothing renders from it.
+  private answering = new Map<string, AbortController>()
 
   activeTopic = $derived(this.topics.find((t) => t.id === this.activeTopicId))
   activeDoc = $derived(this.activeTopic?.activeDocId ? this.docs[this.activeTopic.activeDocId] : undefined)
@@ -109,6 +111,18 @@ export class Workspace {
     if (topic) topic.context = undefined
   }
 
+  /**
+   * Start the topic's chat over: forget its questions and answers and stop an answer that is
+   * still arriving. What belongs to the next question (the draft and the attached spot) stays,
+   * and so do the tabs.
+   */
+  newChat(topicId: string) {
+    const topic = this.topics.find((t) => t.id === topicId)
+    if (!topic) return
+    this.answering.get(topicId)?.abort()
+    topic.chat = []
+  }
+
   /** Whether a topic's latest answer is still arriving. */
   isAnswering(topicId: string): boolean {
     return this.topics.find((t) => t.id === topicId)?.chat.at(-1)?.status === 'streaming'
@@ -134,13 +148,20 @@ export class Workspace {
     const answer = topic.chat[topic.chat.length - 1]
     topic.draft = ''
     topic.context = undefined
+    const controller = new AbortController()
+    this.answering.set(topicId, controller)
     try {
       question.context ??= await fallback?.().catch(() => undefined)
-      for await (const piece of stream(askRequest(topic))) answer.text += piece
+      for await (const piece of stream(askRequest(topic), controller.signal)) {
+        if (controller.signal.aborted) break
+        answer.text += piece
+      }
       answer.status = 'done'
     } catch (error) {
       answer.status = 'error'
       answer.text = error instanceof Error ? error.message : String(error)
+    } finally {
+      if (this.answering.get(topicId) === controller) this.answering.delete(topicId)
     }
   }
 

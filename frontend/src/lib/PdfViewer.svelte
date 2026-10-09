@@ -63,6 +63,26 @@
   }
 
   $effect(() => attachZoomGestures(container, zoomBy))
+
+  // When the viewer changes size (the chat panel opening, the window resizing),
+  // "Fit width" and "Fit page" should still fit. Once per frame is enough.
+  $effect(() => {
+    if (!viewer || typeof ResizeObserver === 'undefined') return
+    const v = viewer
+    let frame = 0
+    const observer = new ResizeObserver(() => {
+      cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(() => {
+        const preset = v.currentScaleValue
+        if (preset === 'page-width' || preset === 'page-fit' || preset === 'auto') v.currentScaleValue = preset
+      })
+    })
+    observer.observe(container)
+    return () => {
+      observer.disconnect()
+      cancelAnimationFrame(frame)
+    }
+  })
   $effect(() => () => clearTimeout(targetTimer))
 
   let opened: Uint8Array | undefined

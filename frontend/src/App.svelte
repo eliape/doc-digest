@@ -1,4 +1,5 @@
 <script lang="ts">
+  import ChatPanel from './lib/ChatPanel.svelte'
   import DocPane from './lib/DocPane.svelte'
   import { isPdfFile } from './lib/pages'
   import TopicsSidebar from './lib/TopicsSidebar.svelte'
@@ -8,24 +9,33 @@
   let error = $state('')
   let dragging = $state(false)
 
+  // Whether the sidebar and the chat panel are showing is remembered across reloads.
   const SIDEBAR_KEY = 'doc-digest.sidebarOpen'
-  let sidebarOpen = $state(readSidebarOpen())
+  const CHAT_KEY = 'doc-digest.chatOpen'
+  let sidebarOpen = $state(readFlag(SIDEBAR_KEY, true))
+  let chatOpen = $state(readFlag(CHAT_KEY, false))
 
-  function readSidebarOpen() {
+  function readFlag(key: string, fallback: boolean) {
     try {
-      return localStorage.getItem(SIDEBAR_KEY) !== 'false'
+      const value = localStorage.getItem(key)
+      return value === null ? fallback : value === 'true'
     } catch {
-      return true
+      return fallback
     }
   }
 
-  $effect(() => {
+  function saveFlag(key: string, value: boolean) {
     try {
-      localStorage.setItem(SIDEBAR_KEY, String(sidebarOpen))
+      localStorage.setItem(key, String(value))
     } catch {
       // Storage can be unavailable (private windows); the default is fine.
     }
-  })
+  }
+
+  $effect(() => saveFlag(SIDEBAR_KEY, sidebarOpen))
+  $effect(() => saveFlag(CHAT_KEY, chatOpen))
+
+  let chatToggle = $state<HTMLButtonElement>()
 
   // Tabs stay mounted once opened, so switching back to one keeps its page,
   // zoom and scroll position without re-rendering.
@@ -136,7 +146,7 @@
       <p class="error" role="alert">{error}</p>
     {/if}
 
-    {#if workspace.activeTopic && workspace.activeTopic.docIds.length > 0}
+    {#if workspace.activeTopic}
       <!-- One row: the tabs scroll sideways when there are many, the controls never shrink. -->
       <div class="tabrow">
         <div
@@ -169,6 +179,17 @@
           onclick={() => fileInput.click()}>+</button
         >
         <div class="controls-slot" bind:this={controlsEl}></div>
+        <button
+          type="button"
+          class="chat-toggle"
+          class:pressed={chatOpen}
+          bind:this={chatToggle}
+          aria-label={chatOpen ? 'Hide chat' : 'Show chat'}
+          aria-expanded={chatOpen}
+          aria-controls="chat-panel"
+          title={chatOpen ? 'Hide chat' : `Chat about ${workspace.activeTopic.name}`}
+          onclick={() => (chatOpen = !chatOpen)}>Chat</button
+        >
       </div>
     {/if}
 
@@ -209,6 +230,8 @@
       {/if}
     </main>
   </div>
+
+  <ChatPanel {workspace} bind:open={chatOpen} onclose={() => chatToggle?.focus()} />
 </div>
 
 <style>
@@ -301,6 +324,26 @@
     flex-shrink: 0;
     padding: 0.25rem 0.625rem;
     color: var(--muted);
+  }
+
+  .chat-toggle {
+    flex-shrink: 0;
+    align-self: center;
+    margin: 0 0 0.25rem 0.25rem;
+    padding: 0.125rem 0.625rem;
+    border: 1px solid var(--border);
+    border-radius: 0.375rem;
+    background: var(--surface);
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+  }
+  .chat-toggle:hover {
+    background: var(--hover);
+  }
+  .chat-toggle.pressed {
+    border-color: var(--accent);
+    color: var(--accent);
   }
 
   .stage {

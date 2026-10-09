@@ -101,4 +101,20 @@ describe('Workspace', () => {
     ws.deleteTopic(first.id)
     expect(ws.activeTopic).toBeUndefined()
   })
+
+  it('keeps one chat per topic, shared by its tabs', () => {
+    const ws = new Workspace()
+    ws.addDoc('slides.pdf', bytes(1))
+    const first = ws.activeTopic!
+    first.draft = 'What is a p-value?'
+    ws.sendMessage(first.id, first.draft)
+    ws.addDoc('book.pdf', bytes(2))
+    expect(ws.activeTopic?.chat.map((m) => [m.role, m.text])).toEqual([['user', 'What is a p-value?']])
+    expect(first.draft).toBe('')
+
+    const second = ws.createTopic('Second')
+    expect(second.chat).toEqual([])
+    ws.sendMessage(second.id, '   ')
+    expect(ws.activeTopic?.chat).toEqual([])
+  })
 })

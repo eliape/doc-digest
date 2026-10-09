@@ -194,4 +194,61 @@ describe('App', () => {
     expect(await screen.findAllByRole('toolbar', { name: 'PDF controls' })).toHaveLength(1)
     expect(within(screen.getByRole('tabpanel', { name: 'a.pdf' })).queryByRole('toolbar')).not.toBeInTheDocument()
   })
+
+  it('opens the chat from the tab row and closes it without clearing it', async () => {
+    renderOffline()
+    expect(screen.queryByRole('button', { name: 'Show chat' })).not.toBeInTheDocument()
+    await pick(pdf('slides.pdf'))
+    await screen.findByRole('tab', { name: 'slides.pdf' })
+
+    const toggle = screen.getByRole('button', { name: 'Show chat' })
+    expect(screen.getByRole('tablist').parentElement).toBe(toggle.parentElement)
+    const panel = screen.getByRole('complementary', { name: 'Chat' }) as HTMLElement & { inert: boolean }
+    expect(panel.inert).toBe(true)
+    await fireEvent.click(toggle)
+    expect(panel.inert).toBe(false)
+    expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    expect(localStorage.getItem('doc-digest.chatOpen')).toBe('true')
+
+    const box = within(panel).getByLabelText('Ask a question')
+    await fireEvent.input(box, { target: { value: 'What is on slide 3?' } })
+    await fireEvent.keyDown(box, { key: 'Enter' })
+    expect(within(panel).getByRole('log')).toHaveTextContent('What is on slide 3?')
+    expect(box).toHaveValue('')
+
+    await fireEvent.click(within(panel).getByRole('button', { name: 'Close chat' }))
+    expect(panel.inert).toBe(true)
+    expect(screen.getByRole('button', { name: 'Show chat' })).toHaveFocus()
+    await fireEvent.click(screen.getByRole('button', { name: 'Show chat' }))
+    expect(within(panel).getByRole('log')).toHaveTextContent('What is on slide 3?')
+
+    await fireEvent.keyDown(within(panel).getByLabelText('Ask a question'), { key: 'Escape' })
+    expect(panel.inert).toBe(true)
+  })
+
+  it('keeps the chat across tabs and gives each topic its own', async () => {
+    renderOffline()
+    await pick(pdf('slides.pdf', 'a'))
+    await pick(pdf('book.pdf', 'b'))
+    await screen.findByRole('tab', { name: 'book.pdf' })
+    await fireEvent.click(screen.getByRole('button', { name: 'Show chat' }))
+    const panel = within(screen.getByRole('complementary', { name: 'Chat' }))
+    await fireEvent.input(panel.getByLabelText('Ask a question'), { target: { value: 'Compare the two' } })
+    await fireEvent.click(panel.getByRole('button', { name: 'Send' }))
+
+    await fireEvent.click(screen.getByRole('tab', { name: 'slides.pdf' }))
+    expect(panel.getByRole('log')).toHaveTextContent('Compare the two')
+
+    // A half-typed question stays with its topic too.
+    await fireEvent.input(panel.getByLabelText('Ask a question'), { target: { value: 'half typed' } })
+    await fireEvent.click(screen.getByRole('button', { name: 'New topic' }))
+    await fireEvent.submit(screen.getByLabelText('Topic name'))
+    expect(panel.getByRole('log', { name: 'Chat in New topic' })).not.toHaveTextContent('Compare the two')
+    expect(panel.getByLabelText('Ask a question')).toHaveValue('')
+
+    await fireEvent.click(screen.getByRole('button', { name: /^slides/ }))
+    expect(panel.getByRole('log')).toHaveTextContent('Compare the two')
+    expect(panel.getByLabelText('Ask a question')).toHaveValue('half typed')
+  })
 })
+

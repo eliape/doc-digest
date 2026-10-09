@@ -132,4 +132,24 @@ describe('App', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Show topics' }))
     expect(screen.getByRole('complementary', { name: 'Topics' })).toBeInTheDocument()
   })
+
+  it('has no Open PDF button in the header, and puts the PDF controls inside each tab', async () => {
+    renderOffline()
+    expect(screen.queryByRole('button', { name: 'Open PDF' })).not.toBeInTheDocument()
+    await pick(pdf('a.pdf', 'a'))
+    await pick(pdf('b.pdf', 'b'))
+    await screen.findByRole('tab', { name: 'b.pdf' })
+
+    const header = screen.getByRole('banner')
+    expect(within(header).queryByLabelText('Page number')).not.toBeInTheDocument()
+    expect(within(header).queryByLabelText('Zoom in')).not.toBeInTheDocument()
+
+    // Only the open tab's controls are reachable; the other tab is inert.
+    const panel = screen.getByRole('tabpanel', { name: 'b.pdf' })
+    expect(within(panel).getByLabelText('Page number')).toBeInTheDocument()
+    expect(within(panel).getByLabelText('Zoom in')).toBeInTheDocument()
+    // `inert` keeps keyboard focus and screen readers out of the hidden tab.
+    expect((screen.getByLabelText('a.pdf', { selector: '[role=tabpanel]' }) as HTMLElement & { inert: boolean }).inert).toBe(true)
+    expect((panel as HTMLElement & { inert: boolean }).inert).toBeFalsy()
+  })
 })

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { fetchHealth } from './lib/api'
-  import { formatScale, isPdfFile, parsePageInput } from './lib/pages'
-  import PdfViewer from './lib/PdfViewer.svelte'
+  import DocPane from './lib/DocPane.svelte'
+  import { isPdfFile } from './lib/pages'
   import TopicsSidebar from './lib/TopicsSidebar.svelte'
   import { Workspace } from './lib/workspace.svelte'
 
@@ -36,41 +36,25 @@
     }
   })
 
-  // Each tab keeps its own page and zoom. Tabs stay mounted once opened, so
-  // switching back to one keeps its scroll position without re-rendering.
-  type View = { page: number; pageCount: number; scale: number }
-  let views = $state<Record<string, View>>({})
+  // Tabs stay mounted once opened, so switching back to one keeps its page,
+  // zoom and scroll position without re-rendering.
   let mounted = $state<string[]>([])
-  const viewers: Record<string, PdfViewer> = {}
+  const panes: Record<string, DocPane> = {}
 
   let doc = $derived(workspace.activeDoc)
-  let view = $derived(doc ? views[doc.id] : undefined)
 
   $effect(() => {
-    if (doc && !mounted.includes(doc.id)) {
-      views[doc.id] = { page: 1, pageCount: 0, scale: 1 }
-      mounted.push(doc.id)
-    }
+    if (doc && !mounted.includes(doc.id)) mounted.push(doc.id)
   })
 
-  // Unmount the viewers of closed tabs and deleted topics.
+  // Unmount the panes of closed tabs and deleted topics.
   $effect(() => {
     const open = mounted.filter((id) => id in workspace.docs)
-    if (open.length !== mounted.length) {
-      for (const id of mounted) if (!open.includes(id)) delete views[id]
-      mounted = open
-    }
+    if (open.length !== mounted.length) mounted = open
   })
 
-  // Read at call time: bind:this fills `viewers` after the tab mounts.
-  const viewer = (): PdfViewer | undefined => (doc ? viewers[doc.id] : undefined)
-
-  let pageInput = $state('1')
-
-  // Keep the page box in sync while scrolling and switching tabs.
-  $effect(() => {
-    pageInput = String(view?.page ?? 1)
-  })
+  // Read at call time: bind:this fills `panes` after the tab mounts.
+  const pane = (): DocPane | undefined => (doc ? panes[doc.id] : undefined)
 
   let fileInput: HTMLInputElement
 
@@ -90,14 +74,6 @@
     open(event.dataTransfer?.files[0])
   }
 
-  function submitPage(event: SubmitEvent) {
-    event.preventDefault()
-    if (!view) return
-    const n = parsePageInput(pageInput, view.pageCount)
-    if (n === null) pageInput = String(view.page)
-    else viewer()?.goToPage(n)
-  }
-
   function onKeydown(event: KeyboardEvent) {
     const mod = event.ctrlKey || event.metaKey
     if (mod && event.key === 'o') {
@@ -108,23 +84,16 @@
     // Zoom the PDF rather than the whole page, like browser PDF viewers do.
     if (mod && (event.key === '+' || event.key === '=')) {
       event.preventDefault()
-      viewer()?.zoomIn()
+      pane()?.zoomIn()
     } else if (mod && event.key === '-') {
       event.preventDefault()
-      viewer()?.zoomOut()
+      pane()?.zoomOut()
     } else if (mod && event.key === '0') {
       event.preventDefault()
-      viewer()?.setZoom('page-width')
+      pane()?.fitWidth()
     }
   }
 
-  function onZoomSelect(event: Event) {
-    const select = event.currentTarget as HTMLSelectElement
-    const value = select.value
-    viewer()?.setZoom(value === 'page-width' || value === 'page-fit' ? value : Number(value))
-    // Go back to showing the current zoom percentage.
-    select.value = ''
-  }
 </script>
 
 <svelte:window onkeydown={onKeydown} />
@@ -151,7 +120,6 @@
       onclick={() => (sidebarOpen = !sidebarOpen)}>☰</button
     >
     <h1>doc-digest</h1>
-    <button type="button" onclick={() => fileInput.click()}>Open PDF</button>
     <input
       bind:this={fileInput}
       type="file"
@@ -163,47 +131,6 @@
         e.currentTarget.value = ''
       }}
     />
-
-    {#if doc && view}
-      <nav class="group" aria-label="Pages">
-        <button
-          type="button"
-          aria-label="Previous page"
-          disabled={view.page <= 1}
-          onclick={() => viewer()?.previousPage()}>‹</button
-        >
-        <form onsubmit={submitPage}>
-          <input
-            class="page-input"
-            aria-label="Page number"
-            inputmode="numeric"
-            bind:value={pageInput}
-            onblur={() => (pageInput = String(view?.page ?? 1))}
-          />
-        </form>
-        <span>of {view.pageCount}</span>
-        <button
-          type="button"
-          aria-label="Next page"
-          disabled={view.page >= view.pageCount}
-          onclick={() => viewer()?.nextPage()}>›</button
-        >
-      </nav>
-
-      <div class="group" role="group" aria-label="Zoom">
-        <button type="button" aria-label="Zoom out" onclick={() => viewer()?.zoomOut()}>−</button>
-        <select aria-label="Zoom level" onchange={onZoomSelect} value="">
-          <option value="" disabled hidden>{formatScale(view.scale)}</option>
-          <option value="page-width">Fit width</option>
-          <option value="page-fit">Fit page</option>
-          <option value="0.5">50%</option>
-          <option value="1">100%</option>
-          <option value="1.5">150%</option>
-          <option value="2">200%</option>
-        </select>
-        <button type="button" aria-label="Zoom in" onclick={() => viewer()?.zoomIn()}>+</button>
-      </div>
-    {/if}
 
     <span class="status" data-state={backend} title="Backend status">
       Backend:
@@ -250,14 +177,11 @@
       <main class="stage">
         {#each mounted as id (id)}
           {@const d = workspace.docs[id]}
-          {#if d && views[id]}
-            <div class="pane" class:active={id === doc?.id} role="tabpanel" aria-label={d.name}>
-              <PdfViewer
-                bind:this={viewers[id]}
+          {#if d}
+            <div class="tabpanel" class:active={id === doc?.id} inert={id !== doc?.id} role="tabpanel" aria-label={d.name}>
+              <DocPane
+                bind:this={panes[id]}
                 data={d.data}
-                bind:page={views[id].page}
-                bind:pageCount={views[id].pageCount}
-                bind:scale={views[id].scale}
                 onerror={() => {
                   error = `Could not open ${d.name}. Is it a valid PDF?`
                   workspace.closeDoc(id)
@@ -317,21 +241,6 @@
     font-size: 1.1rem;
     cursor: pointer;
     padding: 0.125rem 0.375rem;
-  }
-
-  .group {
-    display: flex;
-    align-items: center;
-    gap: 0.25rem;
-  }
-
-  .group form {
-    display: contents;
-  }
-
-  .page-input {
-    width: 3rem;
-    text-align: center;
   }
 
   .status {
@@ -427,12 +336,12 @@
   }
 
   /* Inactive tabs stay laid out (so they keep their scroll position) but hidden. */
-  .pane {
+  .tabpanel {
     position: absolute;
     inset: 0;
     visibility: hidden;
   }
-  .pane.active {
+  .tabpanel.active {
     visibility: visible;
   }
 

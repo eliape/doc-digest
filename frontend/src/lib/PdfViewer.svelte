@@ -2,6 +2,7 @@
   import 'pdfjs-dist/legacy/web/pdf_viewer.css'
   import type { PDFDocumentLoadingTask, PDFDocumentProxy } from 'pdfjs-dist/legacy/build/pdf.mjs'
   import type { PDFViewer } from 'pdfjs-dist/legacy/web/pdf_viewer.mjs'
+  import { attachZoomGestures, type Origin } from './gestures'
   import { assetOptions, loadPdfjs } from './pdfjs'
 
   type Props = {
@@ -47,6 +48,22 @@
       viewer = undefined
     }
   })
+
+  // PDF.js rounds each zoom step to whole percents, which would swallow the tiny
+  // steps a pinch sends. So keep the exact target scale while a gesture lasts.
+  let target: number | undefined
+  let targetTimer: ReturnType<typeof setTimeout> | undefined
+
+  function zoomBy(factor: number, origin: Origin) {
+    if (!viewer) return
+    target = Math.min(25, Math.max(0.1, (target ?? viewer.currentScale) * factor))
+    viewer.updateScale({ scaleFactor: target / viewer.currentScale, origin, drawingDelay: 120 })
+    clearTimeout(targetTimer)
+    targetTimer = setTimeout(() => (target = undefined), 200)
+  }
+
+  $effect(() => attachZoomGestures(container, zoomBy))
+  $effect(() => () => clearTimeout(targetTimer))
 
   let opened: Uint8Array | undefined
   let current: PDFDocumentLoadingTask | undefined
@@ -116,5 +133,7 @@
     inset: 0;
     overflow: auto;
     background: var(--viewer-bg);
+    /* Scrolling stays native, but pinches go to us instead of zooming the page. */
+    touch-action: pan-x pan-y;
   }
 </style>

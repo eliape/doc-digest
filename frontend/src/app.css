@@ -7,6 +7,8 @@
   --muted: #59636e;
   --accent: #0969da;
   --viewer-bg: #e8eaed;
+  --sidebar-bg: #f6f8fa;
+  --hover: #eaeef2;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -16,6 +18,8 @@
     --muted: #9198a1;
     --accent: #4493f8;
     --viewer-bg: #2b2f36;
+    --sidebar-bg: #161b22;
+    --hover: #262c36;
   }
 }
 

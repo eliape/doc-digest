@@ -241,6 +241,41 @@ describe('App', () => {
     expect(screen.queryByRole('menu')).not.toBeInTheDocument()
   })
 
+  it('cancels a new topic on Escape: the placeholder goes, the sidebar stays open and the earlier topic stays selected', async () => {
+    renderOffline()
+    await pick(pdf('slides.pdf'))
+    await screen.findByRole('tab', { name: 'slides.pdf' })
+    await showTopics()
+    const sidebar = within(screen.getByRole('complementary', { name: 'Topics' }))
+    await fireEvent.click(sidebar.getByRole('button', { name: 'New topic' }))
+    await fireEvent.keyDown(sidebar.getByLabelText('Topic name'), { key: 'Escape' })
+
+    expect(sidebar.queryByLabelText('Topic name')).not.toBeInTheDocument()
+    expect(sidebar.queryByRole('button', { name: /^New topic/  })).toBeInTheDocument()
+    expect(sidebar.queryByText('New topic', { selector: '.name' })).not.toBeInTheDocument()
+    expect(sidebar.getByRole('button', { name: 'Hide topics' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'slides.pdf' })).toBeInTheDocument()
+  })
+
+  it('folds the sidebar away when the content is pressed', async () => {
+    renderOffline()
+    await pick(pdf('slides.pdf'))
+    await screen.findByRole('tab', { name: 'slides.pdf' })
+    await showTopics()
+    expect(screen.getByRole('button', { name: 'Hide topics' })).toBeInTheDocument()
+    await fireEvent.pointerDown(screen.getByTestId('pdf-viewer'))
+    expect(screen.getByRole('button', { name: 'Show topics' })).toBeInTheDocument()
+  })
+
+  it('folds the sidebar away when a topic is clicked', async () => {
+    renderOffline()
+    await pick(pdf('slides.pdf'))
+    await screen.findByRole('tab', { name: 'slides.pdf' })
+    await showTopics()
+    await fireEvent.click(screen.getByRole('button', { name: /^slides/ }))
+    expect(screen.getByRole('button', { name: 'Show topics' })).toBeInTheDocument()
+  })
+
   it('expands the sidebar when New topic is pressed while it is collapsed', async () => {
     renderOffline()
     const sidebar = within(screen.getByRole('complementary', { name: 'Topics' }))

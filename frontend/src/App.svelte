@@ -214,7 +214,9 @@
 >
   <TopicsSidebar {workspace} bind:open={sidebarOpen} />
 
-  <div class="main">
+  <!-- Pressing anywhere in the content folds the topics away (a pointer shortcut: the menu button does the same by keyboard). -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="main" onpointerdown={() => (sidebarOpen = false)}>
     <input
       bind:this={fileInput}
       type="file"

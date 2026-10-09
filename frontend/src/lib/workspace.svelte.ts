@@ -1,8 +1,21 @@
 /** A PDF opened in a topic. Each one is a tab. */
 export type Doc = { id: string; name: string; data: Uint8Array }
 
-/** A named group of PDFs that are read (and later asked about) together. */
-export type Topic = { id: string; name: string; docIds: string[]; activeDocId?: string }
+/** One message in a topic's chat. */
+export type ChatMessage = { id: string; role: 'user' | 'assistant'; text: string }
+
+/**
+ * A named group of PDFs that are read and asked about together. Each topic has
+ * one chat, shared by all its tabs, and `draft` is the unsent question in it.
+ */
+export type Topic = {
+  id: string
+  name: string
+  docIds: string[]
+  activeDocId?: string
+  chat: ChatMessage[]
+  draft: string
+}
 
 let nextId = 0
 const newId = () => `${Date.now().toString(36)}-${nextId++}`
@@ -27,7 +40,7 @@ export class Workspace {
   }
 
   createTopic(name = 'New topic'): Topic {
-    this.topics.push({ id: newId(), name, docIds: [] })
+    this.topics.push({ id: newId(), name, docIds: [], chat: [], draft: '' })
     const topic = this.topics[this.topics.length - 1]
     this.activeTopicId = topic.id
     return topic
@@ -69,6 +82,15 @@ export class Workspace {
     topic.docIds.push(doc.id)
     topic.activeDocId = doc.id
     return doc
+  }
+
+  /** Add the user's question to a topic's chat and clear its draft. Blank questions are ignored. */
+  sendMessage(topicId: string, text: string): ChatMessage | undefined {
+    const topic = this.topics.find((t) => t.id === topicId)
+    if (!topic || !text.trim()) return
+    topic.chat.push({ id: newId(), role: 'user', text: text.trim() })
+    topic.draft = ''
+    return topic.chat[topic.chat.length - 1]
   }
 
   selectDoc(id: string) {

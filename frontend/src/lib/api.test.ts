@@ -17,16 +17,23 @@ function respond(chunks: string[], init: ResponseInit = {}) {
     )) as unknown as typeof fetch
 }
 
-async function collect(stream: AsyncIterable<string>) {
-  const pieces: string[] = []
+async function collect<T>(stream: AsyncIterable<T>) {
+  const pieces: T[] = []
   for await (const piece of stream) pieces.push(piece)
   return pieces
 }
 
 describe('fetchAnswer', () => {
   it('yields text pieces, even when a line is split across chunks', async () => {
-    const fetchFn = respond(['{"type":"text","text":"Hel"}\n{"type":"te', 'xt","text":"lo"}\n{"type":"done"}\n'])
-    expect(await collect(fetchAnswer(request, undefined, fetchFn))).toEqual(['Hel', 'lo'])
+    const fetchFn = respond([
+      '{"type":"step","text":"Searched"}\n{"type":"text","text":"Hel"}\n{"type":"te',
+      'xt","text":"lo"}\n{"type":"done","seconds":2}\n',
+    ])
+    expect(await collect(fetchAnswer(request, undefined, fetchFn))).toEqual([
+      { type: 'step', text: 'Searched' },
+      { type: 'text', text: 'Hel' },
+      { type: 'text', text: 'lo' },
+    ])
   })
 
   it('throws the error the backend reports in the stream', async () => {

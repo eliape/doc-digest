@@ -1,4 +1,4 @@
-import { type AnswerStream, type AskRequest, fetchAnswer } from './api'
+import { type AnswerStream, type AskRequest, fetchAnswer, fetchIndexStatus, type IndexStatus, uploadDoc } from './api'
 import type { PageContext } from './context'
 
 /** A PDF opened in a topic. Each one is a tab. */
@@ -14,7 +14,29 @@ export type ChatMessage = {
   text: string
   context?: PageContext
   status?: 'streaming' | 'done' | 'error'
+  /** The lookups the model made while answering, e.g. "Read book.pdf, pp. 4–5". */
+  steps?: string[]
 }
+
+/**
+ * How far the backend has got with indexing a PDF. `serverId` is the backend's
+ * id for it, known once the upload is done; questions can name it from then on.
+ */
+export type IndexState = {
+  serverId?: string
+  status: 'uploading' | IndexStatus['status']
+  pagesDone: number
+  pageCount: number
+  error?: string
+}
+
+/** The backend calls indexing uses. Tests pass fakes. */
+export type IndexApi = {
+  upload: (name: string, data: Uint8Array) => Promise<IndexStatus>
+  status: (serverId: string) => Promise<IndexStatus>
+}
+
+const realIndexApi: IndexApi = { upload: (name, data) => uploadDoc(name, data), status: (id) => fetchIndexStatus(id) }
 
 /**
  * A named group of PDFs that are read and asked about together. Each topic has
@@ -45,6 +67,10 @@ export class Workspace {
   // Raw: the PDF bytes should not be wrapped in reactive proxies.
   docs = $state.raw<Record<string, Doc>>({})
   activeTopicId = $state<string>()
+  /** Indexing progress per PDF (by tab id). */
+  indexing = $state<Record<string, IndexState>>({})
+  // Uploads still on their way, so a question can wait for its PDFs' ids.
+  private uploads: Record<string, Promise<unknown>> = {}
   // Stops each topic's answer that is still arriving. Not state: nothing renders from it.
   private answering = new Map<string, AbortController>()
 
@@ -76,6 +102,7 @@ export class Workspace {
     if (index === -1) return
     const [topic] = this.topics.splice(index, 1)
     this.docs = omit(this.docs, topic.docIds)
+    for (const docId of topic.docIds) delete this.indexing[docId]
     if (this.activeTopicId === id) {
       this.activeTopicId = (this.topics[index] ?? this.topics[index - 1])?.id
     }
@@ -98,6 +125,38 @@ export class Workspace {
     topic.docIds.push(doc.id)
     topic.activeDocId = doc.id
     return doc
+  }
+
+  /**
+   * Send a PDF to the backend, which indexes it in the background, and follow
+   * its progress until it is ready or fails. Stops following once the tab is closed.
+   */
+  async index(docId: string, api: IndexApi = realIndexApi, pollMs = 1500): Promise<void> {
+    const doc = this.docs[docId]
+    if (!doc) return
+    this.indexing[docId] = { status: 'uploading', pagesDone: 0, pageCount: 0 }
+    const update = (s: IndexStatus) => {
+      if (!(docId in this.docs)) return false
+      this.indexing[docId] = { serverId: s.id, status: s.status, pagesDone: s.pages_done, pageCount: s.page_count, error: s.error }
+      return s.status !== 'ready' && s.status !== 'error'
+    }
+    try {
+      const upload = api.upload(doc.name, doc.data)
+      this.uploads[docId] = upload.catch(() => {})
+      let status = await upload
+      while (update(status)) {
+        await new Promise((resolve) => setTimeout(resolve, pollMs))
+        if (!(docId in this.docs)) return
+        status = await api.status(status.id)
+      }
+    } catch (error) {
+      if (docId in this.docs) {
+        const message = error instanceof Error ? error.message : String(error)
+        this.indexing[docId] = { ...this.indexing[docId], status: 'error', error: message }
+      }
+    } finally {
+      delete this.uploads[docId]
+    }
   }
 
   /** Attach what the reader pointed at to the topic's next question, replacing what was attached. */
@@ -152,9 +211,13 @@ export class Workspace {
     this.answering.set(topicId, controller)
     try {
       question.context ??= await fallback?.().catch(() => undefined)
-      for await (const piece of stream(askRequest(topic), controller.signal)) {
+      const uploading = topic.docIds.filter((id) => id in this.uploads).map((id) => this.uploads[id])
+      if (uploading.length) await Promise.all(uploading)
+      const serverId = (id: string) => this.indexing[id]?.serverId
+      for await (const event of stream(askRequest(topic, serverId), controller.signal)) {
         if (controller.signal.aborted) break
-        answer.text += piece
+        if (event.type === 'text') answer.text += event.text
+        else answer.steps = [...(answer.steps ?? []), event.text]
       }
       answer.status = 'done'
     } catch (error) {
@@ -181,27 +244,31 @@ export class Workspace {
     if (topic.activeDocId === id) topic.activeDocId = topic.docIds[index] ?? topic.docIds[index - 1]
     if (topic.context?.docId === id) topic.context = undefined
     this.docs = omit(this.docs, [id])
+    delete this.indexing[id]
   }
 }
 
 /**
  * What the backend needs to answer a topic's newest question: the conversation
- * so far. Only the newest question carries images, which keeps requests small.
+ * so far, and the backend's ids of the topic's PDFs so it can look things up in
+ * them. Only the newest question carries images, which keeps requests small.
  */
-export function askRequest(topic: Topic): AskRequest {
+export function askRequest(topic: Topic, serverId: (docId: string) => string | undefined = () => undefined): AskRequest {
   const turns = topic.chat.filter((m) => m.status !== 'streaming')
   return {
     topic: topic.name,
+    docs: topic.docIds.map(serverId).filter((id): id is string => !!id),
     messages: turns.map((m, i) => ({
       role: m.role,
       text: m.status === 'error' ? '' : m.text,
-      context: m.context && contextForRequest(m.context, i === turns.length - 1),
+      context: m.context && contextForRequest(m.context, i === turns.length - 1, serverId(m.context.docId)),
     })),
   }
 }
 
-function contextForRequest(context: PageContext, withImages: boolean) {
+function contextForRequest(context: PageContext, withImages: boolean, docId: string | undefined) {
   return {
+    doc_id: docId,
     doc_name: context.docName,
     page: context.page,
     page_label: context.pageLabel,

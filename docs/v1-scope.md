@@ -66,7 +66,25 @@ For each click or selection the browser renders, with PDF.js at a fixed resoluti
 - a **crop** around the point, large enough to hold a whole equation or figure, with the click point marked, and
 - the **whole page** at a moderate resolution, so the model sees what the crop belongs to.
 
-**Answer** (`POST /api/ask`, streaming) sends the model the question, the anchor as structured text, the crop and page images, and the text of the surrounding pages. From build step 3 it also gets the whole PDF as a document block with prompt caching, which already includes every page as an image, so scanned books get full context too. Citations come back as PDF and page.
+**Answer** (`POST /api/ask`, streaming) sends the model the question, the anchor as structured text, the crop and page images, and the text of the surrounding pages. From build step 3 it also gets a compact map of the topic and tools to look things up in every PDF (see Step 3d). Citations come back as PDF and page.
+
+## Step 3d. Finding things beyond the open page: an index and lookup tools
+
+Rather than putting more and more PDF content into each request, the model gets a map of the topic and decides what to read.
+
+**Index on upload.** Adding a PDF sends it to the backend, which keeps it under `backend/data/` and indexes it in the background. The tab shows progress, and questions about the open page work meanwhile. A cheap model reads 20 pages per pass, as extracted text for text pages and as images for scanned or badly extracted pages, and returns structured output:
+- a title and short summary of the whole document,
+- an outline of sections with PDF page ranges and a summary each,
+- key terms, acronyms, definitions, equations, figures and tables with pages,
+- references to other sections, figures or documents.
+
+Printed page labels (like "xii" or "41") are kept next to PDF page numbers. Indexes are stored separately and never sent whole.
+
+**What each question carries.** The open page and spot as before, plus a compact overview: one line per PDF with its status and summary, the open PDF's outline to two levels and the other PDFs' top-level outline.
+
+**Tools.** `search` looks in the indexes and in the full page text (so it finds things the index missed and works before indexing finishes), `get_outline` gives a document's full outline with entries for a page range, and `read_pages` returns the actual pages, as images when they are scanned or when asked. The index is a guide, not a filter: the model can search again with other words, try another PDF or read neighbouring pages. Answers cite the pages actually read.
+
+**Measured, not estimated.** Every model call is logged with input, output, cache tokens, latency and cost (`GET /api/usage`), and indexing calls record how many pages went as text and as images. `python -m doc_digest.evaluate` runs a set of PDFs and questions with known answer pages and reports whether the model read and cited the right pages, and what it cost.
 
 ## Step 3c. Why a click and not a box
 
@@ -107,9 +125,9 @@ Defaults I picked (easy to change): Python backend rather than Node, and v1 runs
 2. **Ask:** in two pieces, each usable on its own.
    - **2a. Answers:** typed question → `/api/ask` → streaming answer in the chat, with the current page's image and the surrounding pages' text as context.
    - **2b. Click to ask:** click or selection → anchor, marker, crop and page images, context chip; the chip on sent messages jumps back.
-3. **Whole document and topic:** cached full-PDF context for the open tab, then the topic's other PDFs, with citations that switch tab and jump.
+3. **Whole topic:** index each PDF on upload, give the model a map of the topic and tools to search and read pages (Step 3d), and measure cost and whether it finds the right pages. Then citations that switch tab and jump.
 4. **Persistence:** topics, their PDFs and each topic's chat history (with anchors) in IndexedDB.
-5. **Long documents:** retrieval fallback when the PDF exceeds the model's limits.
+5. **Long documents:** largely covered by step 3, since nothing sends a whole PDF; revisit if evaluations show gaps.
 
 Each step works on its own, so steps 1 and 2 already give a usable tool.
 

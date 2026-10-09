@@ -24,6 +24,17 @@ make dev                              # backend on :8000, frontend on http://loc
 
 The frontend dev server forwards `/api/*` to the backend, so open http://localhost:5173. The page shows whether it can reach the backend.
 
+## Checking retrieval and cost
+
+Each PDF you add is indexed in the background with a cheap model, and answers look things up across the topic. To check how well that finds the right pages, and what it costs, write a few questions with known answer pages (format in [evaluate.py](backend/src/doc_digest/evaluate.py)) and run:
+
+```sh
+cd backend
+uv run python -m doc_digest.evaluate questions.json book.pdf scanned-book.pdf paper.pdf
+```
+
+`GET /api/usage` shows tokens, cache use, latency and cost of every model call so far.
+
 ## Tests and checks
 
 ```sh

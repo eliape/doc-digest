@@ -88,6 +88,14 @@
     if (open && topic) tick().then(() => composer?.focus({ preventScroll: true }))
   })
 
+  /** How many of the topic's PDFs the backend is still indexing. */
+  let indexingCount = $derived(
+    topic?.docIds.filter((id) => {
+      const status = workspace.indexing[id]?.status
+      return status === 'uploading' || status === 'queued' || status === 'indexing'
+    }).length ?? 0,
+  )
+
   let answering = $derived(topic ? workspace.isAnswering(topic.id) : false)
 
   /** The chip's name, with the PDF's name when the topic has several. */
@@ -106,6 +114,7 @@
     if (!topic) return
     void topic.chat.length
     void topic.chat.at(-1)?.text
+    void topic.chat.at(-1)?.steps?.length
     tick().then(() => log?.lastElementChild?.scrollIntoView?.({ block: 'end' }))
   })
 
@@ -209,6 +218,11 @@
                 <span>{chipName(message.context)}</span>
               </button>
             {/if}
+            {#if message.steps?.length}
+              <ul class="steps" aria-label="Looked up">
+                {#each message.steps as step, i (i)}<li>{step}</li>{/each}
+              </ul>
+            {/if}
             {#if message.status === 'streaming' && !message.text}
               <span class="thinking">Thinking…</span>
             {:else if message.role === 'assistant'}
@@ -225,6 +239,13 @@
           </p>
         {/each}
       </div>
+
+      {#if indexingCount}
+        <p class="indexing" role="status">
+          Indexing {indexingCount === 1 ? '1 PDF' : `${indexingCount} PDFs`}. You can already ask about the open page;
+          the rest of the topic becomes searchable as indexing finishes.
+        </p>
+      {/if}
 
       <form class="composer" onsubmit={send}>
         {#if topic.context}
@@ -514,6 +535,23 @@
     color: var(--error, #82071e);
     background: #ffebe9;
     border-color: #ffcecb;
+  }
+
+  .steps {
+    margin: 0 0 0.375rem;
+    padding: 0;
+    list-style: none;
+    color: var(--muted);
+    font-size: 0.8rem;
+  }
+  .steps li::before {
+    content: '↳ ';
+  }
+
+  .indexing {
+    margin: 0;
+    color: var(--muted);
+    font-size: 0.8rem;
   }
 
   .thinking {

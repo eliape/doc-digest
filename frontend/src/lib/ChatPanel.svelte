@@ -98,6 +98,14 @@
 
   let answering = $derived(topic ? workspace.isAnswering(topic.id) : false)
 
+  /**
+   * Whether a question was about a spot the reader clicked or selected. Questions
+   * asked without one carry the open page, which is always included, so they get no chip.
+   */
+  function pointedAt(context: PageContext) {
+    return !!(context.point || context.selection)
+  }
+
   /** The chip's name, with the PDF's name when the topic has several. */
   function chipName(context: PageContext) {
     const several = (topic?.docIds.length ?? 0) > 1
@@ -207,7 +215,7 @@
       <div class="messages" role="log" aria-label={`Chat in ${topic.name}`} bind:this={log}>
         {#each topic.chat as message (message.id)}
           <div class="message {message.role}" class:error={message.status === 'error'}>
-            {#if message.context}
+            {#if message.context && pointedAt(message.context)}
               <button
                 type="button"
                 class="chip small"

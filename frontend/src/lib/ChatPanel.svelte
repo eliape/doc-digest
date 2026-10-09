@@ -1,6 +1,8 @@
 <script lang="ts">
+  import 'katex/dist/katex.min.css'
   import { tick } from 'svelte'
   import { contextLabel, type PageContext } from './context'
+  import { renderMarkdown } from './markdown'
   import type { Workspace } from './workspace.svelte'
 
   type Props = {
@@ -196,6 +198,9 @@
             {/if}
             {#if message.status === 'streaming' && !message.text}
               <span class="thinking">Thinking…</span>
+            {:else if message.role === 'assistant'}
+              <!-- Answers are Markdown with LaTeX maths; renderMarkdown sanitizes the HTML. -->
+              <div class="text markdown">{@html renderMarkdown(message.text)}</div>
             {:else}
               <span class="text">{message.text}</span>
             {/if}
@@ -380,6 +385,83 @@
   .text {
     white-space: pre-wrap;
   }
+  .text.markdown {
+    white-space: normal;
+  }
+  .markdown :global(:first-child) {
+    margin-top: 0;
+  }
+  .markdown :global(:last-child) {
+    margin-bottom: 0;
+  }
+  .markdown :global(p),
+  .markdown :global(ul),
+  .markdown :global(ol),
+  .markdown :global(pre),
+  .markdown :global(table),
+  .markdown :global(blockquote) {
+    margin: 0 0 0.6em;
+  }
+  .markdown :global(ul),
+  .markdown :global(ol) {
+    padding-left: 1.4em;
+  }
+  .markdown :global(h1),
+  .markdown :global(h2),
+  .markdown :global(h3),
+  .markdown :global(h4) {
+    font-size: 1em;
+    margin: 0.8em 0 0.4em;
+  }
+  .markdown :global(code) {
+    font-size: 0.9em;
+    padding: 0.1em 0.3em;
+    border-radius: 0.25rem;
+    background: var(--hover);
+  }
+  .markdown :global(pre) {
+    padding: 0.5em 0.75em;
+    border-radius: 0.375rem;
+    background: var(--hover);
+    overflow-x: auto;
+  }
+  .markdown :global(pre code) {
+    padding: 0;
+    background: none;
+  }
+  .markdown :global(blockquote) {
+    padding-left: 0.75em;
+    border-left: 3px solid var(--border);
+    color: var(--muted);
+  }
+  .markdown :global(table) {
+    border-collapse: collapse;
+    display: block;
+    overflow-x: auto;
+  }
+  .markdown :global(th),
+  .markdown :global(td) {
+    border: 1px solid var(--border);
+    padding: 0.25em 0.5em;
+  }
+  .markdown :global(a) {
+    color: var(--accent);
+  }
+  /* Wide equations scroll sideways instead of overflowing the panel. */
+  .markdown :global(.math-display) {
+    overflow-x: auto;
+    overflow-y: hidden;
+    margin: 0 0 0.6em;
+  }
+  .markdown :global(.katex-display) {
+    margin: 0.25em 0;
+  }
+  /* Keep inline maths like "n − 1" on one line. */
+  .markdown :global(.katex) {
+    font-size: 1.1em;
+    white-space: nowrap;
+  }
+
   .message.user {
     align-self: flex-end;
     max-width: 85%;

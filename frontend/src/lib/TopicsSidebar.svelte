@@ -155,6 +155,7 @@
     padding: 0 0.25rem 0 0.5rem;
   }
   .collapsed .top {
+    justify-content: center;
     padding: 0;
   }
 
@@ -183,8 +184,14 @@
     padding: 0.375rem 0.5rem;
     text-align: left;
   }
+  /* Collapsed, both buttons are the same square, centred in the strip. */
+  .collapsed .toggle,
   .collapsed .new {
-    padding: 0.375rem 0.625rem;
+    align-self: center;
+    justify-content: center;
+    width: 2.125rem;
+    height: 2.125rem;
+    padding: 0;
   }
   .toggle:hover,
   .new:hover {

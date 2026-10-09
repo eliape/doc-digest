@@ -78,8 +78,6 @@ class Context(BaseModel):
     selection: str | None = None
     nearby_text: str | None = None
     page_image: str | None = Field(default=None, description="Base64 JPEG of the whole page")
-    # Older clients also sent a close-up; it is no longer passed to the model.
-    crop: str | None = Field(default=None, description="Unused")
     page_texts: list[PageText] = []
 
 

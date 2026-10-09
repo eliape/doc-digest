@@ -126,3 +126,19 @@ async def test_reports_a_missing_api_key_as_an_indexing_error(library, tmp_path)
     status = indexer.doc_status(doc.id)
     assert status["status"] == "error"
     assert "ANTHROPIC_API_KEY" in status["error"]
+
+
+async def test_resumes_a_half_indexed_document_after_a_restart(library, tmp_path) -> None:
+    doc = await library.add(make_pdf([filler("x")]), "a.pdf")
+    # A fresh indexer, as after the backend restarted mid-index: nothing is queued.
+    indexer = Indexer(library, UsageLog(None), lambda: None)
+    indexer.resume(doc.id)
+    assert indexer.doc_status(doc.id)["status"] == "queued"
+    for _ in range(50):
+        await asyncio.sleep(0.01)
+        if indexer.doc_status(doc.id)["status"] == "error":
+            break
+    # It ran (and failed here for want of a key); asking again does not retry a failure.
+    assert indexer.doc_status(doc.id)["status"] == "error"
+    indexer.resume(doc.id)
+    assert indexer.doc_status(doc.id)["status"] == "error"

@@ -221,6 +221,38 @@ describe('Workspace.ask', () => {
     expect(ws.isAnswering(topic.id)).toBe(false)
   })
 
+  it('starts a new chat: clears the messages and stops the answer, keeping the draft and attached spot', async () => {
+    const ws = new Workspace()
+    const doc = ws.addDoc('notes.pdf', bytes(1))
+    const topic = ws.activeTopic!
+    topic.draft = 'first'
+    let signal: AbortSignal | undefined
+    let more!: () => void
+    const pending = ws.ask(topic.id, undefined, async function* (_request, s) {
+      signal = s
+      yield 'Part one'
+      await new Promise<void>((resolve) => (more = resolve))
+      yield ' and part two'
+    })
+    await new Promise((resolve) => setTimeout(resolve))
+    expect(topic.chat.at(-1)?.text).toBe('Part one')
+
+    ws.attachContext(topic.id, context(doc.id, 3))
+    topic.draft = 'unsent'
+    ws.newChat(topic.id)
+    expect(signal?.aborted).toBe(true)
+    expect(topic.chat).toEqual([])
+    expect(topic.context?.page).toBe(3)
+    expect(topic.draft).toBe('unsent')
+    expect(ws.isAnswering(topic.id)).toBe(false)
+
+    // The stopped answer does not come back into the new chat.
+    more()
+    await pending
+    expect(topic.chat).toEqual([])
+    expect(ws.docs[doc.id]).toBeDefined()
+  })
+
   it('only sends images with the newest question', () => {
     const ws = new Workspace()
     const doc = ws.addDoc('notes.pdf', bytes(1))

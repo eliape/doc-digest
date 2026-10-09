@@ -71,6 +71,8 @@ export class Workspace {
   indexing = $state<Record<string, IndexState>>({})
   // Uploads still on their way, so a question can wait for its PDFs' ids.
   private uploads: Record<string, Promise<unknown>> = {}
+  // Stops each topic's answer that is still arriving. Not state: nothing renders from it.
+  private answering = new Map<string, AbortController>()
 
   activeTopic = $derived(this.topics.find((t) => t.id === this.activeTopicId))
   activeDoc = $derived(this.activeTopic?.activeDocId ? this.docs[this.activeTopic.activeDocId] : undefined)
@@ -168,6 +170,18 @@ export class Workspace {
     if (topic) topic.context = undefined
   }
 
+  /**
+   * Start the topic's chat over: forget its questions and answers and stop an answer that is
+   * still arriving. What belongs to the next question (the draft and the attached spot) stays,
+   * and so do the tabs.
+   */
+  newChat(topicId: string) {
+    const topic = this.topics.find((t) => t.id === topicId)
+    if (!topic) return
+    this.answering.get(topicId)?.abort()
+    topic.chat = []
+  }
+
   /** Whether a topic's latest answer is still arriving. */
   isAnswering(topicId: string): boolean {
     return this.topics.find((t) => t.id === topicId)?.chat.at(-1)?.status === 'streaming'
@@ -193,6 +207,8 @@ export class Workspace {
     const answer = topic.chat[topic.chat.length - 1]
     topic.draft = ''
     topic.context = undefined
+    const controller = new AbortController()
+    this.answering.set(topicId, controller)
     try {
       question.context ??= await fallback?.().catch(() => undefined)
       const uploading = topic.docIds.filter((id) => id in this.uploads).map((id) => this.uploads[id])
@@ -201,11 +217,16 @@ export class Workspace {
       for await (const event of stream(askRequest(topic, serverId))) {
         if (event.type === 'text') answer.text += event.text
         else answer.steps = [...(answer.steps ?? []), event.text]
+      for await (const piece of stream(askRequest(topic), controller.signal)) {
+        if (controller.signal.aborted) break
+        answer.text += piece
       }
       answer.status = 'done'
     } catch (error) {
       answer.status = 'error'
       answer.text = error instanceof Error ? error.message : String(error)
+    } finally {
+      if (this.answering.get(topicId) === controller) this.answering.delete(topicId)
     }
   }
 

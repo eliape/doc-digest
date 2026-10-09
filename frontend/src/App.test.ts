@@ -283,6 +283,17 @@ describe('App', () => {
     expect(screen.getByRole('button', { name: 'Show topics' })).toBeInTheDocument()
   })
 
+  it('folds the sidebar away when the chat is pressed, but not when the sidebar itself is', async () => {
+    renderOffline()
+    await pick(pdf('slides.pdf'))
+    await screen.findByRole('tab', { name: 'slides.pdf' })
+    await showTopics()
+    await fireEvent.pointerDown(screen.getByRole('heading', { name: 'Topics' }))
+    expect(screen.getByRole('button', { name: 'Hide topics' })).toBeInTheDocument()
+    await fireEvent.pointerDown(screen.getByRole('complementary', { name: 'Chat' }))
+    expect(screen.getByRole('button', { name: 'Show topics' })).toBeInTheDocument()
+  })
+
   it('folds the sidebar away when a topic is clicked', async () => {
     renderOffline()
     await pick(pdf('slides.pdf'))

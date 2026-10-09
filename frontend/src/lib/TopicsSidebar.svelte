@@ -127,12 +127,25 @@
     padding: 0.5rem 0.375rem;
     border-right: 1px solid var(--border);
     background: var(--sidebar-bg);
-    overflow-y: auto;
+    overflow: hidden auto;
+    white-space: nowrap;
+    /* Slides like the chat panel. */
+    transition: width 0.2s ease;
   }
   /* Just wide enough for the two buttons. (Not named .sidebar: PDF.js's stylesheet styles that globally.) */
   .topics-sidebar.collapsed {
     width: 3rem;
-    align-items: center;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .topics-sidebar {
+      transition: none;
+    }
+  }
+
+  /* The list keeps its full width while the sidebar opens, so it is revealed rather than reflowed. */
+  .list {
+    width: calc(15rem - 0.75rem);
+    flex-shrink: 0;
   }
 
   .top {
@@ -187,6 +200,7 @@
   }
 
   .hint {
+    white-space: normal;
     margin: 0 0.5rem;
     font-size: 0.85rem;
     color: var(--muted);

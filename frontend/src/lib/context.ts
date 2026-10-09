@@ -38,7 +38,7 @@ const PAGE_IMAGE_SIDE = 1568
 // The close-up is only rendered for the chip's thumbnail; the model gets the marked page.
 const CROP_IMAGE_SIDE = 800
 const THUMBNAIL_WIDTH = 240
-const MAX_PAGE_TEXT = 8000
+const MAX_PAGE_TEXT = 3000
 const MAX_NEARBY_TEXT = 2000
 const MARK = '#e5221b'
 

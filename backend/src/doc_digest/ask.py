@@ -24,7 +24,7 @@ MAX_ROUNDS = 8
 SYSTEM_PROMPT = """\
 You help someone learn from PDFs they are studying, such as textbooks, papers and lecture \
 slides. They read in a viewer next to this chat and ask about what they are reading. The PDFs \
-they study together form a topic; a map of the topic's documents follows these instructions.
+they study together form a topic; a map of the topic's documents comes with their newest question.
 
 With a question you may get:
 - the whole page they are on, as an image, with the spot they clicked or selected marked in red;
@@ -133,6 +133,10 @@ def text_block(text: str) -> dict[str, Any]:
     return {"type": "text", "text": text}
 
 
+# The page image is the source of truth; its text layer is only a hint, so a part is enough.
+MAX_PAGE_TEXT = 3000
+
+
 def context_blocks(context: Context) -> list[dict[str, Any]]:
     """The images and text for the question being asked now."""
     blocks: list[dict[str, Any]] = []
@@ -146,7 +150,10 @@ def context_blocks(context: Context) -> list[dict[str, Any]]:
     for page in context.page_texts:
         if page.text.strip():
             name = page_name(page.page, page.label)
-            blocks.append(text_block(f"Text the PDF has on {name}:\n{page.text}"))
+            text = page.text
+            if len(text) > MAX_PAGE_TEXT:
+                text = text[:MAX_PAGE_TEXT].rstrip() + " …"
+            blocks.append(text_block(f"Text the PDF has on {name}:\n{text}"))
     return blocks
 
 
@@ -182,19 +189,27 @@ def build_messages(request: AskRequest, aliases: dict[str, str] | None = None) -
     return messages
 
 
-def system_blocks(topic: str, docs: list[TopicDoc], current: str | None) -> list[dict[str, Any]]:
-    """Fixed instructions first (cached), then the topic's map, which changes as indexing runs."""
-    blocks: list[dict[str, Any]] = [
-        {"type": "text", "text": SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}
+def system_blocks(topic: str) -> list[dict[str, Any]]:
+    """Fixed instructions and the topic's name, both cached."""
+    return [
+        {"type": "text", "text": SYSTEM_PROMPT},
+        {
+            "type": "text",
+            "text": f'The topic is called "{topic}".',
+            "cache_control": {"type": "ephemeral"},
+        },
     ]
-    if docs:
-        topic_map = overview(docs, current)
-        blocks.append(
-            {"type": "text", "text": f'The topic "{topic}" has these documents:\n{topic_map}'}
-        )
-    else:
-        blocks.append({"type": "text", "text": f'The topic is called "{topic}".'})
-    return blocks
+
+
+def map_block(docs: list[TopicDoc], current: str | None) -> dict[str, Any] | None:
+    """
+    The topic's map, sent with the newest question rather than in the system prompt:
+    it changes as indexing runs and when another tab is opened, and anything that
+    changes before the chat history stops the history being read from the cache.
+    """
+    if not docs:
+        return None
+    return text_block(f"The topic's documents:\n{overview(docs, current)}")
 
 
 Event = dict[str, Any]
@@ -214,8 +229,11 @@ async def stream_answer(
     aliases = {d.info.id: d.alias for d in toolbox.docs.values()}
     newest = request.messages[-1].context if request.messages else None
     current = aliases.get(newest.doc_id or "") if newest else None
-    system = system_blocks(request.topic, list(toolbox.docs.values()), current)
+    system = system_blocks(request.topic)
     messages: list[Any] = build_messages(request, aliases)
+    topic_map = map_block(list(toolbox.docs.values()), current)
+    if topic_map and messages and messages[-1]["role"] == "user":
+        messages[-1]["content"].insert(0, topic_map)
     tools = TOOLS if toolbox.docs else []
     began = time.monotonic()
     first_text: float | None = None

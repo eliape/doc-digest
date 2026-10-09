@@ -46,7 +46,7 @@ Rules that keep clicks from getting in the way:
 - A click is a mouse-down and mouse-up within a few pixels and no text selected. Clicks on PDF links, on margins (no content near the point) and the click that only focuses the window do nothing.
 - **Whatever is already in the composer stays as it is.** A click only changes the attached context.
 - A new click replaces the attached context; there is one at a time.
-- Esc, the chip's × or clicking the marker removes the attached context, and a question sent without one uses only the open page as context.
+- Esc, the chip's ×, clicking the marker or closing the chat removes the attached context, and a question sent without one uses only the open page as context. Sending a question takes it off too. Whenever the marker goes, it fades out.
 
 ### The metadata: where it came from
 
@@ -97,7 +97,7 @@ A **right-click on page content** (or on the selected text) opens a small menu i
 - **Copy** is there when you right-click selected text.
 
 - The chat has two **modes**, picked from a menu on the left below the question box (the model menu is on the right): **Normal** answers questions; **Socratic** has the model ask you questions that lead you to the answer instead of explaining. In Socratic mode the question box takes on a purple shade and the model's messages get a purple edge; your own messages look as always.
-- **Socratic** in the right-click menu switches to Socratic mode and starts a session about what you right-clicked: the model asks the first question straight away. You answer, and it replies with a line of feedback and the next question, giving hints rather than the answer when you are stuck. When you have the key idea it sums up what you worked out. The question you were typing and any attached spot stay as they are.
+- **Socratic** in the right-click menu switches to Socratic mode and starts a session about what you right-clicked: the model asks the first question straight away. The spot or selection is marked for a moment and the marker fades out at once, since nothing is attached. You answer, and it replies with a line of feedback and the next question, giving hints rather than the answer when you are stuck. When you have the key idea it sums up what you worked out. The question you were typing and any attached spot stay as they are.
 - **Ask, or a left click (or selection) with Click to ask, switches back to Normal**, since pointing at something is for asking about it. New chat goes back to Normal.
 - The model knows which turns are Socratic because each one is marked `[Socratic]`, and the system prompt says how to tutor; unmarked turns are ordinary questions.
 - **Quiz me** is in the right-click menu but greyed out ("Coming soon"). The menu reads Ask, Socratic, Quiz me, then Copy below a line.

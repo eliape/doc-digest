@@ -111,7 +111,8 @@
 
   /**
    * Start a Socratic session about a right-clicked spot: the chat opens and the model asks
-   * the first question. Its images render while the question is on its way.
+   * the first question. The spot is marked for a moment. Its images render while the
+   * question is on its way.
    */
   function startSocratic(docId: string, pick: Pick) {
     const picked = workspace.docs[docId]
@@ -119,6 +120,8 @@
     if (!picked || !topic) return
     chatOpen = true
     tick().then(() => chatPanel?.focus())
+    // Show what the session is about, without attaching it.
+    panes[docId]?.markBriefly(pick)
     const about = { docId, docName: picked.name }
     workspace.startSocratic(topic.id, { ...pick, ...about, pageTexts: [] }, async () => {
       const captured = await panes[docId]?.capture(pick)

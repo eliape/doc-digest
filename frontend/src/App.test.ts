@@ -539,6 +539,9 @@ describe('App', () => {
     await fireEvent.click(within(menu).getByRole('menuitem', { name: /^Socratic/ }))
     expect(screen.queryByRole('menu')).not.toBeInTheDocument()
 
+    // The spot is marked for a moment, not attached.
+    expect(page.querySelector('.context-marker.fade')).not.toBeNull()
+    expect(page.querySelector('.context-marker:not(.fade)')).toBeNull()
     const panel = screen.getByRole('complementary', { name: 'Chat' }) as HTMLElement & { inert: boolean }
     expect(panel.inert).toBe(false)
     expect(within(panel).getByRole('log')).toHaveTextContent('Socratic session')
@@ -571,6 +574,38 @@ describe('App', () => {
     // What was typed stays, and asking about something goes back to normal answers.
     expect(box).toHaveValue('Why is this')
     expect(within(panel).getByRole('button', { name: 'Mode: Normal' })).toBeInTheDocument()
+  })
+
+  it('takes the attached spot off when the chat closes, and its marker fades out', async () => {
+    renderOffline()
+    await pick(pdf('slides.pdf'))
+    await screen.findByRole('tab', { name: 'slides.pdf' })
+    const page = standInPage(3)
+    await fireEvent.contextMenu(page, { clientX: 200, clientY: 150 })
+    await fireEvent.click(screen.getByRole('menuitem', { name: /^Ask/ }))
+    expect(page.querySelector('.context-marker:not(.fade)')).not.toBeNull()
+
+    const panel = within(screen.getByRole('complementary', { name: 'Chat' }))
+    await fireEvent.click(panel.getByRole('button', { name: 'Close chat' }))
+    expect(page.querySelector('.context-marker:not(.fade)')).toBeNull()
+    expect(page.querySelector('.context-marker.fade')).not.toBeNull()
+    await waitFor(() => expect(page.querySelector('.context-marker')).toBeNull())
+    await fireEvent.click(screen.getByRole('button', { name: 'Show chat' }))
+    expect(panel.queryByLabelText('Attached to your question')).not.toBeInTheDocument()
+  })
+
+  it('fades the marker out when the question about it is sent', async () => {
+    renderOffline()
+    await pick(pdf('slides.pdf'))
+    await screen.findByRole('tab', { name: 'slides.pdf' })
+    const page = standInPage(3)
+    await fireEvent.contextMenu(page, { clientX: 200, clientY: 150 })
+    await fireEvent.click(screen.getByRole('menuitem', { name: /^Ask/ }))
+    const box = within(screen.getByRole('complementary', { name: 'Chat' })).getByLabelText('Ask a question')
+    await fireEvent.input(box, { target: { value: 'What is this?' } })
+    await fireEvent.keyDown(box, { key: 'Enter' })
+    await waitFor(() => expect(page.querySelector('.context-marker.fade')).not.toBeNull())
+    expect(page.querySelector('.context-marker:not(.fade)')).toBeNull()
   })
 
   it('offers Copy for right-clicked selected text, and asks about that text', async () => {

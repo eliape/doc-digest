@@ -11,7 +11,10 @@
 
   type Props = {
     workspace: Workspace
-    /** Whether the panel is showing. Closing it only hides it: the chat stays with its topic. */
+    /**
+     * Whether the panel is showing. Closing it hides it and takes off the attached spot;
+     * the chat stays with its topic.
+     */
     open?: boolean
     /** Called after Escape or the close button hides the panel, so focus can go back to the toggle. */
     onclose?: () => void
@@ -169,8 +172,10 @@
     composer?.focus({ preventScroll: true })
   }
 
+  /** Hide the panel. What was attached to the next question goes too, and its marker fades. */
   function close() {
     open = false
+    if (topic?.context) workspace.clearContext(topic.id)
     onclose?.()
   }
 

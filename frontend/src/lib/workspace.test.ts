@@ -219,7 +219,7 @@ describe('Workspace.ask', () => {
     expect(ws.isAnswering(topic.id)).toBe(false)
   })
 
-  it('starts a new chat: clears the messages and attached spot, stops the answer, keeps the draft', async () => {
+  it('starts a new chat: clears the messages and stops the answer, keeping the draft and attached spot', async () => {
     const ws = new Workspace()
     const doc = ws.addDoc('notes.pdf', bytes(1))
     const topic = ws.activeTopic!
@@ -240,7 +240,7 @@ describe('Workspace.ask', () => {
     ws.newChat(topic.id)
     expect(signal?.aborted).toBe(true)
     expect(topic.chat).toEqual([])
-    expect(topic.context).toBeUndefined()
+    expect(topic.context?.page).toBe(3)
     expect(topic.draft).toBe('unsent')
     expect(ws.isAnswering(topic.id)).toBe(false)
 

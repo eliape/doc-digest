@@ -86,7 +86,7 @@ describe('ChatPanel', () => {
     expect(log.querySelector('.assistant .katex-display')).not.toBeNull()
   })
 
-  it('clears the chat with New chat, which is disabled while there is nothing to clear', async () => {
+  it('clears the chat with New chat, keeping the attached spot, and is disabled while the chat is empty', async () => {
     const { workspace, topic, context, panel } = setup()
     const button = panel.getByRole('button', { name: 'New chat' })
     expect(button).toBeDisabled()
@@ -94,7 +94,8 @@ describe('ChatPanel', () => {
     workspace.attachContext(topic.id, context)
     await fireEvent.click(await panel.findByRole('button', { name: 'New chat' }))
     expect(topic.chat).toEqual([])
-    expect(topic.context).toBeUndefined()
+    // The attached spot belongs to the next question, so it stays.
+    expect(topic.context).toEqual(context)
     expect(panel.getByRole('button', { name: 'New chat' })).toBeDisabled()
     expect(panel.getByLabelText('Ask a question')).toHaveFocus()
   })

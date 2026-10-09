@@ -112,15 +112,15 @@ export class Workspace {
   }
 
   /**
-   * Start the topic's chat over: forget its questions and answers, stop an answer that is
-   * still arriving, and drop the attached spot. The unsent question and the tabs stay.
+   * Start the topic's chat over: forget its questions and answers and stop an answer that is
+   * still arriving. What belongs to the next question (the draft and the attached spot) stays,
+   * and so do the tabs.
    */
   newChat(topicId: string) {
     const topic = this.topics.find((t) => t.id === topicId)
     if (!topic) return
     this.answering.get(topicId)?.abort()
     topic.chat = []
-    topic.context = undefined
   }
 
   /** Whether a topic's latest answer is still arriving. */

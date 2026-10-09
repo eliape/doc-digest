@@ -183,7 +183,7 @@
           type="button"
           class="new-chat"
           title="Clear this topic's chat and start over"
-          disabled={!topic || (topic.chat.length === 0 && !topic.context)}
+          disabled={!topic || topic.chat.length === 0}
           onclick={() => {
             if (!topic) return
             workspace.newChat(topic.id)

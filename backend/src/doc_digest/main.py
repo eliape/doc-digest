@@ -123,7 +123,7 @@ async def events(
     )
     try:
         async for event in stream_answer(
-            client, request, toolbox, services.usage, services.answer_model
+            client, request, toolbox, services.usage, request.model or services.answer_model
         ):
             yield json.dumps(event) + "\n"
     except Exception as error:

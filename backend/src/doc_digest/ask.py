@@ -89,10 +89,15 @@ class Turn(BaseModel):
     context: Context | None = None
 
 
+# The models the reader can pick in the chat.
+AnswerModel = Literal["claude-opus-5-5", "claude-sonnet-5-5"]
+
+
 class AskRequest(BaseModel):
     topic: str
     docs: list[str] = Field(default=[], description="Backend ids of the topic's PDFs, tab order")
     messages: list[Turn]
+    model: AnswerModel | None = Field(default=None, description="Defaults to ANSWER_MODEL")
 
 
 def page_name(page: int, label: str | None) -> str:

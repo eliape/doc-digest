@@ -142,3 +142,22 @@ def test_ask_reports_a_failure_in_the_stream(client: TestClient, monkeypatch) ->
         {"type": "text", "text": "Par"},
         {"type": "error", "message": "Something went wrong while answering."},
     ]
+
+
+def test_ask_uses_the_chosen_model_or_the_default(client: TestClient, monkeypatch) -> None:
+    used: list[str] = []
+
+    async def fake_stream(_client, _request, _toolbox, _usage, model):
+        used.append(model)
+        yield {"type": "done"}
+
+    main.app.dependency_overrides[main.get_client] = lambda: object()
+    monkeypatch.setattr(main, "stream_answer", fake_stream)
+    question = {"topic": "T", "messages": [{"role": "user", "text": "hi"}]}
+    client.post("/api/ask", json={**question, "model": "claude-sonnet-5-5"})
+    client.post("/api/ask", json=question)
+    assert used == ["claude-sonnet-5-5", main.get_settings().answer_model]
+
+    # Only the models offered in the chat are accepted.
+    response = client.post("/api/ask", json={**question, "model": "some-other-model"})
+    assert response.status_code == 422

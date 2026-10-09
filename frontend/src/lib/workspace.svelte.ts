@@ -67,6 +67,8 @@ export class Workspace {
   // Raw: the PDF bytes should not be wrapped in reactive proxies.
   docs = $state.raw<Record<string, Doc>>({})
   activeTopicId = $state<string>()
+  /** The model that answers new questions, picked in the chat. */
+  answerModel = $state<string>()
   /** Indexing progress per PDF (by tab id). */
   indexing = $state<Record<string, IndexState>>({})
   // Uploads still on their way, so a question can wait for its PDFs' ids.
@@ -214,7 +216,7 @@ export class Workspace {
       const uploading = topic.docIds.filter((id) => id in this.uploads).map((id) => this.uploads[id])
       if (uploading.length) await Promise.all(uploading)
       const serverId = (id: string) => this.indexing[id]?.serverId
-      for await (const event of stream(askRequest(topic, serverId), controller.signal)) {
+      for await (const event of stream(askRequest(topic, serverId, this.answerModel), controller.signal)) {
         if (controller.signal.aborted) break
         if (event.type === 'text') answer.text += event.text
         else answer.steps = [...(answer.steps ?? []), event.text]
@@ -253,10 +255,15 @@ export class Workspace {
  * so far, and the backend's ids of the topic's PDFs so it can look things up in
  * them. Only the newest question carries images, which keeps requests small.
  */
-export function askRequest(topic: Topic, serverId: (docId: string) => string | undefined = () => undefined): AskRequest {
+export function askRequest(
+  topic: Topic,
+  serverId: (docId: string) => string | undefined = () => undefined,
+  model?: string,
+): AskRequest {
   const turns = topic.chat.filter((m) => m.status !== 'streaming')
   return {
     topic: topic.name,
+    ...(model && { model }),
     docs: topic.docIds.map(serverId).filter((id): id is string => !!id),
     messages: turns.map((m, i) => ({
       role: m.role,

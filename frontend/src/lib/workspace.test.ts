@@ -252,6 +252,22 @@ describe('Workspace.ask', () => {
     expect(ws.docs[doc.id]).toBeDefined()
   })
 
+  it('asks the picked model, or leaves the choice to the backend', async () => {
+    const ws = new Workspace()
+    ws.addDoc('notes.pdf', bytes(1))
+    const topic = ws.activeTopic!
+    const models: (string | undefined)[] = []
+    const stream = async function* (request: { model?: string }) {
+      models.push(request.model)
+    }
+    topic.draft = 'one'
+    await ws.ask(topic.id, undefined, stream)
+    ws.answerModel = 'claude-sonnet-5-5'
+    topic.draft = 'two'
+    await ws.ask(topic.id, undefined, stream)
+    expect(models).toEqual([undefined, 'claude-sonnet-5-5'])
+  })
+
   it('only sends images with the newest question', () => {
     const ws = new Workspace()
     const doc = ws.addDoc('notes.pdf', bytes(1))

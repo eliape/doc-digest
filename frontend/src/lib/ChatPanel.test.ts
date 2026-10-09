@@ -85,5 +85,18 @@ describe('ChatPanel', () => {
     expect(log.querySelector('.assistant strong')).toHaveTextContent('the variance')
     expect(log.querySelector('.assistant .katex-display')).not.toBeNull()
   })
+
+  it('clears the chat with New chat, which is disabled while there is nothing to clear', async () => {
+    const { workspace, topic, context, panel } = setup()
+    const button = panel.getByRole('button', { name: 'New chat' })
+    expect(button).toBeDisabled()
+    topic.chat.push({ id: 'q', role: 'user', text: 'What is this?' })
+    workspace.attachContext(topic.id, context)
+    await fireEvent.click(await panel.findByRole('button', { name: 'New chat' }))
+    expect(topic.chat).toEqual([])
+    expect(topic.context).toBeUndefined()
+    expect(panel.getByRole('button', { name: 'New chat' })).toBeDisabled()
+    expect(panel.getByLabelText('Ask a question')).toHaveFocus()
+  })
 })
 

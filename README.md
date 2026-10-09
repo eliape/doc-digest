@@ -35,6 +35,8 @@ uv run python -m doc_digest.evaluate questions.json book.pdf scanned-book.pdf pa
 
 `GET /api/usage` shows tokens, cache use, latency and cost of every model call so far.
 
+Answers use Claude Opus 5.5. To try the cheaper Claude Sonnet 5.5 (about half the cost per question), add `ANSWER_MODEL=claude-sonnet-5-5` to `backend/.env` and restart the backend. The evaluation above uses the same setting, so you can run it once per model and compare.
+
 ## Tests and checks
 
 ```sh

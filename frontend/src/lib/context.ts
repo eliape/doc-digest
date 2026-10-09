@@ -24,11 +24,9 @@ export type PageContext = Pick & {
   nearbyText?: string
   /** The whole page as a base64 JPEG, with the spot marked. */
   pageImage?: string
-  /** A close-up around the spot as a base64 JPEG, with the spot marked. */
-  crop?: string
   /** A small image shown on the chip, as a data URL. */
   thumbnail?: string
-  /** Text of the page and the pages either side. */
+  /** Text of the page. */
   pageTexts: PageText[]
 }
 
@@ -37,7 +35,8 @@ export type Capture = Omit<PageContext, 'docId' | 'docName'>
 
 // Images are sized for the model: it scales anything with a longer side down to about this.
 const PAGE_IMAGE_SIDE = 1568
-const CROP_IMAGE_SIDE = 1200
+// The close-up is only rendered for the chip's thumbnail; the model gets the marked page.
+const CROP_IMAGE_SIDE = 800
 const THUMBNAIL_WIDTH = 240
 const MAX_PAGE_TEXT = 8000
 const MAX_NEARBY_TEXT = 2000
@@ -237,9 +236,10 @@ function thumbnailOf(canvas: HTMLCanvasElement, pick: Pick, region: Box): string
 }
 
 /**
- * Everything the model gets for a question about a page: images of the page
- * and of the picked spot with the spot marked, the PDF's text around it and on
- * the pages either side, the page's printed label and its section.
+ * Everything the model gets for a question about a page: an image of the page
+ * with the picked spot marked, the PDF's text around the spot and on the page,
+ * the page's printed label and its section. Neighbouring pages are left to the
+ * model's read_pages tool, to keep each question cheap.
  */
 export async function capture(doc: PDFDocumentProxy, pick: Pick): Promise<Capture> {
   const page = await doc.getPage(pick.page)
@@ -259,13 +259,9 @@ export async function capture(doc: PDFDocumentProxy, pick: Pick): Promise<Captur
     drawMark(cropCanvas!, pick, region)
   }
 
-  const neighbours = [pick.page - 1, pick.page, pick.page + 1].filter((n) => n >= 1 && n <= doc.numPages)
-  const pageTexts = await Promise.all(
-    neighbours.map(async (n) => {
-      const text = n === pick.page ? joinText(items) : joinText(await doc.getPage(n).then(placedText).catch(() => []))
-      return { page: n, label: labels?.[n - 1] || undefined, text: truncate(text, MAX_PAGE_TEXT) }
-    }),
-  )
+  const pageTexts = [
+    { page: pick.page, label: labels?.[pick.page - 1] || undefined, text: truncate(joinText(items), MAX_PAGE_TEXT) },
+  ]
 
   return {
     ...pick,
@@ -273,7 +269,6 @@ export async function capture(doc: PDFDocumentProxy, pick: Pick): Promise<Captur
     section: sectionFor(outline, pick.page),
     nearbyText: marked ? truncate(textInRegion(items, region), MAX_NEARBY_TEXT) || undefined : undefined,
     pageImage: toBase64Jpeg(pageCanvas),
-    crop: cropCanvas ? toBase64Jpeg(cropCanvas) : undefined,
     thumbnail: cropCanvas ? thumbnailOf(cropCanvas, pick, region) : thumbnailOf(pageCanvas, pick, whole),
     pageTexts,
   }

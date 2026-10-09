@@ -15,6 +15,7 @@ from typing import Any
 # Haiku 5.5 costs 5x more for prompts over 100K tokens; indexing stays under that.
 PRICES: dict[str, dict[str, float]] = {
     "claude-opus-5-5": {"input": 4.00, "output": 20.00},
+    "claude-sonnet-5-5": {"input": 2.00, "output": 10.00},
     "claude-haiku-5-5": {"input": 0.10, "output": 0.50},
 }
 

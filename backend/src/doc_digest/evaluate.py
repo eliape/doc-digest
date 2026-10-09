@@ -150,7 +150,7 @@ async def ask_one(
     names = {d.alias: d.info.name for d in toolbox.docs.values()}
     first_call = len(usage.calls)
     answer, steps, done = "", [], {}
-    async for event in stream_answer(client, request, toolbox, usage):
+    async for event in stream_answer(client, request, toolbox, usage, get_settings().answer_model):
         if event["type"] == "text":
             answer += event["text"]
         elif event["type"] == "step":

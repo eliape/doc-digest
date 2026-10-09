@@ -63,7 +63,7 @@
       <h2>Topics</h2>
 
       {#if workspace.topics.length === 0}
-        <p class="hint">Topics group the PDFs you study together, like lecture notes and the course book.</p>
+        <p class="hint">Topics group the PDFs you study together, like lecture notes, old exams and the course book.</p>
       {/if}
 
       <ul>

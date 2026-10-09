@@ -1,4 +1,5 @@
 <script lang="ts">
+  import type { Pick } from './context'
   import { formatScale, parsePageInput } from './pages'
   import PdfViewer from './PdfViewer.svelte'
 
@@ -9,10 +10,14 @@
     active?: boolean
     /** Where the controls go: a slot in the tab row, so they share its space. */
     controlsTarget?: HTMLElement
+    /** The spot attached to the chat, if it is in this PDF. */
+    marker?: Pick
+    onpick?: (pick: Pick) => void
+    onmarkerclick?: () => void
     onerror?: (error: unknown) => void
   }
 
-  let { data, active = true, controlsTarget, onerror }: Props = $props()
+  let { data, active = true, controlsTarget, marker, onpick, onmarkerclick, onerror }: Props = $props()
 
   // Each tab has its own page and zoom, which its controls show while it is open.
   let viewer = $state<PdfViewer>()
@@ -47,6 +52,13 @@
     return { destroy: () => node.remove() }
   }
 
+  /** Images and text for a question about a spot, or about the page being read when no spot is given. */
+  export function capture(pick: Pick = { page }) {
+    return viewer?.capture(pick) ?? Promise.resolve(undefined)
+  }
+  export function reveal(pick: Pick) {
+    viewer?.reveal(pick)
+  }
   export function zoomIn() {
     viewer?.zoomIn()
   }
@@ -97,7 +109,17 @@
 
 <!-- PdfViewer fills this box (it positions itself absolutely). -->
 <div class="viewer-area">
-  <PdfViewer bind:this={viewer} {data} bind:page bind:pageCount bind:scale {onerror} />
+  <PdfViewer
+    bind:this={viewer}
+    {data}
+    bind:page
+    bind:pageCount
+    bind:scale
+    {marker}
+    {onpick}
+    {onmarkerclick}
+    {onerror}
+  />
 </div>
 
 <style>

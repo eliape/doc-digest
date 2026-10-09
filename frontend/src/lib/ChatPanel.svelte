@@ -732,6 +732,7 @@
   /* A slim row under the box. Negative margin pulls it close, so it reads as part of the box. */
   .below {
     display: flex;
+    justify-content: flex-end;
     margin-top: -0.25rem;
   }
 

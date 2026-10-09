@@ -46,16 +46,26 @@ DOMPurify.addHook('afterSanitizeAttributes', (node) => {
 
 const marked = new Marked({ gfm: true, breaks: true, extensions: [blockMath, inlineMath] })
 
+/** Which PDFs an answer's citations can point at (see linkCitations). */
+export type CitableDocs = {
+  /** The topic's PDF names. */
+  names: string[]
+  /** The backend's aliases for them, like D1, as the model sees them. */
+  aliases?: Record<string, string>
+  /** The PDF a citation with only a page, like "(p. 12)", is about: the one the question was asked in. */
+  current?: string
+}
+
 /**
  * Turn an answer's Markdown, with LaTeX maths, into HTML that is safe to insert: the model's
  * text is untrusted, so anything like scripts or event handlers is stripped. Citations of the
- * PDFs named in `docs` become links (see linkCitations).
+ * PDFs in `docs` become links (see linkCitations).
  */
-export function renderMarkdown(source: string, docs: string[] = []): string {
+export function renderMarkdown(source: string, docs?: CitableDocs): string {
   const html = marked.parse(source, { async: false })
   // KaTeX's MathML copy (for screen readers and copying) keeps the LaTeX in <annotation>.
   const options = { ADD_TAGS: ['semantics', 'annotation'], ADD_ATTR: ['target', 'encoding'] }
-  if (!docs.length) return DOMPurify.sanitize(html, options)
+  if (!docs?.names.length) return DOMPurify.sanitize(html, options)
   const root = document.createElement('div')
   root.append(DOMPurify.sanitize(html, { ...options, RETURN_DOM_FRAGMENT: true }))
   linkCitations(root, docs)
@@ -64,21 +74,33 @@ export function renderMarkdown(source: string, docs: string[] = []): string {
 
 const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
+// "p. 41", "pp. 41–43", also spelled out or in Swedish ("page 41", "s. 41", "sid. 41").
+const PAGES = String.raw`(?:pp?\.|pages?|ss?\.|sid\.|sidorna|sidan|sida)\s*(\d+)(?:\s*[–—-]\s*\d+)?`
+
 /**
- * Wrap page citations of the given PDFs, written as ask.py asks ("book.pdf, p. 41" or
- * "book.pdf, pp. 41–43", the .pdf optional), in links carrying the PDF's name and the
- * first page, so the chat can show that page. Code, maths and links are left alone.
+ * Wrap page citations in links carrying the PDF's name and the first page, so the chat can show
+ * that page. ask.py asks for "(book.pdf, p. 41)" or "(book.pdf, pp. 41–43)"; the model sometimes
+ * leaves out ".pdf" or the comma, uses the alias it sees in tool results ("D1, p. 41", shown with
+ * the PDF's name instead), or gives only the page ("(p. 41)"), which means `current`.
+ * Code, maths and links are left alone.
  */
-export function linkCitations(root: HTMLElement, docs: string[]) {
+export function linkCitations(root: HTMLElement, docs: CitableDocs) {
   const byName = new Map<string, string>()
-  for (const doc of docs) {
+  for (const doc of docs.names) {
     byName.set(doc.toLowerCase(), doc)
     const bare = doc.replace(/\.pdf$/i, '')
     if (bare && bare !== doc) byName.set(bare.toLowerCase(), doc)
   }
-  const names = [...byName.keys()].sort((a, b) => b.length - a.length).map(escapeRegExp)
+  const byAlias = new Map<string, string>()
+  for (const [alias, doc] of Object.entries(docs.aliases ?? {})) {
+    if (docs.names.includes(doc)) byAlias.set(alias.toLowerCase(), doc)
+  }
+  const names = [...byName.keys(), ...byAlias.keys()].sort((a, b) => b.length - a.length).map(escapeRegExp)
   if (!names.length) return
-  const pattern = new RegExp(`(?<![\\w.-])(${names.join('|')}),\\s*pp?\\.\\s*(\\d+)(?:\\s*[–—-]\\s*\\d+)?`, 'gi')
+  const named = String.raw`(?<![\w.-])(${names.join('|')}),?\s*${PAGES}`
+  // A page alone counts only right after an opening parenthesis, as in "(p. 41)".
+  const alone = String.raw`(?<=\(\s*)${PAGES}`
+  const pattern = new RegExp(docs.current ? `${named}|${alone}` : named, 'gi')
 
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
     acceptNode: (node) =>
@@ -94,19 +116,25 @@ export function linkCitations(root: HTMLElement, docs: string[]) {
     const pieces: (string | HTMLElement)[] = []
     let at = 0
     for (const match of matches) {
-      const doc = byName.get(match[1].toLowerCase())!
+      const [whole, name, namedPage, alonePage] = match
+      const key = name?.toLowerCase()
+      const doc = key ? (byName.get(key) ?? byAlias.get(key)!) : docs.current!
+      const page = namedPage ?? alonePage
+      // An alias means nothing to the reader, so the link shows the PDF's name instead.
+      const shown = key && byAlias.has(key) && !byName.has(key) ? doc + whole.slice(name.length) : whole
       pieces.push(text.slice(at, match.index))
       // A link, so it wraps with the sentence like text; the chat handles its click.
       const link = document.createElement('a')
       link.href = '#'
       link.className = 'citation'
       link.dataset.doc = doc
-      link.dataset.page = match[2]
-      link.title = `Show ${doc}, p. ${match[2]}`
+      link.dataset.page = page
+      link.title = `Show ${doc}, p. ${page}`
       // Non-breaking spaces keep "p. 41" with its PDF's name when the line wraps.
-      link.textContent = match[1] + match[0].slice(match[1].length).replace(/\s+/g, '\u00a0')
+      const lead = key ? shown.length - (whole.length - name.length) : 0
+      link.textContent = shown.slice(0, lead) + shown.slice(lead).replace(/\s+/g, '\u00a0')
       pieces.push(link)
-      at = match.index + match[0].length
+      at = match.index + whole.length
     }
     pieces.push(text.slice(at))
     node.replaceWith(...pieces)

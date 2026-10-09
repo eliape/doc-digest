@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { renderMarkdown } from './markdown'
+import { type CitableDocs, renderMarkdown } from './markdown'
 
-const html = (source: string, docs?: string[]) => {
+const html = (source: string, docs?: CitableDocs) => {
   const div = document.createElement('div')
   div.innerHTML = renderMarkdown(source, docs)
   return div
@@ -46,17 +46,43 @@ describe('renderMarkdown', () => {
     expect(links[1]?.getAttribute('href') ?? '').not.toContain('javascript')
   })
 
+  const citations = (div: HTMLElement) =>
+    [...div.querySelectorAll<HTMLAnchorElement>('a.citation')].map((c) => [
+      c.textContent?.replace(/\u00a0/g, ' '),
+      c.dataset.doc,
+      c.dataset.page,
+    ])
+
   it("turns citations of the topic's PDFs into links with the PDF and page", () => {
     const div = html(
       'See (book.pdf, p. 41) and **notes, pp. 3–5**; not other.pdf, p. 2, `book.pdf, p. 9` or lecture-notes, p. 7.',
-      ['book.pdf', 'notes.pdf'],
+      { names: ['book.pdf', 'notes.pdf'] },
     )
-    const citations = [...div.querySelectorAll<HTMLAnchorElement>('a.citation')]
-    expect(citations.map((c) => [c.textContent?.replace(/\u00a0/g, ' '), c.dataset.doc, c.dataset.page])).toEqual([
+    expect(citations(div)).toEqual([
       ['book.pdf, p. 41', 'book.pdf', '41'],
       ['notes, pp. 3–5', 'notes.pdf', '3'],
     ])
     expect(div.textContent?.replace(/\u00a0/g, ' ')).toContain('See (book.pdf, p. 41) and notes, pp. 3–5; not other.pdf')
+  })
+
+  it('reads the other ways the model writes citations', () => {
+    const docs = { names: ['book.pdf', 'notes.pdf'], aliases: { D1: 'book.pdf', D2: 'notes.pdf' }, current: 'notes.pdf' }
+    const div = html(
+      'As shown (p. 12) and (pp. 14–15), defined in (D1, p. 41), see (book.pdf p. 7), (book.pdf, page 8) and (notes.pdf, s. 9).',
+      docs,
+    )
+    expect(citations(div)).toEqual([
+      ['p. 12', 'notes.pdf', '12'],
+      ['pp. 14–15', 'notes.pdf', '14'],
+      // The alias means nothing to the reader, so the link shows the PDF's name.
+      ['book.pdf, p. 41', 'book.pdf', '41'],
+      ['book.pdf p. 7', 'book.pdf', '7'],
+      ['book.pdf, page 8', 'book.pdf', '8'],
+      ['notes.pdf, s. 9', 'notes.pdf', '9'],
+    ])
+    // A page outside parentheses, or with no PDF to point at, stays text.
+    expect(citations(html('Turn to p. 12.', docs))).toEqual([])
+    expect(citations(html('As shown (p. 12).', { names: ['book.pdf', 'notes.pdf'] }))).toEqual([])
   })
 
   it('leaves citations as text when no PDFs are given', () => {

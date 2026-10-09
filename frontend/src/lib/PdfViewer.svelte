@@ -1,5 +1,6 @@
 <script lang="ts">
   import 'pdfjs-dist/legacy/web/pdf_viewer.css'
+  import { untrack } from 'svelte'
   import type { PDFDocumentLoadingTask, PDFDocumentProxy } from 'pdfjs-dist/legacy/build/pdf.mjs'
   import type { PDFViewer } from 'pdfjs-dist/legacy/web/pdf_viewer.mjs'
   import { type Capture, capture as captureContext, type Pick } from './context'
@@ -154,23 +155,57 @@
     oncontextpick(pick, { x: event.clientX, y: event.clientY })
   }
 
-  // Markers: the attached spot, and a short flash where a chip in the chat points.
+  // Markers: the attached spot, a short flash where a chip in the chat points, and spots fading out.
   let flash = $state<Pick>()
   let flashTimer: ReturnType<typeof setTimeout> | undefined
+
+  // How long a marker takes to fade out (the .fade animation below).
+  const FADE_MS = 700
+  // Not state: drawing is done by hand, and these only live until they have faded.
+  let fading: { pick: Pick; start: number }[] = []
+  const fadeTimers = new Set<ReturnType<typeof setTimeout>>()
+
+  /** Draw a marker that fades out straight away. */
+  function fadeOut(pick: Pick) {
+    const item = { pick, start: performance.now() }
+    fading.push(item)
+    const timer = setTimeout(() => {
+      fadeTimers.delete(timer)
+      fading = fading.filter((f) => f !== item)
+      drawMarkers()
+    }, FADE_MS)
+    fadeTimers.add(timer)
+    drawMarkers()
+  }
+
+  const place = (pick: Pick) => JSON.stringify([pick.page, pick.point, pick.box])
+
+  // The attached spot fades out when it is taken off or replaced. Its images arriving
+  // replace it with a copy in the same place, which is not a change.
+  let drawn: Pick | undefined
+  $effect(() => {
+    const was = drawn
+    drawn = marker
+    if (was && (!marker || place(marker) !== place(was))) untrack(() => fadeOut(was))
+  })
 
   function drawMarkers() {
     if (!container) return
     for (const el of container.querySelectorAll('.context-marker')) el.remove()
-    if (marker) drawMarker(marker, false)
-    if (flash) drawMarker(flash, true)
+    // A redraw (zoom, scrolling back to a page) picks a fade up where it had got to.
+    const now = performance.now()
+    for (const { pick, start } of fading) drawMarker(pick, 'fade', now - start)
+    if (marker) drawMarker(marker, 'attached')
+    if (flash) drawMarker(flash, 'flash')
   }
 
-  function drawMarker(pick: Pick, flashing: boolean) {
+  function drawMarker(pick: Pick, kind: 'attached' | 'flash' | 'fade', elapsed = 0) {
     // The rendered page fills its page box, so positions are percentages of it and survive zooming.
     const pageEl = container.querySelector(`.page[data-page-number="${pick.page}"]`)
     if (!pageEl) return
     const el = document.createElement('div')
-    el.className = `context-marker ${pick.box ? 'box' : 'point'}${flashing ? ' flash' : ''}`
+    el.className = `context-marker ${pick.box ? 'box' : 'point'}${kind === 'attached' ? '' : ` ${kind}`}`
+    if (elapsed) el.style.animationDelay = `-${elapsed}ms`
     const percent = (v: number) => `${v * 100}%`
     if (pick.box) {
       Object.assign(el.style, {
@@ -184,7 +219,7 @@
     } else {
       return
     }
-    if (!flashing) {
+    if (kind === 'attached') {
       el.title = 'Attached to the chat. Click to remove it.'
       el.setAttribute('role', 'button')
       el.setAttribute('aria-label', 'Remove from the chat')
@@ -198,7 +233,10 @@
     void flash
     drawMarkers()
   })
-  $effect(() => () => clearTimeout(flashTimer))
+  $effect(() => () => {
+    clearTimeout(flashTimer)
+    for (const timer of fadeTimers) clearTimeout(timer)
+  })
 
   let pdfDocument: PDFDocumentProxy | undefined
   let opened: Uint8Array | undefined
@@ -258,6 +296,11 @@
     clearTimeout(flashTimer)
     flash = pick
     flashTimer = setTimeout(() => (flash = undefined), 1600)
+  }
+
+  /** Mark a spot for a moment: the marker fades out straight away. */
+  export function markBriefly(pick: Pick) {
+    fadeOut(pick)
   }
 
   export function goToPage(n: number) {
@@ -347,8 +390,18 @@
       opacity: 0;
     }
   }
+  .viewer-container :global(.context-marker.fade) {
+    pointer-events: none;
+    animation: context-fade 0.7s ease-in forwards;
+  }
+  @keyframes context-fade {
+    to {
+      opacity: 0;
+    }
+  }
   @media (prefers-reduced-motion: reduce) {
-    .viewer-container :global(.context-marker.flash) {
+    .viewer-container :global(.context-marker.flash),
+    .viewer-container :global(.context-marker.fade) {
       animation: none;
     }
   }

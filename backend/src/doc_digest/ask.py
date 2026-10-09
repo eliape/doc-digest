@@ -45,7 +45,9 @@ Citing: cite the pages you actually read or were shown, never the index or summa
 (document name, p. N) using PDF page numbers, e.g. (book.pdf, p. 41). If the topic does not \
 contain the answer, say so, then answer from general knowledge and say that you are doing so.
 
-Explain in a way that helps them understand, not only what the answer is. The chat renders \
+Explain in a way that helps them understand, not only what the answer is. Keep answers short by \
+default: answer the question directly and give the key idea in a few short paragraphs. Go into \
+longer derivations, worked examples or background when they ask for more. The chat renders \
 Markdown, so use it where it helps (short paragraphs, lists, **bold** for key terms), but keep \
 answers conversational rather than report-like. Write all maths in LaTeX: $...$ inline and \
 $$...$$ on its own line for display equations. Write a literal dollar sign as \\$."""
@@ -153,7 +155,7 @@ def build_messages(request: AskRequest, aliases: dict[str, str] | None = None) -
     for i, turn in enumerate(request.messages):
         if turn.role == "assistant":
             if turn.text.strip():
-                messages.append({"role": "assistant", "content": turn.text})
+                messages.append({"role": "assistant", "content": [text_block(turn.text)]})
             continue
         content: list[dict[str, Any]] = []
         if turn.context:
@@ -167,6 +169,10 @@ def build_messages(request: AskRequest, aliases: dict[str, str] | None = None) -
             messages[-1]["content"].extend(content)
         else:
             messages.append({"role": "user", "content": content})
+    # Cache the history before the newest question. Its images are dropped on the next
+    # question, so the request-wide cache entry never matches again, but this one does.
+    if len(messages) > 1 and messages[-2]["role"] == "assistant":
+        messages[-2]["content"][-1]["cache_control"] = {"type": "ephemeral"}
     return messages
 
 

@@ -49,6 +49,22 @@ def test_only_the_newest_question_carries_images() -> None:
     assert last["content"][-1]["text"] == "Question: second?"
 
 
+def test_the_history_before_the_newest_question_is_cached() -> None:
+    request = AskRequest(
+        topic="T",
+        messages=[
+            Turn(role="user", text="one"),
+            Turn(role="assistant", text="first answer"),
+            Turn(role="user", text="two"),
+            Turn(role="assistant", text="second answer"),
+            Turn(role="user", text="three"),
+        ],
+    )
+    messages = build_messages(request)
+    marked = [b["text"] for m in messages for b in m["content"] if "cache_control" in b]
+    assert marked == ["second answer"]
+
+
 def test_a_question_without_context_is_sent_as_typed() -> None:
     request = AskRequest(topic="T", messages=[Turn(role="user", text="hi")])
     assert build_messages(request) == [

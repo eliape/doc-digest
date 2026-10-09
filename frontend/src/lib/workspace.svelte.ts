@@ -190,15 +190,16 @@ export class Workspace {
   }
 
   /**
-   * Start the topic's chat over: forget its questions and answers and stop an answer that is
-   * still arriving. What belongs to the next question (the draft, the attached spot and the
-   * mode) stays, and so do the tabs.
+   * Start the topic's chat over: forget its questions and answers, stop an answer that is
+   * still arriving and go back to Normal mode. What belongs to the next question (the draft
+   * and the attached spot) stays, and so do the tabs.
    */
   newChat(topicId: string) {
     const topic = this.topics.find((t) => t.id === topicId)
     if (!topic) return
     this.answering.get(topicId)?.abort()
     topic.chat = []
+    topic.mode = 'normal'
   }
 
   /** Whether a topic's latest answer is still arriving. */

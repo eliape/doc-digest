@@ -91,7 +91,7 @@ A **right-click on page content** (or on the selected text) opens a small menu i
 
 - The chat has two **modes**, picked from a menu on the left below the question box (the model menu is on the right): **Normal** answers questions; **Socratic** has the model ask you questions that lead you to the answer instead of explaining. In Socratic mode the question box takes on a purple shade and the model's messages get a purple edge; your own messages look as always.
 - **Socratic** in the right-click menu switches to Socratic mode and starts a session about what you right-clicked: the model asks the first question straight away. You answer, and it replies with a line of feedback and the next question, giving hints rather than the answer when you are stuck. When you have the key idea it sums up what you worked out. The question you were typing and any attached spot stay as they are.
-- **A left click (or selection) on the page switches back to Normal**, since pointing at something is for asking about it. New chat keeps the mode, like the model.
+- **A left click (or selection) on the page switches back to Normal**, since pointing at something is for asking about it. New chat goes back to Normal.
 - The model knows which turns are Socratic because each one is marked `[Socratic]`, and the system prompt says how to tutor; unmarked turns are ordinary questions.
 - **Quiz me** is in the right-click menu but greyed out ("Coming soon").
 

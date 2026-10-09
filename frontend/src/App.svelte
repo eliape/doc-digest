@@ -1,17 +1,8 @@
 <script lang="ts">
-  import { fetchHealth } from './lib/api'
   import DocPane from './lib/DocPane.svelte'
   import { isPdfFile } from './lib/pages'
   import TopicsSidebar from './lib/TopicsSidebar.svelte'
   import { Workspace } from './lib/workspace.svelte'
-
-  let backend = $state<'checking' | 'ok' | 'down'>('checking')
-
-  $effect(() => {
-    fetchHealth()
-      .then((h) => (backend = h.status === 'ok' ? 'ok' : 'down'))
-      .catch(() => (backend = 'down'))
-  })
 
   const workspace = new Workspace()
   let error = $state('')
@@ -110,16 +101,9 @@
   }}
   ondrop={onDrop}
 >
-  <header class="toolbar">
-    <button
-      type="button"
-      class="sidebar-toggle"
-      aria-label={sidebarOpen ? 'Hide topics' : 'Show topics'}
-      aria-expanded={sidebarOpen}
-      aria-controls={sidebarOpen ? 'topics-sidebar' : undefined}
-      onclick={() => (sidebarOpen = !sidebarOpen)}>☰</button
-    >
-    <h1>doc-digest</h1>
+  <TopicsSidebar {workspace} bind:open={sidebarOpen} />
+
+  <div class="main">
     <input
       bind:this={fileInput}
       type="file"
@@ -132,127 +116,77 @@
       }}
     />
 
-    <span class="status" data-state={backend} title="Backend status">
-      Backend:
-      {#if backend === 'checking'}checking…{:else if backend === 'ok'}connected{:else}not reachable{/if}
-    </span>
-  </header>
-
-  {#if error}
-    <p class="error" role="alert">{error}</p>
-  {/if}
-
-  <div class="body">
-    {#if sidebarOpen}
-      <TopicsSidebar {workspace} />
+    {#if error}
+      <p class="error" role="alert">{error}</p>
     {/if}
 
-    <div class="main">
-      {#if workspace.activeTopic && workspace.activeTopic.docIds.length > 0}
-        <div class="tabs" role="tablist" aria-label={`PDFs in ${workspace.activeTopic.name}`}>
-          {#each workspace.activeTopic.docIds as id (id)}
-            {@const tab = workspace.docs[id]}
-            <div class="tab" class:active={id === doc?.id}>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={id === doc?.id}
-                title={tab.name}
-                onclick={() => workspace.selectDoc(id)}>{tab.name}</button
-              >
-              <button type="button" class="close" aria-label={`Close ${tab.name}`} onclick={() => workspace.closeDoc(id)}
-                >×</button
-              >
-            </div>
-          {/each}
-          <button
-            type="button"
-            class="add-tab"
-            aria-label={`Add a PDF to ${workspace.activeTopic.name}`}
-            onclick={() => fileInput.click()}>+</button
-          >
+    {#if workspace.activeTopic && workspace.activeTopic.docIds.length > 0}
+      <div class="tabs" role="tablist" aria-label={`PDFs in ${workspace.activeTopic.name}`}>
+        {#each workspace.activeTopic.docIds as id (id)}
+          {@const tab = workspace.docs[id]}
+          <div class="tab" class:active={id === doc?.id}>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={id === doc?.id}
+              title={tab.name}
+              onclick={() => workspace.selectDoc(id)}>{tab.name}</button
+            >
+            <button type="button" class="close" aria-label={`Close ${tab.name}`} onclick={() => workspace.closeDoc(id)}
+              >×</button
+            >
+          </div>
+        {/each}
+        <button
+          type="button"
+          class="add-tab"
+          aria-label={`Add a PDF to ${workspace.activeTopic.name}`}
+          onclick={() => fileInput.click()}>+</button
+        >
+      </div>
+    {/if}
+
+    <main class="stage">
+      {#each mounted as id (id)}
+        {@const d = workspace.docs[id]}
+        {#if d}
+          <div class="tabpanel" class:active={id === doc?.id} inert={id !== doc?.id} role="tabpanel" aria-label={d.name}>
+            <DocPane
+              bind:this={panes[id]}
+              data={d.data}
+              onerror={() => {
+                error = `Could not open ${d.name}. Is it a valid PDF?`
+                workspace.closeDoc(id)
+              }}
+            />
+          </div>
+        {/if}
+      {/each}
+
+      {#if !workspace.activeTopic}
+        <div class="empty">
+          <p>Open a PDF to start reading.</p>
+          <button type="button" onclick={() => fileInput.click()}>Choose a file</button>
+          <p class="hint">or drop one anywhere in this window</p>
+        </div>
+      {:else if !doc}
+        <div class="empty">
+          <p>Add a PDF to {workspace.activeTopic.name}.</p>
+          <button type="button" onclick={() => fileInput.click()}>Choose a file</button>
+          <p class="hint">Each PDF in a topic opens as a tab, so you can switch between them.</p>
         </div>
       {/if}
-
-      <main class="stage">
-        {#each mounted as id (id)}
-          {@const d = workspace.docs[id]}
-          {#if d}
-            <div class="tabpanel" class:active={id === doc?.id} inert={id !== doc?.id} role="tabpanel" aria-label={d.name}>
-              <DocPane
-                bind:this={panes[id]}
-                data={d.data}
-                onerror={() => {
-                  error = `Could not open ${d.name}. Is it a valid PDF?`
-                  workspace.closeDoc(id)
-                }}
-              />
-            </div>
-          {/if}
-        {/each}
-
-        {#if !workspace.activeTopic}
-          <div class="empty">
-            <p>Open a PDF to start reading.</p>
-            <button type="button" onclick={() => fileInput.click()}>Choose a file</button>
-            <p class="hint">or drop one anywhere in this window</p>
-          </div>
-        {:else if !doc}
-          <div class="empty">
-            <p>Add a PDF to {workspace.activeTopic.name}.</p>
-            <button type="button" onclick={() => fileInput.click()}>Choose a file</button>
-            <p class="hint">Each PDF in a topic opens as a tab, so you can switch between them.</p>
-          </div>
-        {/if}
-        {#if dragging}
-          <div class="drop-overlay">Drop to open</div>
-        {/if}
-      </main>
-    </div>
+      {#if dragging}
+        <div class="drop-overlay">Drop to open</div>
+      {/if}
+    </main>
   </div>
 </div>
 
 <style>
   .app {
     display: flex;
-    flex-direction: column;
     height: 100vh;
-  }
-
-  .toolbar {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 0.75rem;
-    padding: 0.5rem 1rem;
-    border-bottom: 1px solid var(--border);
-    background: var(--surface);
-  }
-
-  h1 {
-    font-size: 1rem;
-    margin: 0;
-  }
-
-  .sidebar-toggle {
-    border: none;
-    background: none;
-    color: inherit;
-    font-size: 1.1rem;
-    cursor: pointer;
-    padding: 0.125rem 0.375rem;
-  }
-
-  .status {
-    margin-left: auto;
-    font-size: 0.85rem;
-    color: var(--muted);
-  }
-  .status[data-state='ok'] {
-    color: #1a7f37;
-  }
-  .status[data-state='down'] {
-    color: #cf222e;
   }
 
   .error {
@@ -260,12 +194,6 @@
     padding: 0.5rem 1rem;
     background: #ffebe9;
     color: #82071e;
-  }
-
-  .body {
-    display: flex;
-    flex: 1;
-    min-height: 0;
   }
 
   .main {

@@ -22,17 +22,13 @@ async function pick(file: File) {
 }
 
 describe('App', () => {
-  it('shows the backend as connected when /api/health is ok', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ status: 'ok' }))))
-    render(App)
-    expect(screen.getByRole('heading', { name: 'doc-digest' })).toBeInTheDocument()
-    expect(await screen.findByText(/connected/)).toBeInTheDocument()
-  })
-
-  it('shows the backend as not reachable when the request fails', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')))
-    render(App)
-    expect(await screen.findByText(/not reachable/)).toBeInTheDocument()
+  it('has no header: the title lives in the sidebar and the backend status is gone', () => {
+    renderOffline()
+    expect(screen.queryByRole('banner')).not.toBeInTheDocument()
+    expect(screen.queryByText(/Backend/)).not.toBeInTheDocument()
+    const sidebar = within(screen.getByRole('complementary', { name: 'Topics' }))
+    expect(sidebar.getByRole('heading', { name: 'doc-digest' })).toBeInTheDocument()
+    expect(sidebar.getByRole('heading', { name: 'Topics' })).toBeInTheDocument()
   })
 
   it('asks for a PDF before one is open', () => {
@@ -122,27 +118,42 @@ describe('App', () => {
     expect(screen.getByText('Open a PDF to start reading.')).toBeInTheDocument()
   })
 
-  it('collapses and expands the topics sidebar, remembering the choice', async () => {
+  it('collapses the sidebar to a strip that keeps the menu and New topic buttons', async () => {
     renderOffline()
-    const toggle = screen.getByRole('button', { name: 'Hide topics' })
+    const sidebar = screen.getByRole('complementary', { name: 'Topics' })
+    const toggle = within(sidebar).getByRole('button', { name: 'Hide topics' })
     expect(toggle).toHaveAttribute('aria-expanded', 'true')
     await fireEvent.click(toggle)
-    expect(screen.queryByRole('complementary', { name: 'Topics' })).not.toBeInTheDocument()
+
     expect(localStorage.getItem('doc-digest.sidebarOpen')).toBe('false')
-    await fireEvent.click(screen.getByRole('button', { name: 'Show topics' }))
-    expect(screen.getByRole('complementary', { name: 'Topics' })).toBeInTheDocument()
+    expect(within(sidebar).queryByRole('heading', { name: 'doc-digest' })).not.toBeInTheDocument()
+    expect(within(sidebar).queryByRole('heading', { name: 'Topics' })).not.toBeInTheDocument()
+    expect(within(sidebar).getByRole('button', { name: 'Show topics' })).toHaveAttribute('aria-expanded', 'false')
+    expect(within(sidebar).getByRole('button', { name: 'New topic' })).toBeInTheDocument()
+
+    await fireEvent.click(within(sidebar).getByRole('button', { name: 'Show topics' }))
+    expect(within(sidebar).getByRole('heading', { name: 'Topics' })).toBeInTheDocument()
   })
 
-  it('has no Open PDF button in the header, and puts the PDF controls inside each tab', async () => {
+  it('expands the sidebar when New topic is pressed while it is collapsed', async () => {
+    renderOffline()
+    const sidebar = within(screen.getByRole('complementary', { name: 'Topics' }))
+    await fireEvent.click(sidebar.getByRole('button', { name: 'Hide topics' }))
+    await fireEvent.click(sidebar.getByRole('button', { name: 'New topic' }))
+    expect(sidebar.getByLabelText('Topic name')).toBeInTheDocument()
+    expect(sidebar.getByRole('button', { name: 'Hide topics' })).toBeInTheDocument()
+  })
+
+  it('has no Open PDF button, and puts the PDF controls inside each tab', async () => {
     renderOffline()
     expect(screen.queryByRole('button', { name: 'Open PDF' })).not.toBeInTheDocument()
     await pick(pdf('a.pdf', 'a'))
     await pick(pdf('b.pdf', 'b'))
     await screen.findByRole('tab', { name: 'b.pdf' })
 
-    const header = screen.getByRole('banner')
-    expect(within(header).queryByLabelText('Page number')).not.toBeInTheDocument()
-    expect(within(header).queryByLabelText('Zoom in')).not.toBeInTheDocument()
+    const sidebar = within(screen.getByRole('complementary', { name: 'Topics' }))
+    expect(sidebar.queryByLabelText('Page number')).not.toBeInTheDocument()
+    expect(sidebar.queryByLabelText('Zoom in')).not.toBeInTheDocument()
 
     // Only the open tab's controls are reachable; the other tab is inert.
     const panel = screen.getByRole('tabpanel', { name: 'b.pdf' })

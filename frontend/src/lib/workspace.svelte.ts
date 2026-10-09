@@ -1,12 +1,25 @@
+import { type AnswerStream, type AskRequest, fetchAnswer } from './api'
+import type { PageContext } from './context'
+
 /** A PDF opened in a topic. Each one is a tab. */
 export type Doc = { id: string; name: string; data: Uint8Array }
 
-/** One message in a topic's chat. */
-export type ChatMessage = { id: string; role: 'user' | 'assistant'; text: string }
+/**
+ * One message in a topic's chat. A question carries the context it was asked
+ * about; an answer is `streaming` while it arrives and `error` if it failed.
+ */
+export type ChatMessage = {
+  id: string
+  role: 'user' | 'assistant'
+  text: string
+  context?: PageContext
+  status?: 'streaming' | 'done' | 'error'
+}
 
 /**
  * A named group of PDFs that are read and asked about together. Each topic has
  * one chat, shared by all its tabs, and `draft` is the unsent question in it.
+ * `context` is the spot the reader last clicked, attached to the next question.
  */
 export type Topic = {
   id: string
@@ -15,6 +28,7 @@ export type Topic = {
   activeDocId?: string
   chat: ChatMessage[]
   draft: string
+  context?: PageContext
 }
 
 let nextId = 0
@@ -84,13 +98,50 @@ export class Workspace {
     return doc
   }
 
-  /** Add the user's question to a topic's chat and clear its draft. Blank questions are ignored. */
-  sendMessage(topicId: string, text: string): ChatMessage | undefined {
+  /** Attach what the reader pointed at to the topic's next question, replacing what was attached. */
+  attachContext(topicId: string, context: PageContext) {
     const topic = this.topics.find((t) => t.id === topicId)
-    if (!topic || !text.trim()) return
-    topic.chat.push({ id: newId(), role: 'user', text: text.trim() })
+    if (topic) topic.context = context
+  }
+
+  clearContext(topicId: string) {
+    const topic = this.topics.find((t) => t.id === topicId)
+    if (topic) topic.context = undefined
+  }
+
+  /** Whether a topic's latest answer is still arriving. */
+  isAnswering(topicId: string): boolean {
+    return this.topics.find((t) => t.id === topicId)?.chat.at(-1)?.status === 'streaming'
+  }
+
+  /**
+   * Send the topic's draft as a question, with the attached context or, when
+   * nothing is attached, whatever `fallback` gives (the open page), and stream
+   * the answer into the chat. Blank questions are ignored, and so is a new
+   * question while an answer is still arriving.
+   */
+  async ask(
+    topicId: string,
+    fallback?: () => Promise<PageContext | undefined>,
+    stream: AnswerStream = fetchAnswer,
+  ): Promise<void> {
+    const topic = this.topics.find((t) => t.id === topicId)
+    if (!topic || !topic.draft.trim() || this.isAnswering(topicId)) return
+    topic.chat.push({ id: newId(), role: 'user', text: topic.draft.trim(), context: topic.context })
+    topic.chat.push({ id: newId(), role: 'assistant', text: '', status: 'streaming' })
+    // Read back through the topic, so changes go through Svelte's state.
+    const question = topic.chat[topic.chat.length - 2]
+    const answer = topic.chat[topic.chat.length - 1]
     topic.draft = ''
-    return topic.chat[topic.chat.length - 1]
+    topic.context = undefined
+    try {
+      question.context ??= await fallback?.().catch(() => undefined)
+      for await (const piece of stream(askRequest(topic))) answer.text += piece
+      answer.status = 'done'
+    } catch (error) {
+      answer.status = 'error'
+      answer.text = error instanceof Error ? error.message : String(error)
+    }
   }
 
   selectDoc(id: string) {
@@ -107,7 +158,41 @@ export class Workspace {
     const index = topic.docIds.indexOf(id)
     topic.docIds.splice(index, 1)
     if (topic.activeDocId === id) topic.activeDocId = topic.docIds[index] ?? topic.docIds[index - 1]
+    if (topic.context?.docId === id) topic.context = undefined
     this.docs = omit(this.docs, [id])
+  }
+}
+
+/**
+ * What the backend needs to answer a topic's newest question: the conversation
+ * so far. Only the newest question carries images, which keeps requests small.
+ */
+export function askRequest(topic: Topic): AskRequest {
+  const turns = topic.chat.filter((m) => m.status !== 'streaming')
+  return {
+    topic: topic.name,
+    messages: turns.map((m, i) => ({
+      role: m.role,
+      text: m.status === 'error' ? '' : m.text,
+      context: m.context && contextForRequest(m.context, i === turns.length - 1),
+    })),
+  }
+}
+
+function contextForRequest(context: PageContext, withImages: boolean) {
+  return {
+    doc_name: context.docName,
+    page: context.page,
+    page_label: context.pageLabel,
+    section: context.section,
+    point: context.point,
+    selection: context.selection,
+    nearby_text: context.nearbyText,
+    ...(withImages && {
+      page_image: context.pageImage,
+      crop: context.crop,
+      page_texts: context.pageTexts,
+    }),
   }
 }
 

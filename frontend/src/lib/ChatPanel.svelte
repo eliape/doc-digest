@@ -1,5 +1,6 @@
 <script lang="ts">
   import { tick } from 'svelte'
+  import { contextLabel, type PageContext } from './context'
   import type { Workspace } from './workspace.svelte'
 
   type Props = {
@@ -8,9 +9,13 @@
     open?: boolean
     /** Called after Escape or the close button hides the panel, so focus can go back to the toggle. */
     onclose?: () => void
+    /** Send the topic's draft. Defaults to asking with only the attached context. */
+    onsend?: (topicId: string) => void
+    /** Show where a context chip points: switch to its tab and flash the spot. */
+    onreveal?: (context: PageContext) => void
   }
 
-  let { workspace, open = $bindable(false), onclose }: Props = $props()
+  let { workspace, open = $bindable(false), onclose, onsend, onreveal }: Props = $props()
 
   let topic = $derived(workspace.activeTopic)
   let composer = $state<HTMLTextAreaElement>()
@@ -81,10 +86,24 @@
     if (open && topic) tick().then(() => composer?.focus({ preventScroll: true }))
   })
 
-  // Keep the newest message in view.
+  let answering = $derived(topic ? workspace.isAnswering(topic.id) : false)
+
+  /** The chip's name, with the PDF's name when the topic has several. */
+  function chipName(context: PageContext) {
+    const several = (topic?.docIds.length ?? 0) > 1
+    return several ? `${contextLabel(context)} · ${context.docName}` : contextLabel(context)
+  }
+
+  function chipTitle(context: PageContext) {
+    const what = context.selection ? 'Selected text' : context.point ? 'Clicked spot' : 'Page'
+    return `${what} on ${contextLabel(context)} of ${context.docName}. Click to show it.`
+  }
+
+  // Keep the newest message in view, also while an answer streams in.
   $effect(() => {
     if (!topic) return
     void topic.chat.length
+    void topic.chat.at(-1)?.text
     tick().then(() => log?.lastElementChild?.scrollIntoView?.({ block: 'end' }))
   })
 
@@ -100,7 +119,9 @@
 
   function send(event?: SubmitEvent) {
     event?.preventDefault()
-    if (topic) workspace.sendMessage(topic.id, topic.draft)
+    if (!topic || answering) return
+    if (onsend) onsend(topic.id)
+    else workspace.ask(topic.id)
   }
 
   function onComposerKeydown(event: KeyboardEvent) {
@@ -115,8 +136,11 @@
 <svelte:window
   onresize={() => (width = clampWidth(width))}
   onkeydown={(e) => {
-    // Escape closes the panel while focus is in it.
-    if (e.key === 'Escape' && open && panel?.contains(document.activeElement)) close()
+    // Escape takes off the attached spot, or else closes the panel, while focus is in it.
+    if (e.key === 'Escape' && open && panel?.contains(document.activeElement)) {
+      if (topic?.context) workspace.clearContext(topic.id)
+      else close()
+    }
   }}
 />
 
@@ -158,28 +182,59 @@
     {#if topic}
       <div class="messages" role="log" aria-label={`Chat in ${topic.name}`} bind:this={log}>
         {#each topic.chat as message (message.id)}
-          <div class="message {message.role}">{message.text}</div>
+          <div class="message {message.role}" class:error={message.status === 'error'}>
+            {#if message.context}
+              <button
+                type="button"
+                class="chip small"
+                title={chipTitle(message.context)}
+                onclick={() => onreveal?.(message.context!)}
+              >
+                {#if message.context.thumbnail}<img src={message.context.thumbnail} alt="" />{/if}
+                <span>{chipName(message.context)}</span>
+              </button>
+            {/if}
+            {#if message.status === 'streaming' && !message.text}
+              <span class="thinking">Thinking…</span>
+            {:else}
+              <span class="text">{message.text}</span>
+            {/if}
+          </div>
         {:else}
           <p class="hint">
             Ask about anything in {topic.name}. Every PDF in this topic is part of the context, and the chat stays here
             when you switch tabs.
           </p>
         {/each}
-        {#if topic.chat.length > 0 && !topic.chat.some((m) => m.role === 'assistant')}
-          <p class="hint">Answers are not connected yet. They arrive with the next build step.</p>
-        {/if}
       </div>
 
       <form class="composer" onsubmit={send}>
+        {#if topic.context}
+          {@const context = topic.context}
+          <div class="attached" aria-label="Attached to your question">
+            <button type="button" class="chip" title={chipTitle(context)} onclick={() => onreveal?.(context)}>
+              {#if context.thumbnail}<img src={context.thumbnail} alt="" />{/if}
+              <span>{chipName(context)}</span>
+              {#if context.selection}<span class="quote">“{context.selection}”</span>{/if}
+            </button>
+            <button
+              type="button"
+              class="remove"
+              aria-label="Remove from your question"
+              title="Remove (Esc)"
+              onclick={() => workspace.clearContext(topic.id)}>×</button
+            >
+          </div>
+        {/if}
         <textarea
           bind:this={composer}
           bind:value={topic.draft}
           aria-label="Ask a question"
-          placeholder="Ask a question…"
+          placeholder={topic.context ? `Ask about ${contextLabel(topic.context)}…` : 'Ask a question…'}
           rows="3"
           onkeydown={onComposerKeydown}
         ></textarea>
-        <button type="submit" disabled={!topic.draft.trim()}>Send</button>
+        <button type="submit" disabled={!topic.draft.trim() || answering}>Send</button>
       </form>
     {:else}
       <p class="hint">Open a PDF to start a chat about it.</p>
@@ -320,8 +375,10 @@
   .message {
     padding: 0.5rem 0.75rem;
     border-radius: 0.5rem;
-    white-space: pre-wrap;
     overflow-wrap: anywhere;
+  }
+  .text {
+    white-space: pre-wrap;
   }
   .message.user {
     align-self: flex-end;
@@ -331,6 +388,83 @@
   .message.assistant {
     background: var(--surface);
     border: 1px solid var(--border);
+  }
+
+  .message.error {
+    color: var(--error, #82071e);
+    background: #ffebe9;
+    border-color: #ffcecb;
+  }
+
+  .thinking {
+    color: var(--muted);
+  }
+
+  .chip {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-width: 0;
+    padding: 0.25rem;
+    border: 1px solid var(--border);
+    border-radius: 0.375rem;
+    background: var(--surface);
+    color: inherit;
+    font: inherit;
+    font-size: 0.85rem;
+    text-align: left;
+    cursor: pointer;
+  }
+  .chip:hover {
+    background: var(--hover);
+  }
+  .chip img {
+    flex-shrink: 0;
+    width: 4rem;
+    max-height: 3rem;
+    object-fit: cover;
+    object-position: center;
+    border-radius: 0.25rem;
+    border: 1px solid var(--border);
+  }
+  .chip span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .chip .quote {
+    color: var(--muted);
+  }
+  .chip.small {
+    margin-bottom: 0.375rem;
+    font-size: 0.8rem;
+    white-space: normal;
+  }
+  .chip.small img {
+    width: 3rem;
+    max-height: 2.25rem;
+  }
+
+  .attached {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+  }
+  .attached .chip {
+    flex: 1;
+  }
+  .remove {
+    border: none;
+    background: none;
+    color: var(--muted);
+    font: inherit;
+    font-size: 1.1rem;
+    padding: 0.25rem 0.5rem;
+    border-radius: 0.375rem;
+    cursor: pointer;
+  }
+  .remove:hover {
+    background: var(--hover);
   }
 
   .hint {

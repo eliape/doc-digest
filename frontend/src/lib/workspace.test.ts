@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { Workspace, topicNameFor } from './workspace.svelte'
+import type { AskRequest } from './api'
+import type { PageContext } from './context'
+import { Workspace, askRequest, topicNameFor } from './workspace.svelte'
 
 const bytes = (...values: number[]) => new Uint8Array(values)
 
@@ -107,14 +109,136 @@ describe('Workspace', () => {
     ws.addDoc('slides.pdf', bytes(1))
     const first = ws.activeTopic!
     first.draft = 'What is a p-value?'
-    ws.sendMessage(first.id, first.draft)
+    ws.ask(first.id, undefined, async function* () {})
     ws.addDoc('book.pdf', bytes(2))
-    expect(ws.activeTopic?.chat.map((m) => [m.role, m.text])).toEqual([['user', 'What is a p-value?']])
+    expect(ws.activeTopic?.chat.map((m) => [m.role, m.text])).toEqual([
+      ['user', 'What is a p-value?'],
+      ['assistant', ''],
+    ])
     expect(first.draft).toBe('')
 
     const second = ws.createTopic('Second')
     expect(second.chat).toEqual([])
-    ws.sendMessage(second.id, '   ')
+    second.draft = '   '
+    ws.ask(second.id)
     expect(ws.activeTopic?.chat).toEqual([])
+  })
+})
+
+describe('Workspace.ask', () => {
+  const context = (docId: string, page: number): PageContext => ({
+    docId,
+    docName: 'notes.pdf',
+    page,
+    point: { x: 0.5, y: 0.25 },
+    pageImage: 'PAGE',
+    crop: 'CROP',
+    pageTexts: [{ page, text: 'some text' }],
+  })
+
+  it('streams the answer into the chat and sends the attached context with the question', async () => {
+    const ws = new Workspace()
+    const doc = ws.addDoc('notes.pdf', bytes(1))
+    const topic = ws.activeTopic!
+    ws.attachContext(topic.id, context(doc.id, 3))
+    topic.draft = '  How is this derived? '
+    const requests: AskRequest[] = []
+    await ws.ask(topic.id, undefined, async function* (request) {
+      requests.push(request)
+      yield 'By '
+      yield 'parts.'
+    })
+    expect(topic.chat.map((m) => [m.role, m.text, m.status])).toEqual([
+      ['user', 'How is this derived?', undefined],
+      ['assistant', 'By parts.', 'done'],
+    ])
+    expect(topic.chat[0].context?.page).toBe(3)
+    expect(topic.context).toBeUndefined()
+    expect(topic.draft).toBe('')
+    expect(requests[0].topic).toBe('notes')
+    expect(requests[0].messages).toEqual([
+      {
+        role: 'user',
+        text: 'How is this derived?',
+        context: expect.objectContaining({ doc_name: 'notes.pdf', page: 3, page_image: 'PAGE', crop: 'CROP' }),
+      },
+    ])
+  })
+
+  it('uses the open page when nothing is attached', async () => {
+    const ws = new Workspace()
+    const doc = ws.addDoc('notes.pdf', bytes(1))
+    const topic = ws.activeTopic!
+    topic.draft = 'What is this page about?'
+    await ws.ask(
+      topic.id,
+      async () => ({ ...context(doc.id, 7), point: undefined }),
+      async function* () {},
+    )
+    expect(topic.chat[0].context?.page).toBe(7)
+  })
+
+  it('shows why an answer failed and leaves it out of the next request', async () => {
+    const ws = new Workspace()
+    ws.addDoc('notes.pdf', bytes(1))
+    const topic = ws.activeTopic!
+    topic.draft = 'first'
+    await ws.ask(topic.id, undefined, async function* () {
+      throw new Error('No API key')
+    })
+    expect(topic.chat[1]).toMatchObject({ role: 'assistant', status: 'error', text: 'No API key' })
+    topic.draft = 'second'
+    let sent: AskRequest | undefined
+    await ws.ask(topic.id, undefined, async function* (request) {
+      sent = request
+    })
+    expect(sent?.messages.map((m) => [m.role, m.text])).toEqual([
+      ['user', 'first'],
+      ['assistant', ''],
+      ['user', 'second'],
+    ])
+  })
+
+  it('ignores a new question while an answer is arriving', async () => {
+    const ws = new Workspace()
+    ws.addDoc('notes.pdf', bytes(1))
+    const topic = ws.activeTopic!
+    topic.draft = 'first'
+    let finish!: () => void
+    const pending = ws.ask(topic.id, undefined, async function* () {
+      await new Promise<void>((resolve) => (finish = resolve))
+    })
+    await Promise.resolve()
+    expect(ws.isAnswering(topic.id)).toBe(true)
+    topic.draft = 'second'
+    await ws.ask(topic.id, undefined, async function* () {})
+    expect(topic.chat).toHaveLength(2)
+    expect(topic.draft).toBe('second')
+    finish()
+    await pending
+    expect(ws.isAnswering(topic.id)).toBe(false)
+  })
+
+  it('only sends images with the newest question', () => {
+    const ws = new Workspace()
+    const doc = ws.addDoc('notes.pdf', bytes(1))
+    const topic = ws.activeTopic!
+    topic.chat.push(
+      { id: 'a', role: 'user', text: 'one', context: context(doc.id, 1) },
+      { id: 'b', role: 'assistant', text: 'answer', status: 'done' },
+      { id: 'c', role: 'user', text: 'two', context: context(doc.id, 2) },
+    )
+    const [first, , last] = askRequest(topic).messages
+    expect(first.context).not.toHaveProperty('page_image')
+    expect(last.context).toMatchObject({ page: 2, page_image: 'PAGE' })
+  })
+
+  it('drops the attached context when its tab closes', () => {
+    const ws = new Workspace()
+    const doc = ws.addDoc('notes.pdf', bytes(1))
+    const topic = ws.activeTopic!
+    ws.attachContext(topic.id, context(doc.id, 1))
+    ws.closeDoc(doc.id)
+    expect(topic.context).toBeUndefined()
   })
 })

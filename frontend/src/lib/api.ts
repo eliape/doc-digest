@@ -6,3 +6,55 @@ export async function fetchHealth(fetchFn: typeof fetch = fetch): Promise<Health
   if (!res.ok) throw new Error(`Backend returned ${res.status}`)
   return (await res.json()) as Health
 }
+
+/** One turn of the conversation, as the backend reads it. */
+export type AskTurn = {
+  role: 'user' | 'assistant'
+  text: string
+  context?: Record<string, unknown>
+}
+
+export type AskRequest = { topic: string; messages: AskTurn[] }
+
+/** Something that streams an answer's text. `fetchAnswer` is the real one; tests pass fakes. */
+export type AnswerStream = (request: AskRequest, signal?: AbortSignal) => AsyncIterable<string>
+
+/**
+ * Ask the backend a question and yield the answer's text as it arrives. The
+ * backend sends newline-delimited JSON: text pieces, then "done" or an error.
+ */
+export async function* fetchAnswer(
+  request: AskRequest,
+  signal?: AbortSignal,
+  fetchFn: typeof fetch = fetch,
+): AsyncGenerator<string> {
+  const res = await fetchFn('/api/ask', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request),
+    signal,
+  })
+  if (!res.ok || !res.body) {
+    const detail = await res
+      .json()
+      .then((body: { detail?: unknown }) => (typeof body.detail === 'string' ? body.detail : undefined))
+      .catch(() => undefined)
+    throw new Error(detail ?? `The backend returned an error (${res.status}). Is it running?`)
+  }
+  const reader = res.body.pipeThrough(new TextDecoderStream()).getReader()
+  let buffered = ''
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (value) buffered += value
+    const lines = buffered.split('\n')
+    buffered = done ? '' : lines.pop()!
+    for (const line of lines) {
+      if (!line.trim()) continue
+      const event = JSON.parse(line) as { type: string; text?: string; message?: string }
+      if (event.type === 'text' && event.text) yield event.text
+      else if (event.type === 'error') throw new Error(event.message ?? 'Something went wrong while answering.')
+      else if (event.type === 'done') return
+    }
+    if (done) throw new Error('The answer stopped before it was finished.')
+  }
+}

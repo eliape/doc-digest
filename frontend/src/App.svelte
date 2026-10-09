@@ -1,6 +1,8 @@
 <script lang="ts">
+  import { tick } from 'svelte'
   import ChatPanel from './lib/ChatPanel.svelte'
   import DocPane from './lib/DocPane.svelte'
+  import type { PageContext, Pick } from './lib/context'
   import { isPdfFile } from './lib/pages'
   import TopicsSidebar from './lib/TopicsSidebar.svelte'
   import { Workspace } from './lib/workspace.svelte'
@@ -79,6 +81,57 @@
 
   // Read at call time: bind:this fills `panes` after the tab mounts.
   const pane = (): DocPane | undefined => (doc ? panes[doc.id] : undefined)
+
+  // Clicking a spot (or selecting text) attaches it to the topic's chat and
+  // opens the chat. Its images render in the background; a question sent
+  // meanwhile waits for them.
+  let latestPick = 0
+  const capturing: Record<string, Promise<unknown>> = {}
+
+  function onPick(docId: string, pick: Pick) {
+    const picked = workspace.docs[docId]
+    const topic = workspace.topicOf(docId)
+    if (!picked || !topic) return
+    const n = ++latestPick
+    workspace.attachContext(topic.id, { ...pick, docId, docName: picked.name, pageTexts: [] })
+    chatOpen = true
+    tick().then(() => chatPanel?.focus())
+    capturing[topic.id] = (panes[docId]?.capture(pick) ?? Promise.resolve(undefined))
+      .then((captured) => {
+        // Unless another pick replaced it or it was removed meanwhile.
+        if (captured && n === latestPick && topic.context?.docId === docId) {
+          workspace.attachContext(topic.id, { ...captured, docId, docName: picked.name })
+        }
+      })
+      .catch(() => {})
+  }
+
+  /** The topic's open page as context, for a question asked without clicking anything. */
+  async function openPageContext(topicId: string): Promise<PageContext | undefined> {
+    const docId = workspace.topics.find((t) => t.id === topicId)?.activeDocId
+    const open = docId ? workspace.docs[docId] : undefined
+    const captured = docId ? await panes[docId]?.capture() : undefined
+    return open && captured ? { ...captured, docId: open.id, docName: open.name } : undefined
+  }
+
+  async function send(topicId: string) {
+    await capturing[topicId]
+    workspace.ask(topicId, () => openPageContext(topicId))
+  }
+
+  /** Show where a chat chip points: its tab, page and spot. */
+  async function reveal(context: PageContext) {
+    if (!workspace.docs[context.docId]) return
+    workspace.selectDoc(context.docId)
+    await tick()
+    panes[context.docId]?.reveal(context)
+  }
+
+  /** The spot attached to a tab's topic, when it is in that tab's PDF. */
+  function markerFor(docId: string): Pick | undefined {
+    const context = workspace.topicOf(docId)?.context
+    return context?.docId === docId ? context : undefined
+  }
 
   let fileInput: HTMLInputElement
 
@@ -219,6 +272,12 @@
               data={d.data}
               active={id === doc?.id}
               controlsTarget={controlsEl}
+              marker={markerFor(id)}
+              onpick={(p) => onPick(id, p)}
+              onmarkerclick={() => {
+                const topic = workspace.topicOf(id)
+                if (topic) workspace.clearContext(topic.id)
+              }}
               onerror={() => {
                 error = `Could not open ${d.name}. Is it a valid PDF?`
                 workspace.closeDoc(id)
@@ -247,7 +306,14 @@
     </main>
   </div>
 
-  <ChatPanel bind:this={chatPanel} {workspace} bind:open={chatOpen} onclose={() => chatToggle?.focus()} />
+  <ChatPanel
+    bind:this={chatPanel}
+    {workspace}
+    bind:open={chatOpen}
+    onclose={() => chatToggle?.focus()}
+    onsend={send}
+    onreveal={reveal}
+  />
 </div>
 
 <style>

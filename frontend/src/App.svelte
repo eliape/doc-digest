@@ -142,24 +142,29 @@
 
   let fileInput: HTMLInputElement
 
-  async function open(file: File | undefined) {
-    if (!file) return
-    if (!isPdfFile(file)) {
-      error = `${file.name} is not a PDF.`
-      return
-    }
-    error = ''
-    // Get the topics out of the way of the new PDF.
+  /** Open each PDF as a tab in the active topic. Several at once all go into the same topic. */
+  async function open(files: FileList | File[] | null | undefined) {
+    const list = Array.from(files ?? [])
+    if (!list.length) return
+    const pdfs = list.filter(isPdfFile)
+    const skipped = list.filter((f) => !isPdfFile(f)).map((f) => f.name)
+    error = skipped.length ? `${skipped.join(', ')} ${skipped.length === 1 ? 'is' : 'are'} not a PDF.` : ''
+    if (!pdfs.length) return
+    // Get the topics out of the way of the new PDFs, once.
     sidebarOpen = false
-    const added = workspace.addDoc(file.name, new Uint8Array(await file.arrayBuffer()))
-    // Index it in the background, so the whole topic can be searched, opened or not.
-    if (!workspace.indexing[added.id]) workspace.index(added.id)
+    // Read them all first, so a slow file can't reorder the tabs.
+    const loaded = await Promise.all(pdfs.map(async (f) => [f.name, new Uint8Array(await f.arrayBuffer())] as const))
+    const added = loaded.map(([name, data]) => workspace.addDoc(name, data))
+    // Land on the first one, as the reader picked them.
+    workspace.selectDoc(added[0].id)
+    // Index them in the background, so the whole topic can be searched, opened or not.
+    for (const doc of added) if (!workspace.indexing[doc.id]) workspace.index(doc.id)
   }
 
   function onDrop(event: DragEvent) {
     event.preventDefault()
     dragging = false
-    open(event.dataTransfer?.files[0])
+    open(event.dataTransfer?.files)
   }
 
   function onKeydown(event: KeyboardEvent) {
@@ -214,10 +219,11 @@
       bind:this={fileInput}
       type="file"
       accept="application/pdf,.pdf"
+      multiple
       hidden
       data-testid="file-input"
       onchange={(e) => {
-        open(e.currentTarget.files?.[0])
+        open(e.currentTarget.files)
         e.currentTarget.value = ''
       }}
     />
@@ -320,7 +326,7 @@
         <div class="empty">
           <p>Open a PDF to start reading.</p>
           <button type="button" onclick={() => fileInput.click()}>Choose a file</button>
-          <p class="hint">or drop one anywhere in this window</p>
+          <p class="hint">or drop PDFs anywhere in this window</p>
         </div>
       {:else if !doc}
         <div class="empty">

@@ -29,7 +29,7 @@ def test_describe_a_selection_quotes_it() -> None:
 
 
 def test_only_the_newest_question_carries_images() -> None:
-    with_images = {"page_image": "PAGE", "crop": "CROP", "point": {"x": 0.1, "y": 0.2}}
+    with_images = {"page_image": "PAGE", "point": {"x": 0.1, "y": 0.2}}
     request = AskRequest(
         topic="Calculus",
         messages=[
@@ -44,7 +44,6 @@ def test_only_the_newest_question_carries_images() -> None:
     assert [b["type"] for b in first["content"]] == ["text", "text"]
     assert first["content"][-1]["text"] == "Question: first?"
     images = [b["source"]["data"] for b in last["content"] if b["type"] == "image"]
-    # The close-up is no longer sent; the mark is drawn on the page image.
     assert images == ["PAGE"]
     assert last["content"][-1]["text"] == "Question: second?"
 

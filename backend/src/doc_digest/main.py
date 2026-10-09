@@ -25,10 +25,16 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@cache
+def _client(api_key: str) -> anthropic.AsyncAnthropic:
+    # One client per key, so questions reuse its connections instead of opening new ones.
+    return anthropic.AsyncAnthropic(api_key=api_key)
+
+
 def make_client(settings: Settings) -> anthropic.AsyncAnthropic | None:
     if not settings.anthropic_api_key:
         return None
-    return anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+    return _client(settings.anthropic_api_key)
 
 
 def get_client(settings: Annotated[Settings, Depends(get_settings)]) -> anthropic.AsyncAnthropic:
@@ -79,9 +85,10 @@ async def add_doc(request: Request, services: ServicesDep, name: str = Query("do
 
 
 @app.get("/api/docs/{doc_id}")
-def doc_status(doc_id: str, services: ServicesDep) -> dict[str, Any]:
+async def doc_status(doc_id: str, services: ServicesDep) -> dict[str, Any]:
     if services.library.get(doc_id) is None:
         raise HTTPException(status_code=404, detail="No such document.")
+    services.indexer.resume(doc_id)
     return {"id": doc_id, **services.indexer.doc_status(doc_id)}
 
 

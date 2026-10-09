@@ -104,6 +104,23 @@ describe('Workspace', () => {
     expect(ws.activeTopic).toBeUndefined()
   })
 
+  it('stops the answer of a topic that is deleted', async () => {
+    const ws = new Workspace()
+    ws.addDoc('notes.pdf', bytes(1))
+    const topic = ws.activeTopic!
+    topic.draft = 'question'
+    let signal: AbortSignal | undefined
+    const pending = ws.ask(topic.id, undefined, async function* (_request, s) {
+      signal = s
+      yield { type: 'text', text: 'Part one' }
+      await new Promise(() => {})
+    })
+    await new Promise((resolve) => setTimeout(resolve))
+    ws.deleteTopic(topic.id)
+    expect(signal?.aborted).toBe(true)
+    void pending
+  })
+
   it('keeps one chat per topic, shared by its tabs', () => {
     const ws = new Workspace()
     ws.addDoc('slides.pdf', bytes(1))

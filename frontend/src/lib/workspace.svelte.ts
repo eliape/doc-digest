@@ -103,6 +103,7 @@ export class Workspace {
     const index = this.topics.findIndex((t) => t.id === id)
     if (index === -1) return
     const [topic] = this.topics.splice(index, 1)
+    this.answering.get(id)?.abort()
     this.docs = omit(this.docs, topic.docIds)
     for (const docId of topic.docIds) delete this.indexing[docId]
     if (this.activeTopicId === id) {

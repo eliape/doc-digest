@@ -243,6 +243,14 @@ class Indexer:
         doc = self.library.get(doc_id)
         return {"status": "queued", "pages_done": 0, "page_count": doc.page_count if doc else 0}
 
+    def resume(self, doc_id: str) -> None:
+        """
+        Pick a half-indexed document back up after the backend restarted (as `make dev`
+        does on every backend edit), since its queue and status lived only in memory.
+        """
+        if doc_id not in self.status:
+            self.enqueue(doc_id)
+
     def enqueue(self, doc_id: str) -> None:
         index = self.get(doc_id)
         if (index and index.complete) or self.status.get(doc_id, {}).get("status") in (

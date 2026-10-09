@@ -85,21 +85,22 @@
   // Clicking a spot (or selecting text) attaches it to the topic's chat and
   // opens the chat. Its images render in the background; a question sent
   // meanwhile waits for them.
-  let latestPick = 0
+  // Per topic, so a pick in another topic can't drop this one's images.
+  const latestPick: Record<string, number> = {}
   const capturing: Record<string, Promise<unknown>> = {}
 
   function onPick(docId: string, pick: Pick) {
     const picked = workspace.docs[docId]
     const topic = workspace.topicOf(docId)
     if (!picked || !topic) return
-    const n = ++latestPick
+    const n = (latestPick[topic.id] = (latestPick[topic.id] ?? 0) + 1)
     workspace.attachContext(topic.id, { ...pick, docId, docName: picked.name, pageTexts: [] })
     chatOpen = true
     tick().then(() => chatPanel?.focus())
     capturing[topic.id] = (panes[docId]?.capture(pick) ?? Promise.resolve(undefined))
       .then((captured) => {
         // Unless another pick replaced it or it was removed meanwhile.
-        if (captured && n === latestPick && topic.context?.docId === docId) {
+        if (captured && n === latestPick[topic.id] && topic.context?.docId === docId) {
           workspace.attachContext(topic.id, { ...captured, docId, docName: picked.name })
         }
       })

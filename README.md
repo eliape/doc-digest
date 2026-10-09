@@ -8,8 +8,8 @@ The v1 plan, scope and build order are in [docs/v1-scope.md](docs/v1-scope.md).
 
 ## Layout
 
-- `frontend/`: Svelte + TypeScript + Vite single-page app (PDF.js arrives with the viewer step). Tests use Vitest and Testing Library.
-- `backend/`: Python FastAPI service, managed with [uv](https://docs.astral.sh/uv/). Tests use pytest; lint and format with ruff.
+- `frontend/`: Svelte + TypeScript + Vite single-page app with a PDF.js viewer (its legacy build, which works in Chromium and WebKit). Tests use Vitest and Testing Library.
+- `backend/`: Python FastAPI service, managed with [uv](https://docs.astral.sh/uv/). It answers questions, and keeps and indexes the PDFs you add under `backend/data/`. Tests use pytest; lint and format with ruff.
 - `docs/`: plans and design notes.
 
 ## Getting started
@@ -22,7 +22,7 @@ cp backend/.env.example backend/.env  # then add your ANTHROPIC_API_KEY
 make dev                              # backend on :8000, frontend on http://localhost:5173
 ```
 
-The frontend dev server forwards `/api/*` to the backend, so open http://localhost:5173. The page shows whether it can reach the backend.
+The frontend dev server forwards `/api/*` to the backend, so open http://localhost:5173. Topics and chats live in the page for now, so a reload starts empty; the PDFs and their indexes stay in `backend/data/`.
 
 ## Checking retrieval and cost
 
@@ -35,7 +35,7 @@ uv run python -m doc_digest.evaluate questions.json book.pdf scanned-book.pdf pa
 
 `GET /api/usage` shows tokens, cache use, latency and cost of every model call so far.
 
-Answers use Claude Opus 5.5. To try the cheaper Claude Sonnet 5.5 (about half the cost per question), add `ANSWER_MODEL=claude-sonnet-5-5` to `backend/.env` and restart the backend. The evaluation above uses the same setting, so you can run it once per model and compare.
+The menu under the question box picks the answering model, Claude Opus 5.5 or the cheaper Claude Sonnet 5.5 (about half the cost per question), and the browser remembers it. The evaluation above uses `ANSWER_MODEL` from `backend/.env` instead (default `claude-opus-5-5`), so set `ANSWER_MODEL=claude-sonnet-5-5` and run it again to compare.
 
 ## Tests and checks
 

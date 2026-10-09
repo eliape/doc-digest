@@ -42,11 +42,16 @@ export type IndexApi = {
 const realIndexApi: IndexApi = { upload: (name, data) => uploadDoc(name, data), status: (id) => fetchIndexStatus(id) }
 
 /**
+ * How a topic's chat answers: `normal` answers questions; `socratic` has the model
+ * ask the reader questions that lead them to the answer instead of explaining.
+ */
+export type Mode = 'normal' | 'socratic'
+
+/**
  * A named group of PDFs that are read and asked about together. Each topic has
  * one chat, shared by all its tabs, and `draft` is the unsent question in it.
  * `context` is the spot the reader last clicked, attached to the next question.
- * `socratic` is what a Socratic session is about while one is on: the model then
- * asks the reader questions instead of explaining.
+ * `mode` is how the chat answers, picked in the chat or by a right-click.
  */
 export type Topic = {
   id: string
@@ -56,7 +61,7 @@ export type Topic = {
   chat: ChatMessage[]
   draft: string
   context?: PageContext
-  socratic?: PageContext
+  mode: Mode
 }
 
 let nextId = 0
@@ -90,7 +95,7 @@ export class Workspace {
   }
 
   createTopic(name = 'New topic'): Topic {
-    this.topics.push({ id: newId(), name, docIds: [], chat: [], draft: '' })
+    this.topics.push({ id: newId(), name, docIds: [], chat: [], draft: '', mode: 'normal' })
     const topic = this.topics[this.topics.length - 1]
     this.activeTopicId = topic.id
     return topic
@@ -168,10 +173,15 @@ export class Workspace {
     }
   }
 
-  /** Attach what the reader pointed at to the topic's next question, replacing what was attached. */
+  /**
+   * Attach what the reader pointed at to the topic's next question, replacing what was attached.
+   * Pointing at something is for asking about it, so it also turns Socratic mode off.
+   */
   attachContext(topicId: string, context: PageContext) {
     const topic = this.topics.find((t) => t.id === topicId)
-    if (topic) topic.context = context
+    if (!topic) return
+    topic.context = context
+    topic.mode = 'normal'
   }
 
   clearContext(topicId: string) {
@@ -180,16 +190,15 @@ export class Workspace {
   }
 
   /**
-   * Start the topic's chat over: forget its questions and answers, stop an answer that is
-   * still arriving and end a Socratic session. What belongs to the next question (the draft
-   * and the attached spot) stays, and so do the tabs.
+   * Start the topic's chat over: forget its questions and answers and stop an answer that is
+   * still arriving. What belongs to the next question (the draft, the attached spot and the
+   * mode) stays, and so do the tabs.
    */
   newChat(topicId: string) {
     const topic = this.topics.find((t) => t.id === topicId)
     if (!topic) return
     this.answering.get(topicId)?.abort()
     topic.chat = []
-    topic.socratic = undefined
   }
 
   /** Whether a topic's latest answer is still arriving. */
@@ -201,8 +210,8 @@ export class Workspace {
    * Send the topic's draft as a question, with the attached context or, when
    * nothing is attached, whatever `fallback` gives (the open page), and stream
    * the answer into the chat. Blank questions are ignored, and so is a new
-   * question while an answer is still arriving. During a Socratic session the
-   * question is the reader's reply in it.
+   * question while an answer is still arriving. In Socratic mode the model
+   * replies with questions.
    */
   async ask(
     topicId: string,
@@ -212,7 +221,7 @@ export class Workspace {
     const topic = this.topics.find((t) => t.id === topicId)
     if (!topic || !topic.draft.trim() || this.isAnswering(topicId)) return
     const { context } = topic
-    const mode = topic.socratic && { mode: 'socratic' as const }
+    const mode = topic.mode === 'socratic' && { mode: 'socratic' as const }
     const question = { text: topic.draft.trim(), context, ...mode }
     topic.draft = ''
     topic.context = undefined
@@ -220,11 +229,10 @@ export class Workspace {
   }
 
   /**
-   * Start a Socratic session about a spot: from now on the model asks the reader questions
-   * about it instead of explaining, until the session is ended. The model asks first, so
-   * this sends at once; `capture` gives the spot with its images once they are rendered.
-   * The draft and the attached spot are left for the reader's own question. Ignored while
-   * an answer is still arriving.
+   * Start a Socratic session about a spot: the topic switches to Socratic mode and the
+   * model asks the first question about it straight away. `capture` gives the spot with
+   * its images once they are rendered. The draft and the attached spot are left for the
+   * reader's own question. Ignored while an answer is still arriving.
    */
   async startSocratic(
     topicId: string,
@@ -234,14 +242,14 @@ export class Workspace {
   ): Promise<void> {
     const topic = this.topics.find((t) => t.id === topicId)
     if (!topic || this.isAnswering(topicId)) return
-    topic.socratic = about
+    topic.mode = 'socratic'
     await this.converse(topic, { text: '', context: about, mode: 'socratic' }, capture, stream)
   }
 
-  /** End the topic's Socratic session: questions get ordinary answers again. */
-  endSocratic(topicId: string) {
+  /** Switch how the topic's chat answers, from the next question on. */
+  setMode(topicId: string, mode: Mode) {
     const topic = this.topics.find((t) => t.id === topicId)
-    if (topic) topic.socratic = undefined
+    if (topic) topic.mode = mode
   }
 
   /**

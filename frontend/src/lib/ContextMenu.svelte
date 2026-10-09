@@ -77,7 +77,7 @@
 </script>
 
 <div
-  class="menu"
+  class="popup-menu menu"
   role="menu"
   tabindex="-1"
   aria-label={label}
@@ -99,44 +99,25 @@
 </div>
 
 <style>
-  /* Like the sidebar's topic menu, but over everything (the sidebar and the chat too), as the browser's would be. */
+  /* The shared popup menu (app.css), but over everything (the sidebar and the chat too), as the browser's would be. */
   .menu {
     position: fixed;
     z-index: 50;
-    display: flex;
-    flex-direction: column;
     min-width: 12rem;
-    padding: 0.25rem;
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    background: var(--surface);
-    box-shadow: 0 6px 20px rgb(0 0 0 / 0.18);
-    font-size: 0.85rem;
-    outline: none;
   }
 
-  button {
-    display: flex;
+  /* Rows have a hint under the label, with the icon level with the label. */
+  .menu > button {
     align-items: flex-start;
-    gap: 0.5rem;
-    padding: 0.3rem 0.5rem;
-    border: none;
-    border-radius: var(--radius);
-    background: none;
-    color: inherit;
-    font: inherit;
     line-height: 1.3;
-    text-align: left;
-    cursor: pointer;
-    outline: none;
+    white-space: normal;
   }
-  button:hover:not([aria-disabled='true']),
-  button:focus {
-    background: var(--hover);
-  }
-  button[aria-disabled='true'] {
+  .menu > button[aria-disabled='true'] {
     color: var(--muted);
     cursor: default;
+  }
+  .menu svg {
+    margin-top: 0.1rem;
   }
 
   .text {
@@ -146,18 +127,5 @@
   .hint {
     color: var(--muted);
     font-size: 0.75rem;
-  }
-
-  /* Level with the label, the first line. */
-  svg {
-    flex-shrink: 0;
-    width: 0.95rem;
-    height: 0.95rem;
-    margin-top: 0.1rem;
-    fill: none;
-    stroke: currentColor;
-    stroke-width: 2;
-    stroke-linecap: round;
-    stroke-linejoin: round;
   }
 </style>

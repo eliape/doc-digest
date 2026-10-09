@@ -113,51 +113,75 @@ describe('ChatPanel', () => {
     expect(panel.getByLabelText('Ask a question')).toHaveFocus()
   })
 
-  it('picks the answering model below the question box and remembers it', async () => {
+  it('picks the answering model from a menu below the question box and remembers it', async () => {
     localStorage.removeItem('doc-digest.model')
     const { workspace, panel } = setup()
-    const picker = panel.getByLabelText('Model') as HTMLSelectElement
-    expect(picker.value).toBe('claude-opus-5-5')
+    const picker = panel.getByRole('button', { name: 'Model: Opus 5.5' })
     expect(workspace.answerModel).toBe('claude-opus-5-5')
     // The menu sits below the question box; the send arrow stays inside it.
     const box = panel.getByLabelText('Ask a question').closest('form')!
     expect(box).toContainElement(panel.getByRole('button', { name: 'Send' }))
     expect(box).not.toContainElement(picker)
 
-    await fireEvent.change(picker, { target: { value: 'claude-sonnet-5-5' } })
+    await fireEvent.click(picker)
+    const items = within(panel.getByRole('menu', { name: 'Model' })).getAllByRole('menuitemradio')
+    expect(items.map((i) => i.textContent?.trim())).toEqual(['Opus 5.5', 'Sonnet 5.5'])
+    // Like the topic menu, but without icons.
+    expect(items.every((i) => !i.querySelector('svg'))).toBe(true)
+    await fireEvent.click(items[1])
     expect(workspace.answerModel).toBe('claude-sonnet-5-5')
     expect(localStorage.getItem('doc-digest.model')).toBe('claude-sonnet-5-5')
+    expect(panel.getByRole('button', { name: 'Model: Sonnet 5.5' })).toBeInTheDocument()
     localStorage.removeItem('doc-digest.model')
   })
 
-  it('shows a Socratic session in the chat and above the question box, until it is ended', async () => {
-    const { workspace, topic, context, onreveal, panel } = setup()
-    vi.spyOn(workspace, 'ask').mockImplementation(async () => {})
+  it('marks the model’s Socratic questions and tints the question box, but not the reader’s messages', async () => {
+    const { workspace, topic, context, panel } = setup()
     await workspace.startSocratic(topic.id, context, undefined, async function* () {
       yield { type: 'text', text: 'What does the integral add up?' }
     })
     const log = panel.getByRole('log')
     const [start, question] = log.querySelectorAll('.message')
-    // The session starts from the right-clicked spot, with nothing typed.
-    expect(start).toHaveClass('socratic')
+    // The session starts from the right-clicked spot, with nothing typed, and looks like any question.
+    expect(start).not.toHaveClass('socratic')
     expect(within(start as HTMLElement).getByText('Socratic session')).toBeInTheDocument()
     expect(within(start as HTMLElement).getByRole('button', { name: 'p. 10' })).toBeInTheDocument()
     expect(start.querySelector('.text')).toBeNull()
     expect(question).toHaveClass('socratic')
     expect(question).toHaveTextContent('What does the integral add up?')
 
-    const session = panel.getByLabelText('Socratic session')
-    expect(panel.getByLabelText('Ask a question')).toHaveAttribute('placeholder', 'Answer, or ask for a hint…')
-    await fireEvent.click(within(session).getByRole('button', { name: 'p. 10' }))
-    expect(onreveal).toHaveBeenLastCalledWith(expect.objectContaining({ page: 12 }))
+    const box = panel.getByLabelText('Ask a question')
+    expect(box.closest('form')).toHaveClass('socratic')
+    expect(box).toHaveAttribute('placeholder', 'Answer, or ask for a hint…')
+    expect(panel.getByRole('button', { name: 'Mode: Socratic' })).toBeInTheDocument()
+  })
 
-    await fireEvent.click(within(session).getByRole('button', { name: 'End Socratic session' }))
-    expect(topic.socratic).toBeUndefined()
-    expect(panel.queryByLabelText('Socratic session')).not.toBeInTheDocument()
-    expect(panel.getByLabelText('Ask a question')).toHaveAttribute('placeholder', 'Ask a question…')
+  it('switches the mode from the menu on the left below the question box', async () => {
+    const { topic, panel } = setup()
+    const below = panel.getByLabelText('Ask a question').closest('form')!.nextElementSibling!
+    const mode = within(below as HTMLElement).getByRole('button', { name: 'Mode: Normal' })
+    const model = within(below as HTMLElement).getByRole('button', { name: /^Model: / })
+    // Mode on the left, model on the right.
+    expect(mode.compareDocumentPosition(model) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+
+    await fireEvent.click(mode)
+    const menu = panel.getByRole('menu', { name: 'Mode' })
+    const items = within(menu).getAllByRole('menuitemradio')
+    expect(items.map((i) => i.textContent?.trim())).toEqual(['Normal', 'Socratic'])
+    expect(items[0]).toHaveAttribute('aria-checked', 'true')
+    expect(items[1].querySelector('svg')).not.toBeNull()
+    await fireEvent.click(items[1])
+    expect(topic.mode).toBe('socratic')
+    expect(panel.queryByRole('menu')).not.toBeInTheDocument()
+    expect(panel.getByLabelText('Ask a question').closest('form')).toHaveClass('socratic')
     expect(panel.getByLabelText('Ask a question')).toHaveFocus()
-    // The session's messages keep their mark.
-    expect(log.querySelectorAll('.message.socratic')).toHaveLength(2)
+
+    // Escape closes the menu but not the chat.
+    await fireEvent.click(panel.getByRole('button', { name: 'Mode: Socratic' }))
+    await fireEvent.keyDown(panel.getByRole('menu', { name: 'Mode' }), { key: 'Escape' })
+    expect(panel.queryByRole('menu')).not.toBeInTheDocument()
+    expect(screen.getByRole('complementary', { name: 'Chat' }).inert).toBe(false)
+    expect(panel.getByRole('button', { name: 'Mode: Socratic' })).toHaveFocus()
   })
 
   it("shows the page an answer cites when its citation is clicked", async () => {

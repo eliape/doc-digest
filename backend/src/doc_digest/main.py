@@ -46,6 +46,7 @@ class Services:
 
     def __init__(self, settings: Settings) -> None:
         self.library = Library(settings.data_dir)
+        self.answer_model = settings.answer_model
         self.usage = UsageLog(settings.data_dir / "usage.jsonl")
         self.indexer = Indexer(self.library, self.usage, lambda: make_client(get_settings()))
 
@@ -121,7 +122,9 @@ async def events(
         services.library, topic_docs(services.library, services.indexer, request.docs)
     )
     try:
-        async for event in stream_answer(client, request, toolbox, services.usage):
+        async for event in stream_answer(
+            client, request, toolbox, services.usage, services.answer_model
+        ):
             yield json.dumps(event) + "\n"
     except Exception as error:
         logger.exception("Answer failed")

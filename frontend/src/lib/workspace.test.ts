@@ -132,7 +132,6 @@ describe('Workspace.ask', () => {
     page,
     point: { x: 0.5, y: 0.25 },
     pageImage: 'PAGE',
-    crop: 'CROP',
     pageTexts: [{ page, text: 'some text' }],
   })
 
@@ -162,7 +161,7 @@ describe('Workspace.ask', () => {
       {
         role: 'user',
         text: 'How is this derived?',
-        context: expect.objectContaining({ doc_name: 'notes.pdf', page: 3, page_image: 'PAGE', crop: 'CROP' }),
+        context: expect.objectContaining({ doc_name: 'notes.pdf', page: 3, page_image: 'PAGE' }),
       },
     ])
   })

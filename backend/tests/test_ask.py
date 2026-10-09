@@ -44,7 +44,8 @@ def test_only_the_newest_question_carries_images() -> None:
     assert [b["type"] for b in first["content"]] == ["text", "text"]
     assert first["content"][-1]["text"] == "Question: first?"
     images = [b["source"]["data"] for b in last["content"] if b["type"] == "image"]
-    assert images == ["PAGE", "CROP"]
+    # The close-up is no longer sent; the mark is drawn on the page image.
+    assert images == ["PAGE"]
     assert last["content"][-1]["text"] == "Question: second?"
 
 
@@ -89,7 +90,7 @@ def test_ask_without_an_api_key_says_how_to_add_one(client: TestClient) -> None:
 
 
 def test_ask_streams_events_as_json_lines(client: TestClient, monkeypatch) -> None:
-    async def fake_stream(_client, request, toolbox, _usage):
+    async def fake_stream(_client, request, toolbox, _usage, _model):
         assert request.messages[-1].text == "hi"
         assert toolbox.docs == {}
         yield {"type": "step", "text": "Searched for “x”"}
@@ -112,7 +113,7 @@ def test_ask_streams_events_as_json_lines(client: TestClient, monkeypatch) -> No
 
 
 def test_ask_reports_a_failure_in_the_stream(client: TestClient, monkeypatch) -> None:
-    async def failing_stream(_client, _request, _toolbox, _usage):
+    async def failing_stream(_client, _request, _toolbox, _usage, _model):
         yield {"type": "text", "text": "Par"}
         raise RuntimeError("boom")
 

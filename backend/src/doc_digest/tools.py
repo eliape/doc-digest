@@ -17,7 +17,8 @@ from .index import DocIndex, Indexer, page_range, render_outline
 from .library import DocInfo, Library, page_name
 
 MAX_PAGES_PER_READ = 8
-READ_IMAGE_SIDE = 1568
+# Pages read as images during lookups; about half the tokens of a full-size 1568 px page.
+READ_IMAGE_SIDE = 1100
 SEARCH_RESULTS = 8
 
 STOPWORDS = set(

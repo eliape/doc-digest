@@ -278,7 +278,6 @@ function contextForRequest(context: PageContext, withImages: boolean, docId: str
     nearby_text: context.nearbyText,
     ...(withImages && {
       page_image: context.pageImage,
-      crop: context.crop,
       page_texts: context.pageTexts,
     }),
   }

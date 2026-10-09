@@ -14,7 +14,10 @@ from pydantic import BaseModel, Field
 from .tools import TOOLS, Toolbox, ToolError, TopicDoc, overview
 from .usage import UsageLog, call_from_response
 
+# The default answering model; ANSWER_MODEL in backend/.env overrides it.
 MODEL = "claude-opus-5-5"
+# Low effort keeps thinking and lookups short, which is most of what an answer costs.
+EFFORT = "low"
 # Rounds of tool use before the model must answer with what it has.
 MAX_ROUNDS = 8
 
@@ -24,9 +27,8 @@ slides. They read in a viewer next to this chat and ask about what they are read
 they study together form a topic; a map of the topic's documents follows these instructions.
 
 With a question you may get:
-- the whole page they are on, as an image;
-- a close-up of the spot they clicked or the text they selected, with that spot marked in red;
-- text extracted from the PDF around that spot and from nearby pages.
+- the whole page they are on, as an image, with the spot they clicked or selected marked in red;
+- text extracted from the PDF around that spot and from the whole page.
 
 Trust the images over the extracted text: the text is often missing (scanned pages) or garbled \
 (equations, tables, figures). When they clicked something, answer about the marked thing.
@@ -74,7 +76,8 @@ class Context(BaseModel):
     selection: str | None = None
     nearby_text: str | None = None
     page_image: str | None = Field(default=None, description="Base64 JPEG of the whole page")
-    crop: str | None = Field(default=None, description="Base64 JPEG around the point, marked")
+    # Older clients also sent a close-up; it is no longer passed to the model.
+    crop: str | None = Field(default=None, description="Unused")
     page_texts: list[PageText] = []
 
 
@@ -126,11 +129,10 @@ def context_blocks(context: Context) -> list[dict[str, Any]]:
     """The images and text for the question being asked now."""
     blocks: list[dict[str, Any]] = []
     if context.page_image:
-        blocks.append(text_block(f"The whole page, {page_name(context.page, context.page_label)}:"))
+        name = page_name(context.page, context.page_label)
+        marked = ", with where they pointed marked in red" if context.point else ""
+        blocks.append(text_block(f"The whole page, {name}{marked}:"))
         blocks.append(image_block(context.page_image))
-    if context.crop:
-        blocks.append(text_block("Close-up of where they pointed, marked in red:"))
-        blocks.append(image_block(context.crop))
     if context.nearby_text and not context.selection:
         blocks.append(text_block(f"Text the PDF has around that spot:\n{context.nearby_text}"))
     for page in context.page_texts:
@@ -191,6 +193,7 @@ async def stream_answer(
     request: AskRequest,
     toolbox: Toolbox,
     usage: UsageLog | None = None,
+    model: str = MODEL,
 ) -> AsyncIterator[Event]:
     """
     Yield the answer as events: {"type": "text"} pieces as they arrive, and a
@@ -213,11 +216,11 @@ async def stream_answer(
             options["tool_choice"] = {"type": "none" if last_round else "auto"}
         call_began = time.monotonic()
         async with client.beta.messages.stream(
-            model=MODEL,
+            model=model,
             max_tokens=64000,
             system=system,  # type: ignore[arg-type]
             messages=messages,
-            output_config={"effort": "medium"},
+            output_config={"effort": EFFORT},
             # Cache the conversation so far, so each round of lookups reuses it.
             cache_control={"type": "ephemeral"},
             # If a safety check declines the request, the API retries it on a suitable model.
@@ -232,7 +235,7 @@ async def stream_answer(
                     yield {"type": "text", "text": event.text}
             final = await stream.get_final_message()
         if usage:
-            usage.record(call_from_response("answer", MODEL, final, time.monotonic() - call_began))
+            usage.record(call_from_response("answer", model, final, time.monotonic() - call_began))
 
         tool_uses = [b for b in final.content if b.type == "tool_use"]
         if final.stop_reason == "refusal":

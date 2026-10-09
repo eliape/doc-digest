@@ -53,6 +53,20 @@ describe('ContextMenu', () => {
     expect(onclose).toHaveBeenCalledOnce()
   })
 
+  it('sets an item apart with a line above it', () => {
+    render(ContextMenu, {
+      x: 0,
+      y: 0,
+      label: 'Study this',
+      onclose: vi.fn(),
+      items: [{ label: 'Ask' }, { label: 'Copy', divider: true }],
+    })
+    const menu = screen.getByRole('menu')
+    const separator = screen.getByRole('separator')
+    expect(Array.from(menu.children).indexOf(separator)).toBe(1)
+    expect(separator.nextElementSibling).toBe(screen.getByRole('menuitem', { name: 'Copy' }))
+  })
+
   it('closes on a click elsewhere, which then does nothing else', async () => {
     const { onclose } = setup()
     const elsewhere = document.createElement('div')

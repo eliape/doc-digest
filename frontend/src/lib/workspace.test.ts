@@ -341,9 +341,10 @@ describe('Workspace.ask', () => {
     await ws.ask(topic.id, undefined, stream)
     expect(modes).toEqual(['socratic'])
 
-    // A new chat keeps the mode, like the model.
+    // A new chat starts over in Normal mode.
     ws.newChat(topic.id)
-    expect(topic.mode).toBe('socratic')
+    expect(topic.mode).toBe('normal')
+    ws.setMode(topic.id, 'socratic')
 
     // Clicking a spot is for asking about it, so it switches back to normal answers.
     ws.attachContext(topic.id, context(doc.id, 3))

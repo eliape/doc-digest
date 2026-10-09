@@ -1,9 +1,17 @@
 <script lang="ts" module>
   /**
    * One thing the menu offers, with a short line under it and an icon (an SVG path on a
-   * 24 by 24 grid). A disabled item shows but does nothing.
+   * 24 by 24 grid). A disabled item shows but does nothing. `divider` draws a line above it,
+   * to set it apart from the items before.
    */
-  export type MenuItem = { label: string; hint?: string; icon?: string; disabled?: boolean; onselect?: () => void }
+  export type MenuItem = {
+    label: string
+    hint?: string
+    icon?: string
+    disabled?: boolean
+    divider?: boolean
+    onselect?: () => void
+  }
 </script>
 
 <script lang="ts">
@@ -87,6 +95,7 @@
   {onkeydown}
 >
   {#each items as item (item.label)}
+    {#if item.divider}<div class="divider" role="separator"></div>{/if}
     <!-- Disabled items stay focusable, so the arrow keys and screen readers still reach them. -->
     <button type="button" role="menuitem" aria-disabled={item.disabled || undefined} onclick={() => select(item)}>
       {#if item.icon}<svg viewBox="0 0 24 24" aria-hidden="true"><path d={item.icon} /></svg>{/if}
@@ -118,6 +127,12 @@
   }
   .menu svg {
     margin-top: 0.1rem;
+  }
+
+  .divider {
+    height: 1px;
+    margin: 0.25rem 0.375rem;
+    background: var(--border);
   }
 
   .text {

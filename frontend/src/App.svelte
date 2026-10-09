@@ -122,9 +122,17 @@
     // A session starts with the model's question, which has to wait for the answer still arriving.
     const busy = !!topic && workspace.isAnswering(topic.id)
     return [
-      { label: 'Quiz me', hint: 'Coming soon', disabled: true },
+      {
+        label: 'Quiz me',
+        hint: 'Coming soon',
+        // A list of ticked boxes.
+        icon: 'M10 6h10M10 12h10M10 18h10M4 6l1.5 1.5L8 5M4 12l1.5 1.5L8 11M4 18l1.5 1.5L8 17',
+        disabled: true,
+      },
       {
         label: 'Socratic',
+        // A speech bubble with a question mark.
+        icon: 'M21 11.5a8.5 8.5 0 0 1-12.3 7.6L3 21l1.9-5.7A8.5 8.5 0 1 1 21 11.5zM10 9.5a2 2 0 1 1 2.8 1.8c-.5.3-.8.7-.8 1.2v.3M12 15.5h.01',
         hint: busy ? 'Wait for the answer to finish' : 'Work it out by answering questions',
         disabled: busy,
         onselect: () => startSocratic(docId, pick),

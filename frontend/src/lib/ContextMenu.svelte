@@ -1,6 +1,9 @@
 <script lang="ts" module>
-  /** One thing the menu offers, with a short line under it. A disabled item shows but does nothing. */
-  export type MenuItem = { label: string; hint?: string; disabled?: boolean; onselect?: () => void }
+  /**
+   * One thing the menu offers, with a short line under it and an icon (an SVG path on a
+   * 24 by 24 grid). A disabled item shows but does nothing.
+   */
+  export type MenuItem = { label: string; hint?: string; icon?: string; disabled?: boolean; onselect?: () => void }
 </script>
 
 <script lang="ts">
@@ -86,14 +89,17 @@
   {#each items as item (item.label)}
     <!-- Disabled items stay focusable, so the arrow keys and screen readers still reach them. -->
     <button type="button" role="menuitem" aria-disabled={item.disabled || undefined} onclick={() => select(item)}>
-      <span class="label">{item.label}</span>
-      {#if item.hint}<span class="hint">{item.hint}</span>{/if}
+      {#if item.icon}<svg viewBox="0 0 24 24" aria-hidden="true"><path d={item.icon} /></svg>{/if}
+      <span class="text">
+        <span>{item.label}</span>
+        {#if item.hint}<span class="hint">{item.hint}</span>{/if}
+      </span>
     </button>
   {/each}
 </div>
 
 <style>
-  /* Over everything, the sidebar and the chat included, like the browser's own menu. */
+  /* Like the sidebar's topic menu, but over everything (the sidebar and the chat too), as the browser's would be. */
   .menu {
     position: fixed;
     z-index: 50;
@@ -102,30 +108,29 @@
     min-width: 12rem;
     padding: 0.25rem;
     border: 1px solid var(--border);
-    border-radius: 0.5rem;
+    border-radius: var(--radius);
     background: var(--surface);
-    box-shadow: 0 6px 24px rgb(0 0 0 / 0.18);
+    box-shadow: 0 6px 20px rgb(0 0 0 / 0.18);
+    font-size: 0.85rem;
     outline: none;
   }
 
   button {
     display: flex;
-    flex-direction: column;
     align-items: flex-start;
-    padding: 0.375rem 0.625rem;
+    gap: 0.5rem;
+    padding: 0.3rem 0.5rem;
     border: none;
     border-radius: var(--radius);
     background: none;
     color: inherit;
     font: inherit;
-    font-size: 0.9rem;
     line-height: 1.3;
     text-align: left;
     cursor: pointer;
     outline: none;
   }
   button:hover:not([aria-disabled='true']),
-  button:focus-visible,
   button:focus {
     background: var(--hover);
   }
@@ -134,8 +139,25 @@
     cursor: default;
   }
 
+  .text {
+    display: flex;
+    flex-direction: column;
+  }
   .hint {
     color: var(--muted);
     font-size: 0.75rem;
+  }
+
+  /* Level with the label, the first line. */
+  svg {
+    flex-shrink: 0;
+    width: 0.95rem;
+    height: 0.95rem;
+    margin-top: 0.1rem;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
   }
 </style>

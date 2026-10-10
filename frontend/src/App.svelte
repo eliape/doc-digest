@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { tick } from 'svelte'
+  import { onMount, tick } from 'svelte'
+  import { fetchPdf, fetchSavedWorkspace, saveWorkspace } from './lib/api'
   import { chatReserve } from './lib/chatWidth'
   import ChatPanel from './lib/ChatPanel.svelte'
   import ContextMenu, { type MenuItem } from './lib/ContextMenu.svelte'
@@ -14,6 +15,43 @@
   const workspace = new Workspace()
   let error = $state('')
   let dragging = $state(false)
+
+  // The topics, tabs and chats are saved on disk through the backend and come back on load.
+  // Saving only starts once the saved ones are back, so a failed load can't overwrite them.
+  let restored = $state(false)
+
+  onMount(async () => {
+    try {
+      const docIds = await workspace.restore(await fetchSavedWorkspace(), fetchPdf)
+      for (const id of docIds) workspace.index(id)
+      restored = true
+    } catch {
+      error = 'Could not load your saved topics. Is the backend running? Reload to try again.'
+    }
+  })
+
+  let unsaved: string | undefined
+  let saveTimer: ReturnType<typeof setTimeout> | undefined
+
+  function saveNow(keepalive = false) {
+    clearTimeout(saveTimer)
+    if (unsaved === undefined) return
+    const json = unsaved
+    unsaved = undefined
+    saveWorkspace(json, fetch, keepalive).catch(() => {
+      unsaved ??= json
+      error = 'Could not save your topics. Is the backend running?'
+    })
+  }
+
+  // Save shortly after each change, and right away when the page is closed.
+  $effect(() => {
+    const json = JSON.stringify(workspace.snapshot())
+    if (!restored) return
+    unsaved = json
+    clearTimeout(saveTimer)
+    saveTimer = setTimeout(saveNow, 500)
+  })
 
   // Every load starts with the topics open and the chat closed.
   let sidebarOpen = $state(true)
@@ -286,7 +324,7 @@
 
 </script>
 
-<svelte:window onkeydown={onKeydown} />
+<svelte:window onkeydown={onKeydown} onpagehide={() => saveNow(true)} />
 
 <div
   class="app"
@@ -397,6 +435,8 @@
             <DocPane
               bind:this={panes[id]}
               data={d.data}
+              startPage={workspace.pages[id]}
+              onpagechange={(page) => (workspace.pages[id] = page)}
               active={id === doc?.id}
               controlsTarget={controlsEl}
               marker={markerFor(id)}

@@ -1,9 +1,21 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App.svelte'
 
 // PDF.js needs a real browser (canvas, workers), so tests stop at the loader.
 vi.mock('./lib/pdfjs', () => ({ loadPdfjs: () => new Promise(() => {}) }))
+
+/** A backend with nothing saved that is otherwise unreachable, unless a test stands in its own. */
+function offline() {
+  return vi.fn(async (url: string) => {
+    if (url === '/api/workspace') return new Response('{}')
+    throw new Error('offline')
+  })
+}
+
+beforeEach(() => {
+  vi.stubGlobal('fetch', offline())
+})
 
 afterEach(() => {
   vi.restoreAllMocks()
@@ -19,7 +31,7 @@ async function showTopics() {
 const pdf = (name: string, body = '%PDF-1.7') => new File([body], name, { type: 'application/pdf' })
 
 function renderOffline() {
-  vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')))
+  vi.stubGlobal('fetch', offline())
   return render(App)
 }
 
@@ -53,14 +65,14 @@ describe('App', () => {
   })
 
   it('asks for a PDF before one is open', () => {
-    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')))
+    vi.stubGlobal('fetch', offline())
     render(App)
     expect(screen.getByText('Open a PDF to start reading.')).toBeInTheDocument()
     expect(screen.queryByLabelText('Page number')).not.toBeInTheDocument()
   })
 
   it('opens a picked PDF and shows its name with page and zoom controls', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')))
+    vi.stubGlobal('fetch', offline())
     render(App)
     const file = new File(['%PDF-1.7'], 'chapter-3.pdf', { type: 'application/pdf' })
     await fireEvent.change(screen.getByTestId('file-input'), { target: { files: [file] } })
@@ -71,7 +83,7 @@ describe('App', () => {
   })
 
   it('refuses files that are not PDFs', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')))
+    vi.stubGlobal('fetch', offline())
     render(App)
     const file = new File(['hello'], 'notes.txt', { type: 'text/plain' })
     await fireEvent.change(screen.getByTestId('file-input'), { target: { files: [file] } })

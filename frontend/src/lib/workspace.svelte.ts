@@ -419,7 +419,7 @@ function isSavedWorkspace(value: unknown): value is SavedWorkspace {
 function savedMessage(message: ChatMessage): ChatMessage {
   const { context, ...rest } = message
   if (!context) return { ...rest }
-  const { pageImage: _image, pageTexts: _texts, ...spot } = context
+  const { pageImage: _image, imagePages: _pages, pageTexts: _texts, ...spot } = context
   return { ...rest, context: { ...spot, pageTexts: [] } }
 }
 
@@ -465,6 +465,7 @@ function contextForRequest(context: PageContext, withImages: boolean, docId: str
     nearby_text: context.nearbyText,
     ...(withImages && {
       page_image: context.pageImage,
+      image_pages: context.imagePages,
       page_texts: context.pageTexts,
     }),
   }

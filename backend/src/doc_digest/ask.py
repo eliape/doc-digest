@@ -27,14 +27,17 @@ slides. They read in a viewer next to this chat and ask about what they are read
 they study together form a topic; a map of the topic's documents comes with their newest question.
 
 With a question you may get:
-- the whole page they are on, as an image, with the spot they clicked or selected marked in red;
-- text extracted from the PDF around that spot and from the whole page.
+- an image of what they are looking at. When they clicked or selected something, it is a band \
+80% of a page tall centred on that spot, which is marked in red; near the top or bottom of a page \
+it runs into the previous or next page, with a grey dashed line at the page break. Otherwise it \
+is the whole page;
+- text extracted from the PDF for what the image shows, and around the spot.
 
 Trust the images over the extracted text: the text is often missing (scanned pages) or garbled \
 (equations, tables, figures). When they clicked something, answer about the marked thing.
 
 Finding things in the topic:
-- If the page they are on is enough, answer from it directly.
+- If what they are looking at is enough, answer from it directly.
 - Otherwise use the tools. The map and the index show where things probably are; they are a \
 guide, not the evidence. Search with different words, check other documents, or read \
 neighbouring pages when a lookup finds too little. Read the pages before relying on them.
@@ -99,7 +102,12 @@ class Context(BaseModel):
     point: Point | None = None
     selection: str | None = None
     nearby_text: str | None = None
-    page_image: str | None = Field(default=None, description="Base64 JPEG of the whole page")
+    page_image: str | None = Field(
+        default=None, description="Base64 JPEG of the whole page, or of a band around the spot"
+    )
+    image_pages: list[int] = Field(
+        default=[], description="Pages the band shows parts of; empty for the whole page"
+    )
     page_texts: list[PageText] = []
 
 
@@ -162,10 +170,15 @@ MAX_PAGE_TEXT = 3000
 def context_blocks(context: Context) -> list[dict[str, Any]]:
     """The images and text for the question being asked now."""
     blocks: list[dict[str, Any]] = []
+    labels = {p.page: p.label for p in context.page_texts}
+    labels[context.page] = context.page_label
     if context.page_image:
-        name = page_name(context.page, context.page_label)
-        marked = ", with where they pointed marked in red" if context.point else ""
-        blocks.append(text_block(f"The whole page, {name}{marked}:"))
+        if context.image_pages:
+            parts = " into ".join(page_name(n, labels.get(n)) for n in context.image_pages)
+            caption = f"Around where they pointed, marked in red ({parts}):"
+        else:
+            caption = f"The whole page, {page_name(context.page, context.page_label)}:"
+        blocks.append(text_block(caption))
         blocks.append(image_block(context.page_image))
     if context.nearby_text and not context.selection:
         blocks.append(text_block(f"Text the PDF has around that spot:\n{context.nearby_text}"))
@@ -175,7 +188,8 @@ def context_blocks(context: Context) -> list[dict[str, Any]]:
             text = page.text
             if len(text) > MAX_PAGE_TEXT:
                 text = text[:MAX_PAGE_TEXT].rstrip() + " …"
-            blocks.append(text_block(f"Text the PDF has on {name}:\n{text}"))
+            where = f"the part of {name} in the image" if context.image_pages else name
+            blocks.append(text_block(f"Text the PDF has on {where}:\n{text}"))
     return blocks
 
 

@@ -63,9 +63,9 @@ The anchor shows as the context chip, and on the sent message. Clicking it switc
 
 The **image is the source of truth**, and the PDF's text is a hint. Scanned pages, equations (whose text layer is usually garbled), figures and tables all work the same way, and we never run our own OCR.
 
-For each click or selection the browser renders the **whole page** with PDF.js at a fixed resolution independent of zoom (1568 px on the long side), with the click point marked in red. (A separate close-up crop was dropped in October 2026 to cut cost; the page image is sharp enough to read normal text and equations.)
+Without a click the browser renders the **whole page** with PDF.js at a fixed resolution independent of zoom (1568 px on the long side). For a click or selection it renders, at the same scale, a **band 80% of a page tall centred on the spot**, with the spot marked in red. A page is not a unit of meaning, so near the top or bottom of a page the band runs into the previous or next page, with a dashed line and both page numbers at the break. (October 2026: this replaced a separate close-up crop and cut image tokens by about 20%.)
 
-**Answer** (`POST /api/ask`, streaming) sends the model the question, the anchor as structured text, the marked page image, and the text of that page; neighbouring pages are read with the `read_pages` tool when needed. From build step 3 it also gets a compact map of the topic and tools to look things up in every PDF (see Step 3d). Citations come back as PDF and page.
+**Answer** (`POST /api/ask`, streaming) sends the model the question, the anchor as structured text, the image, and the PDF's text for what the image shows; other pages are read with the `read_pages` tool when needed. From build step 3 it also gets a compact map of the topic and tools to look things up in every PDF (see Step 3d). Citations come back as PDF and page.
 
 ## Step 3d. Finding things beyond the open page: an index and lookup tools
 

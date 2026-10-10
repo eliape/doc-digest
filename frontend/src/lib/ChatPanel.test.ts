@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, within } from '@testing-library/svelte'
+import { tick } from 'svelte'
 import { describe, expect, it, vi } from 'vitest'
 import ChatPanel from './ChatPanel.svelte'
 import type { PageContext } from './context'
@@ -197,5 +198,44 @@ describe('ChatPanel', () => {
     await fireEvent.click(panel.getByRole('link', { name: /^p\.\s8$/ }))
     expect(onreveal).toHaveBeenLastCalledWith({ docId: notes, page: 8 })
     expect(workspace.docs[notes]).toBeDefined()
+  })
+
+  it('follows a streaming answer only while the reader is at the bottom', async () => {
+    const { topic, panel } = setup()
+    topic.chat.push({ id: 'q', role: 'user', text: 'Why?' }, { id: 'a', role: 'assistant', text: 'Because', status: 'streaming' })
+    const log = await panel.findByRole('log')
+    // jsdom has no layout, so give the log a height of 1000 viewed through a 200 window.
+    Object.defineProperty(log, 'scrollHeight', { configurable: true, value: 1000 })
+    Object.defineProperty(log, 'clientHeight', { configurable: true, value: 200 })
+    const scrollTo = async (top: number) => {
+      log.scrollTop = top
+      await fireEvent.scroll(log)
+    }
+    const stream = async (text: string) => {
+      topic.chat[1].text = text
+      await tick()
+      await tick()
+    }
+
+    await scrollTo(800)
+    await stream('Because of')
+    expect(log.scrollTop).toBe(1000)
+
+    // Scrolling up to read stops the following.
+    await scrollTo(300)
+    await stream('Because of this')
+    expect(log.scrollTop).toBe(300)
+
+    // Scrolling back to the bottom resumes it.
+    await scrollTo(790)
+    await stream('Because of this and that')
+    expect(log.scrollTop).toBe(1000)
+
+    // A new question always goes to the bottom.
+    await scrollTo(300)
+    topic.chat.push({ id: 'q2', role: 'user', text: 'And?' })
+    await tick()
+    await tick()
+    expect(log.scrollTop).toBe(1000)
   })
 })

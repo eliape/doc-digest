@@ -129,13 +129,26 @@
     return `${what} on ${contextLabel(context)} of ${context.docName}. Click to show it.`
   }
 
-  // Keep the newest message in view, also while an answer streams in.
+  // Follow the newest message, also while an answer streams in, but only while the reader is at
+  // the bottom: scrolling up to read stops the following, and scrolling back down resumes it.
+  const NEAR_BOTTOM = 24
+  let following = true
+  let followed: { topic?: string; length: number } = { length: 0 }
+
+  function onLogScroll() {
+    if (log) following = log.scrollHeight - log.scrollTop - log.clientHeight <= NEAR_BOTTOM
+  }
+
   $effect(() => {
     if (!topic) return
-    void topic.chat.length
     void topic.chat.at(-1)?.text
     void topic.chat.at(-1)?.steps?.length
-    tick().then(() => log?.lastElementChild?.scrollIntoView?.({ block: 'end' }))
+    const length = topic.chat.length
+    // A new question, or another topic's chat, always starts at the bottom.
+    const sent = length > followed.length && topic.chat.at(-1)?.role === 'user'
+    if (sent || followed.topic !== topic.id) following = true
+    followed = { topic: topic.id, length }
+    if (following) tick().then(() => log && (log.scrollTop = log.scrollHeight))
   })
 
   /** The topic's PDF names, so answers' citations of them become links. */
@@ -259,7 +272,7 @@
     {#if topic}
       <!-- Citations are links inside the answers' HTML, so their clicks are handled here. -->
       <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
-      <div class="messages" role="log" aria-label={`Chat in ${topic.name}`} bind:this={log} onclick={onCitationClick}>
+      <div class="messages" role="log" aria-label={`Chat in ${topic.name}`} bind:this={log} onclick={onCitationClick} onscroll={onLogScroll}>
         {#each topic.chat as message, index (message.id)}
           <!-- Only the model's side of a Socratic session is marked; the reader's messages look as always. -->
           <div

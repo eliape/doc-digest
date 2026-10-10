@@ -6,12 +6,13 @@ from typing import Annotated, Any
 
 import anthropic
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 
 from .ask import AskRequest, stream_answer
 from .config import Settings, get_settings
 from .index import Indexer
 from .library import Library
+from .saved import SavedWorkspace
 from .tools import Toolbox, topic_docs
 from .usage import UsageLog
 
@@ -48,12 +49,13 @@ def get_client(settings: Annotated[Settings, Depends(get_settings)]) -> anthropi
 
 
 class Services:
-    """The PDF library, its indexer and the usage log, shared by all requests."""
+    """The PDF library, its indexer, the usage log and the saved workspace, shared by requests."""
 
     def __init__(self, settings: Settings) -> None:
         self.library = Library(settings.data_dir)
         self.answer_model = settings.answer_model
         self.usage = UsageLog(settings.data_dir / "usage.jsonl")
+        self.saved = SavedWorkspace(settings.data_dir / "workspace.json")
         self.indexer = Indexer(self.library, self.usage, lambda: make_client(get_settings()))
 
 
@@ -90,6 +92,27 @@ async def doc_status(doc_id: str, services: ServicesDep) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail="No such document.")
     services.indexer.resume(doc_id)
     return {"id": doc_id, **services.indexer.doc_status(doc_id)}
+
+
+@app.get("/api/docs/{doc_id}/pdf")
+def doc_pdf(doc_id: str, services: ServicesDep) -> FileResponse:
+    """The PDF itself, for reopening a saved tab."""
+    source = services.library.folder(doc_id) / "source.pdf"
+    if not doc_id.isalnum() or not source.is_file():
+        raise HTTPException(status_code=404, detail="No such document.")
+    return FileResponse(source, media_type="application/pdf")
+
+
+@app.get("/api/workspace")
+def load_workspace(services: ServicesDep) -> dict[str, Any]:
+    """The saved topics, tabs and chats, or an empty object before anything was saved."""
+    return services.saved.load() or {}
+
+
+@app.put("/api/workspace")
+def save_workspace(workspace: dict[str, Any], services: ServicesDep) -> dict[str, str]:
+    services.saved.save(workspace)
+    return {"status": "saved"}
 
 
 @app.get("/api/docs/{doc_id}/index")

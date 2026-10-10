@@ -14,6 +14,8 @@
     data: Uint8Array
     /** Current page, 1-based. Read it with bind:, change it with goToPage(). */
     page?: number
+    /** The page to open the PDF at, e.g. where the reader was last time. */
+    startPage?: number
     pageCount?: number
     /** Current zoom, where 1 is 100%. */
     scale?: number
@@ -44,6 +46,7 @@
   let {
     data,
     page = $bindable(1),
+    startPage = 1,
     pageCount = $bindable(0),
     scale = $bindable(1),
     marker,
@@ -68,7 +71,10 @@
       const pdfViewer = new v.PDFViewer({ container, eventBus, linkService })
       linkService.setViewer(pdfViewer)
       // Fit new documents to the window width, like most PDF readers.
-      eventBus.on('pagesinit', () => fitWidth(pdfViewer))
+      eventBus.on('pagesinit', () => {
+        fitWidth(pdfViewer)
+        if (startPage > 1 && startPage <= pdfViewer.pagesCount) pdfViewer.currentPageNumber = startPage
+      })
       eventBus.on('pagechanging', (e: { pageNumber: number }) => (page = e.pageNumber))
       eventBus.on('scalechanging', (e: { scale: number }) => (scale = e.scale))
       // PDF.js clears its page boxes when it re-renders them (on zoom, or when

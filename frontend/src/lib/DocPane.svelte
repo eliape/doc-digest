@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from 'svelte'
   import type { Pick } from './context'
   import { formatScale, parsePageInput } from './pages'
   import PdfViewer from './PdfViewer.svelte'
@@ -7,6 +8,10 @@
   type Props = {
     /** The PDF's bytes. */
     data: Uint8Array
+    /** The page to open at, e.g. where the reader was last time. */
+    startPage?: number
+    /** Called as the reader moves to another page, so it can be saved. */
+    onpagechange?: (page: number) => void
     /** Whether this is the open tab. Only the open tab's controls are shown. */
     active?: boolean
     /** Where the controls go: a slot in the tab row, so they share its space. */
@@ -26,6 +31,8 @@
 
   let {
     data,
+    startPage,
+    onpagechange,
     active = true,
     controlsTarget,
     marker,
@@ -45,9 +52,13 @@
   let scale = $state(1)
   let pageInput = $state('1')
 
-  // Keep the page box in sync while scrolling.
+  // Only the page it first opened at: later changes come from this tab's own scrolling.
+  const openAt = untrack(() => startPage)
+
+  // Keep the page box in sync while scrolling, and report the page.
   $effect(() => {
     pageInput = String(page)
+    if (pageCount) untrack(() => onpagechange?.(page))
   })
 
   function submitPage(event: SubmitEvent) {
@@ -174,6 +185,7 @@
     bind:this={viewer}
     {data}
     bind:page
+    startPage={openAt}
     bind:pageCount
     bind:scale
     {marker}

@@ -139,12 +139,12 @@ Defaults I picked (easy to change): Python backend rather than Node, and v1 runs
    - **2a. Answers:** typed question → `/api/ask` → streaming answer in the chat, with the current page's image and text as context.
    - **2b. Click to ask:** click or selection (or Ask in the right-click menu) → anchor, marker, marked page image, context chip; the chip on sent messages jumps back.
 3. **Whole topic:** index each PDF on upload, give the model a map of the topic and tools to search and read pages (Step 3d), and measure cost and whether it finds the right pages. Then citations that switch tab and jump.
-4. **Persistence:** topics, their PDFs and each topic's chat history (with anchors) in IndexedDB.
+4. **Persistence:** topics, their PDFs and each topic's chat history (with anchors) saved as files on disk through the backend: `backend/data/workspace.json` next to the PDFs it already keeps. Chosen over IndexedDB (October 2026) because browser storage belongs to one browser at one address, the PDFs would be stored twice, and files carry over to a Mac app.
 5. **Long documents:** largely covered by step 3, since nothing sends a whole PDF; revisit if evaluations show gaps.
 
 Each step works on its own, so steps 1 and 2 already give a usable tool.
 
-Status (October 2026): steps 1 to 3 are built. A citation in an answer is a link that switches to its PDF's tab and goes to the page. The PDF toolbar has Select and Click to ask tools (Step 3b). The chat has a Normal/Socratic mode, and a right-click menu asks about a spot or selection or starts a Socratic session on it (Step 3e); Quiz me is a placeholder. Persistence (step 4) is not started; it should keep a topic's mode and the messages' Socratic marks with its chat.
+Status (October 2026): steps 1 to 3 are built. A citation in an answer is a link that switches to its PDF's tab and goes to the page. The PDF toolbar has Select and Click to ask tools (Step 3b). The chat has a Normal/Socratic mode, and a right-click menu asks about a spot or selection or starts a Socratic session on it (Step 3e); Quiz me is a placeholder. Persistence (step 4) is built: topics, tabs, the page each tab was on, chats (with their spots and Socratic marks) and each topic's mode are saved shortly after each change and come back on load. The draft and an attached but unsent spot are not saved; the model choice stays remembered per browser.
 
 ## Step 7. How we know v1 works
 

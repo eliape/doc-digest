@@ -469,3 +469,152 @@ describe('Workspace.ask', () => {
     expect(topic.context).toBeUndefined()
   })
 })
+
+describe('Workspace saving', () => {
+  const ready = (id: string): IndexStatus => ({
+    id,
+    status: 'ready',
+    pages_done: 1,
+    page_count: 1,
+  })
+
+  /** A workspace with one topic, one uploaded tab and a Socratic chat about a spot. */
+  async function saved() {
+    const ws = new Workspace()
+    const doc = ws.addDoc('book.pdf', bytes(1, 2))
+    const topic = ws.activeTopic!
+    await ws.index(doc.id, {
+      upload: async () => ready('srv1'),
+      status: async () => ready('srv1'),
+    })
+    ws.pages[doc.id] = 12
+    topic.mode = 'socratic'
+    topic.draft = 'half a question'
+    topic.chat.push(
+      {
+        id: 'q',
+        role: 'user',
+        text: '',
+        mode: 'socratic',
+        context: {
+          docId: doc.id,
+          docName: 'book.pdf',
+          page: 3,
+          pageImage: 'BIG',
+          thumbnail: 'data:small',
+          pageTexts: [{ page: 3, text: 'PAGETEXT' }],
+        },
+      },
+      {
+        id: 'a',
+        role: 'assistant',
+        text: 'What do you see?',
+        status: 'done',
+        mode: 'socratic',
+      },
+      { id: 'b', role: 'assistant', text: 'Half an ans', status: 'streaming' },
+    )
+    return { ws, doc, topic }
+  }
+
+  it('saves topics, tabs, pages, mode and chat, without page images or the draft', async () => {
+    const { ws, doc, topic } = await saved()
+    const snapshot = ws.snapshot()
+    expect(snapshot).toMatchObject({
+      version: 1,
+      activeTopicId: topic.id,
+      topics: [
+        {
+          id: topic.id,
+          name: 'book',
+          mode: 'socratic',
+          activeDocId: doc.id,
+          docs: [{ id: doc.id, name: 'book.pdf', serverId: 'srv1', page: 12 }],
+        },
+      ],
+    })
+    const json = JSON.stringify(snapshot)
+    expect(json).not.toContain('BIG')
+    expect(json).not.toContain('PAGETEXT')
+    expect(json).not.toContain('half a question')
+    expect(json).toContain('data:small')
+  })
+
+  it('leaves out tabs the backend does not have yet', () => {
+    const ws = new Workspace()
+    ws.addDoc('new.pdf', bytes(1))
+    expect(ws.snapshot().topics[0]).toMatchObject({
+      docs: [],
+      activeDocId: undefined,
+    })
+  })
+
+  it('brings a saved workspace back, reloading PDFs from the backend', async () => {
+    const { ws, doc, topic } = await saved()
+    const json = JSON.parse(JSON.stringify(ws.snapshot()))
+    const loaded: string[] = []
+    const back = new Workspace()
+    const docIds = await back.restore(json, async (id) => {
+      loaded.push(id)
+      return bytes(1, 2)
+    })
+    expect(loaded).toEqual(['srv1'])
+    expect(docIds).toEqual([doc.id])
+    expect(back.activeTopic).toMatchObject({
+      name: 'book',
+      mode: 'socratic',
+      docIds: [doc.id],
+      draft: '',
+    })
+    expect(back.activeDoc?.data).toEqual(bytes(1, 2))
+    expect(back.pages[doc.id]).toBe(12)
+    expect(back.activeTopic!.chat.map((m) => m.text)).toEqual(['', 'What do you see?', 'Half an ans'])
+    // The answer that was arriving when the app closed did not finish.
+    expect(back.activeTopic!.chat[2].status).toBe('error')
+    expect(back.activeTopic!.chat[0].context).toMatchObject({
+      docId: doc.id,
+      page: 3,
+      thumbnail: 'data:small',
+    })
+    expect(topic.id).toBe(back.activeTopicId)
+
+    // Indexing is followed by asking the backend, without uploading again.
+    const seen: string[] = []
+    await back.index(doc.id, {
+      upload: async () => {
+        seen.push('upload')
+        return ready('srv1')
+      },
+      status: async (id) => {
+        seen.push(`status ${id}`)
+        return ready(id)
+      },
+    })
+    expect(seen).toEqual(['status srv1'])
+    expect(back.indexing[doc.id]).toMatchObject({
+      serverId: 'srv1',
+      status: 'ready',
+    })
+  })
+
+  it('drops tabs whose PDF is gone and keeps topics opened while loading', async () => {
+    const { ws } = await saved()
+    const json = JSON.parse(JSON.stringify(ws.snapshot()))
+    const back = new Workspace()
+    back.addDoc('meanwhile.pdf', bytes(9))
+    await back.restore(json, async () => {
+      throw new Error('404')
+    })
+    expect(back.topics.map((t) => [t.name, t.docIds.length])).toEqual([
+      ['book', 0],
+      ['meanwhile', 1],
+    ])
+    expect(back.activeTopic?.name).toBe('meanwhile')
+  })
+
+  it('ignores something that is not a saved workspace', async () => {
+    const back = new Workspace()
+    expect(await back.restore({}, async () => bytes())).toEqual([])
+    expect(back.topics).toEqual([])
+  })
+})

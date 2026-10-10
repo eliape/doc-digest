@@ -90,3 +90,28 @@ export async function fetchIndexStatus(id: string, fetchFn: typeof fetch = fetch
   if (!res.ok) throw await backendError(res)
   return (await res.json()) as IndexStatus
 }
+
+/** A PDF the backend keeps, by its id, for reopening a saved tab. */
+export async function fetchPdf(id: string, fetchFn: typeof fetch = fetch): Promise<Uint8Array> {
+  const res = await fetchFn(`/api/docs/${encodeURIComponent(id)}/pdf`)
+  if (!res.ok) throw await backendError(res)
+  return new Uint8Array(await res.arrayBuffer())
+}
+
+/** The workspace saved last time, or an empty object before anything was saved. */
+export async function fetchSavedWorkspace(fetchFn: typeof fetch = fetch): Promise<unknown> {
+  const res = await fetchFn('/api/workspace')
+  if (!res.ok) throw await backendError(res)
+  return res.json()
+}
+
+/** Save the workspace (already turned into JSON) on disk, replacing what was saved. */
+export async function saveWorkspace(json: string, fetchFn: typeof fetch = fetch, keepalive = false): Promise<void> {
+  const res = await fetchFn('/api/workspace', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: json,
+    keepalive,
+  })
+  if (!res.ok) throw await backendError(res)
+}

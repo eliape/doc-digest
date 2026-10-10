@@ -64,6 +64,26 @@ export type Topic = {
   mode: Mode
 }
 
+/** One saved tab: the backend keeps its PDF, so only its id and where the reader was are saved. */
+export type SavedDoc = {
+  id: string
+  name: string
+  serverId: string
+  page?: number
+}
+
+/** One saved topic. Its chat is saved without the page images, which only the newest question needs. */
+export type SavedTopic = Omit<Topic, 'docIds' | 'draft' | 'context'> & {
+  docs: SavedDoc[]
+}
+
+/** What is saved on disk (through the backend) so the workspace is back after a reload. */
+export type SavedWorkspace = {
+  version: 1
+  activeTopicId?: string
+  topics: SavedTopic[]
+}
+
 let nextId = 0
 const newId = () => `${Date.now().toString(36)}-${nextId++}`
 
@@ -82,6 +102,8 @@ export class Workspace {
   answerModel = $state<string>()
   /** Indexing progress per PDF (by tab id). */
   indexing = $state<Record<string, IndexState>>({})
+  /** The page each tab was last on, so it opens there next time. */
+  pages = $state<Record<string, number>>({})
   // Uploads still on their way, so a question can wait for its PDFs' ids.
   private uploads: Record<string, Promise<unknown>> = {}
   // Stops each topic's answer that is still arriving. Not state: nothing renders from it.
@@ -116,7 +138,10 @@ export class Workspace {
     const [topic] = this.topics.splice(index, 1)
     this.answering.get(id)?.abort()
     this.docs = omit(this.docs, topic.docIds)
-    for (const docId of topic.docIds) delete this.indexing[docId]
+    for (const docId of topic.docIds) {
+      delete this.indexing[docId]
+      delete this.pages[docId]
+    }
     if (this.activeTopicId === id) {
       this.activeTopicId = (this.topics[index] ?? this.topics[index - 1])?.id
     }
@@ -148,14 +173,16 @@ export class Workspace {
   async index(docId: string, api: IndexApi = realIndexApi, pollMs = 1500): Promise<void> {
     const doc = this.docs[docId]
     if (!doc) return
-    this.indexing[docId] = { status: 'uploading', pagesDone: 0, pageCount: 0 }
+    // A PDF reopened from the saved workspace is already on the backend: just follow it.
+    const known = this.indexing[docId]?.serverId
+    this.indexing[docId] = { serverId: known, status: known ? 'queued' : 'uploading', pagesDone: 0, pageCount: 0 }
     const update = (s: IndexStatus) => {
       if (!(docId in this.docs)) return false
       this.indexing[docId] = { serverId: s.id, status: s.status, pagesDone: s.pages_done, pageCount: s.page_count, error: s.error }
       return s.status !== 'ready' && s.status !== 'error'
     }
     try {
-      const upload = api.upload(doc.name, doc.data)
+      const upload = known ? api.status(known) : api.upload(doc.name, doc.data)
       this.uploads[docId] = upload.catch(() => {})
       let status = await upload
       while (update(status)) {
@@ -309,7 +336,97 @@ export class Workspace {
     if (topic.context?.docId === id) topic.context = undefined
     this.docs = omit(this.docs, [id])
     delete this.indexing[id]
+    delete this.pages[id]
   }
+
+  /**
+   * What to save so the workspace is back next time: the topics, their tabs, chats and
+   * modes. Tabs not yet on the backend are left out, and so are the draft and the
+   * attached spot, which belong to the moment.
+   */
+  snapshot(): SavedWorkspace {
+    return {
+      version: 1,
+      activeTopicId: this.activeTopicId,
+      topics: this.topics.map((topic) => {
+        const docs = topic.docIds.flatMap((id): SavedDoc[] => {
+          const serverId = this.indexing[id]?.serverId
+          const page = this.pages[id]
+          return serverId ? [{ id, name: this.docs[id].name, serverId, ...(page > 1 && { page }) }] : []
+        })
+        return {
+          id: topic.id,
+          name: topic.name,
+          docs,
+          activeDocId: docs.some((d) => d.id === topic.activeDocId) ? topic.activeDocId : docs[0]?.id,
+          mode: topic.mode,
+          chat: topic.chat.map(savedMessage),
+        }
+      }),
+    }
+  }
+
+  /**
+   * Bring back a saved workspace. `loadPdf` fetches a tab's PDF from the backend; a tab
+   * whose PDF is gone is dropped. Topics opened while it loaded are kept, after the saved
+   * ones. Returns the tabs restored, to follow their indexing.
+   */
+  async restore(saved: unknown, loadPdf: (serverId: string) => Promise<Uint8Array>): Promise<string[]> {
+    if (!isSavedWorkspace(saved)) return []
+    const loaded = await Promise.all(
+      saved.topics
+        .flatMap((t) => t.docs)
+        .map(async (d) => [d, await loadPdf(d.serverId).catch(() => undefined)] as const),
+    )
+    const docs: Record<string, Doc> = {}
+    const indexing: Record<string, IndexState> = {}
+    const pages: Record<string, number> = {}
+    for (const [d, data] of loaded) {
+      if (!data) continue
+      docs[d.id] = { id: d.id, name: d.name, data }
+      indexing[d.id] = { serverId: d.serverId, status: 'queued', pagesDone: 0, pageCount: 0 }
+      if (d.page) pages[d.id] = d.page
+    }
+    this.docs = { ...docs, ...this.docs }
+    this.indexing = { ...indexing, ...this.indexing }
+    this.pages = { ...pages, ...this.pages }
+    const restored = saved.topics.map((t): Topic => {
+      const docIds = t.docs.map((d) => d.id).filter((id) => id in docs)
+      return {
+        id: t.id,
+        name: t.name,
+        docIds,
+        activeDocId: t.activeDocId && docIds.includes(t.activeDocId) ? t.activeDocId : docIds[0],
+        chat: t.chat.map(restoredMessage),
+        draft: '',
+        mode: t.mode === 'socratic' ? 'socratic' : 'normal',
+      }
+    })
+    this.topics = [...restored, ...this.topics]
+    if (!this.activeTopicId) {
+      this.activeTopicId = restored.some((t) => t.id === saved.activeTopicId) ? saved.activeTopicId : restored[0]?.id
+    }
+    return Object.keys(docs)
+  }
+}
+
+function isSavedWorkspace(value: unknown): value is SavedWorkspace {
+  const saved = value as SavedWorkspace | null
+  return !!saved && saved.version === 1 && Array.isArray(saved.topics)
+}
+
+/** A message as saved: its spot without the page image and text, which only a new question sends. */
+function savedMessage(message: ChatMessage): ChatMessage {
+  const { context, ...rest } = message
+  if (!context) return { ...rest }
+  const { pageImage: _image, pageTexts: _texts, ...spot } = context
+  return { ...rest, context: { ...spot, pageTexts: [] } }
+}
+
+/** An answer that was still arriving when the app closed did not finish. */
+function restoredMessage(message: ChatMessage): ChatMessage {
+  if (message.status !== 'streaming') return message
+  return { ...message, status: 'error', text: message.text || 'The answer stopped when the app was closed.' }
 }
 
 /**

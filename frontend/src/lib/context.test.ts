@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { contextLabel, cropRegion, joinText, sectionFor, textInRegion, truncate } from './context'
+import { contextLabel, cropRegion, joinText, sectionFor, textInRegion, truncate, windowSlices } from './context'
 
 describe('cropRegion', () => {
   it('centres a wide close-up on a clicked spot', () => {
@@ -65,5 +65,33 @@ describe('contextLabel', () => {
   it('uses the printed page number when the PDF has one', () => {
     expect(contextLabel({ page: 15, pageLabel: 'xii' })).toBe('p. xii')
     expect(contextLabel({ page: 15 })).toBe('p. 15')
+  })
+})
+
+describe('windowSlices', () => {
+  const close = (slices: ReturnType<typeof windowSlices>) =>
+    slices.map((s) => ({ page: s.page, from: +s.from.toFixed(2), to: +s.to.toFixed(2) }))
+
+  it('centres a band 80% of a page tall on the spot', () => {
+    expect(close(windowSlices(5, 0.5, 10))).toEqual([{ page: 5, from: 0.1, to: 0.9 }])
+  })
+
+  it('runs into the previous page near the top', () => {
+    expect(close(windowSlices(5, 0.1, 10))).toEqual([
+      { page: 4, from: 0.7, to: 1 },
+      { page: 5, from: 0, to: 0.5 },
+    ])
+  })
+
+  it('runs into the next page near the bottom', () => {
+    expect(close(windowSlices(5, 0.95, 10))).toEqual([
+      { page: 5, from: 0.55, to: 1 },
+      { page: 6, from: 0, to: 0.35 },
+    ])
+  })
+
+  it('stays inside the document on its first and last page', () => {
+    expect(close(windowSlices(1, 0.1, 10))).toEqual([{ page: 1, from: 0, to: 0.8 }])
+    expect(close(windowSlices(10, 0.95, 10))).toEqual([{ page: 10, from: 0.2, to: 1 }])
   })
 })

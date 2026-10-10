@@ -73,6 +73,19 @@ def test_the_history_before_the_newest_question_is_cached() -> None:
     assert marked == ["second answer"]
 
 
+def test_a_band_across_a_page_break_names_both_pages() -> None:
+    ctx = context(
+        page_image="BAND",
+        point={"x": 0.5, "y": 0.1},
+        image_pages=[11, 12],
+        page_texts=[{"page": 11, "label": "x", "text": "end"}, {"page": 12, "text": "start"}],
+    )
+    request = AskRequest(topic="T", messages=[Turn(role="user", text="?", context=ctx)])
+    texts = [b["text"] for b in build_messages(request)[0]["content"] if b["type"] == "text"]
+    assert 'Around where they pointed, marked in red (p. 11 (printed as "x") into p. 12):' in texts
+    assert 'Text the PDF has on the part of p. 11 (printed as "x") in the image:\nend' in texts
+
+
 def test_long_page_text_is_cut() -> None:
     page = {"page": 12, "text": "x" * 5000}
     request = AskRequest(

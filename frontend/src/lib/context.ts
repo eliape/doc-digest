@@ -22,11 +22,16 @@ export type PageContext = Pick & {
   section?: string
   /** Text the PDF has around the spot. */
   nearbyText?: string
-  /** The whole page as a base64 JPEG, with the spot marked. */
+  /**
+   * What the model sees, as a base64 JPEG: the whole page, or with a spot or
+   * selection a band around it with the spot marked (see `windowSlices`).
+   */
   pageImage?: string
+  /** The pages the band shows parts of, in order. Absent when the image is the whole page. */
+  imagePages?: number[]
   /** A small image shown on the chip, as a data URL. */
   thumbnail?: string
-  /** Text of the page. */
+  /** Text of what the image shows, per page. */
   pageTexts: PageText[]
 }
 
@@ -41,6 +46,9 @@ const THUMBNAIL_WIDTH = 240
 const MAX_PAGE_TEXT = 3000
 const MAX_NEARBY_TEXT = 2000
 const MARK = '#e5221b'
+const PAGE_BREAK = '#8a8a8a'
+/** How tall the image around a spot is, as a share of a page's height. */
+export const WINDOW_HEIGHT = 0.8
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
 
@@ -72,6 +80,36 @@ export function cropRegion(pick: Pick): Box {
     width,
     height,
   }
+}
+
+/** Part of a page, from `from` to `to` down it (0 to 1). */
+export type Slice = { page: number; from: number; to: number }
+
+/**
+ * The parts of pages the image around a spot shows: a band WINDOW_HEIGHT of a
+ * page tall centred on the spot, since a page is not a unit of meaning. Near the
+ * top or bottom of a page it runs into the previous or next page; at the start
+ * or end of the document it slides back inside. Neighbouring pages are assumed
+ * to be about the same size.
+ */
+export function windowSlices(page: number, centre: number, pageCount: number): Slice[] {
+  let top = centre - WINDOW_HEIGHT / 2
+  let bottom = centre + WINDOW_HEIGHT / 2
+  if (top < 0 && page === 1) [top, bottom] = [0, WINDOW_HEIGHT]
+  if (bottom > 1 && page === pageCount) [top, bottom] = [1 - WINDOW_HEIGHT, 1]
+  if (top < 0) {
+    return [
+      { page: page - 1, from: 1 + top, to: 1 },
+      { page, from: 0, to: bottom },
+    ]
+  }
+  if (bottom > 1) {
+    return [
+      { page, from: top, to: 1 },
+      { page: page + 1, from: 0, to: bottom - 1 },
+    ]
+  }
+  return [{ page, from: top, to: bottom }]
 }
 
 /** A text item from PDF.js with where it starts on the page, in 0 to 1 units. */
@@ -191,10 +229,15 @@ function drawMark(canvas: HTMLCanvasElement, pick: Pick, region: Box) {
   }
 }
 
-/** Render part of a page (the whole page by default) to a white-backed canvas whose longer side is `side`. */
-async function renderRegion(page: PDFPageProxy, region: Box, side: number) {
+/** Render part of a page to a white-backed canvas whose longer side is `side`. */
+function renderRegion(page: PDFPageProxy, region: Box, side: number) {
   const base = page.getViewport({ scale: 1 })
-  const scale = side / Math.max(base.width * region.width, base.height * region.height)
+  return renderAt(page, region, side / Math.max(base.width * region.width, base.height * region.height))
+}
+
+/** Render part of a page to a white-backed canvas at a given scale. */
+async function renderAt(page: PDFPageProxy, region: Box, scale: number) {
+  const base = page.getViewport({ scale: 1 })
   const viewport = page.getViewport({
     scale,
     offsetX: -region.x * base.width * scale,
@@ -206,6 +249,59 @@ async function renderRegion(page: PDFPageProxy, region: Box, side: number) {
   ctx.fillRect(0, 0, canvas.width, canvas.height)
   await page.render({ canvas, canvasContext: ctx, viewport, background: '#fff' }).promise
   return canvas
+}
+
+const sliceBox = (slice: Slice): Box => ({ x: 0, y: slice.from, width: 1, height: slice.to - slice.from })
+
+/**
+ * The band around a spot as one image, `width` pixels wide: each page part is
+ * rendered at that width and stacked, with a grey dashed line and both page
+ * numbers where one page ends and the next begins. The spot is marked on the
+ * picked page's part.
+ */
+async function renderWindow(
+  doc: PDFDocumentProxy,
+  pick: Pick,
+  slices: Slice[],
+  width: number,
+  name: (page: number) => string,
+): Promise<HTMLCanvasElement> {
+  const parts = await Promise.all(
+    slices.map(async (slice) => {
+      const page = await doc.getPage(slice.page)
+      const canvas = await renderAt(page, sliceBox(slice), width / page.getViewport({ scale: 1 }).width)
+      if (slice.page === pick.page) drawMark(canvas, pick, sliceBox(slice))
+      return canvas
+    }),
+  )
+  const out = newCanvas(width, parts.reduce((sum, part) => sum + part.height, 0))
+  const ctx = out.getContext('2d')!
+  let y = 0
+  parts.forEach((part, i) => {
+    ctx.drawImage(part, 0, y)
+    if (i > 0) {
+      const line = Math.max(2, Math.round(width / 500))
+      ctx.strokeStyle = PAGE_BREAK
+      ctx.lineWidth = line
+      ctx.setLineDash([line * 6, line * 4])
+      ctx.beginPath()
+      ctx.moveTo(0, y)
+      ctx.lineTo(width, y)
+      ctx.stroke()
+      ctx.setLineDash([])
+      const label = `end of ${name(slices[i - 1].page)} · start of ${name(slices[i].page)}`
+      const size = Math.max(12, Math.round(width / 70))
+      ctx.font = `${size}px sans-serif`
+      const textWidth = ctx.measureText(label).width
+      ctx.fillStyle = '#fff'
+      ctx.fillRect(width - textWidth - size * 1.5, y - size * 0.8, textWidth + size, size * 1.6)
+      ctx.fillStyle = PAGE_BREAK
+      ctx.textBaseline = 'middle'
+      ctx.fillText(label, width - textWidth - size, y)
+    }
+    y += part.height
+  })
+  return out
 }
 
 const toBase64Jpeg = (canvas: HTMLCanvasElement) => canvas.toDataURL('image/jpeg', 0.85).split(',')[1]
@@ -236,40 +332,50 @@ function thumbnailOf(canvas: HTMLCanvasElement, pick: Pick, region: Box): string
 }
 
 /**
- * Everything the model gets for a question about a page: an image of the page
- * with the picked spot marked, the PDF's text around the spot and on the page,
- * the page's printed label and its section. Neighbouring pages are left to the
- * model's read_pages tool, to keep each question cheap.
+ * Everything the model gets for a question about a page: an image of what the
+ * reader is looking at, the PDF's text for it and around the spot, the page's
+ * printed label and its section. Without a spot the image is the whole page;
+ * with one it is a band around the spot (see `windowSlices`), drawn at the same
+ * scale as the whole page would be, so it costs less and crosses page breaks.
  */
 export async function capture(doc: PDFDocumentProxy, pick: Pick): Promise<Capture> {
   const page = await doc.getPage(pick.page)
   const whole: Box = { x: 0, y: 0, width: 1, height: 1 }
   const marked = pick.point || pick.box
   const region = cropRegion(pick)
+  const base = page.getViewport({ scale: 1 })
+  const pageWidth = (PAGE_IMAGE_SIDE * base.width) / Math.max(base.width, base.height)
+  const centre = pick.box ? pick.box.y + pick.box.height / 2 : (pick.point?.y ?? 0.5)
+  const slices = marked ? windowSlices(pick.page, centre, doc.numPages) : [{ page: pick.page, from: 0, to: 1 }]
 
-  const [pageCanvas, cropCanvas, labels, outline, items] = await Promise.all([
-    renderRegion(page, whole, PAGE_IMAGE_SIDE),
-    marked ? renderRegion(page, region, CROP_IMAGE_SIDE) : undefined,
+  const [labels, outline, texts] = await Promise.all([
     doc.getPageLabels().catch(() => null),
     headings(doc),
-    placedText(page).catch(() => []),
+    Promise.all(slices.map((slice) => doc.getPage(slice.page).then(placedText).catch(() => [] as PlacedText[]))),
   ])
-  if (marked) {
-    drawMark(pageCanvas, pick, whole)
-    drawMark(cropCanvas!, pick, region)
-  }
+  const label = (n: number) => labels?.[n - 1] || undefined
+  const items = texts[slices.findIndex((slice) => slice.page === pick.page)]
+  const [imageCanvas, cropCanvas] = await Promise.all([
+    marked
+      ? renderWindow(doc, pick, slices, pageWidth, (n) => contextLabel({ page: n, pageLabel: label(n) }))
+      : renderRegion(page, whole, PAGE_IMAGE_SIDE),
+    marked ? renderRegion(page, region, CROP_IMAGE_SIDE) : undefined,
+  ])
 
-  const pageTexts = [
-    { page: pick.page, label: labels?.[pick.page - 1] || undefined, text: truncate(joinText(items), MAX_PAGE_TEXT) },
-  ]
+  const pageTexts = slices.map((slice, i) => {
+    const text = marked ? textInRegion(texts[i], sliceBox(slice)) : joinText(texts[i])
+    const share = Math.min(1, (slice.to - slice.from) / (marked ? WINDOW_HEIGHT : 1))
+    return { page: slice.page, label: label(slice.page), text: truncate(text, Math.round(MAX_PAGE_TEXT * share)) }
+  })
 
   return {
     ...pick,
-    pageLabel: labels?.[pick.page - 1] || undefined,
+    pageLabel: label(pick.page),
     section: sectionFor(outline, pick.page),
     nearbyText: marked ? truncate(textInRegion(items, region), MAX_NEARBY_TEXT) || undefined : undefined,
-    pageImage: toBase64Jpeg(pageCanvas),
-    thumbnail: cropCanvas ? thumbnailOf(cropCanvas, pick, region) : thumbnailOf(pageCanvas, pick, whole),
+    pageImage: toBase64Jpeg(imageCanvas),
+    imagePages: marked ? slices.map((slice) => slice.page) : undefined,
+    thumbnail: cropCanvas ? thumbnailOf(cropCanvas, pick, region) : thumbnailOf(imageCanvas, pick, whole),
     pageTexts,
   }
 }

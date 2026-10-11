@@ -385,6 +385,10 @@ async def stream_answer(
         if tools:
             options["tools"] = tools
             options["tool_choice"] = {"type": "none" if last_round else "auto"}
+        if n > 0:
+            # Cache the conversation so far once a lookup has started, so later rounds reread
+            # it cheaply. Most questions take one round, where caching it would cost 25% extra.
+            options["cache_control"] = {"type": "ephemeral"}
         call_began = time.monotonic()
         async with client.beta.messages.stream(
             model=model,
@@ -392,8 +396,6 @@ async def stream_answer(
             system=system,  # type: ignore[arg-type]
             messages=messages,
             output_config={"effort": EFFORT},
-            # Cache the conversation so far, so each round of lookups reuses it.
-            cache_control={"type": "ephemeral"},
             # If a safety check declines the request, the API retries it on a suitable model.
             betas=["server-side-fallback-2026-07-01"],
             fallbacks="default",

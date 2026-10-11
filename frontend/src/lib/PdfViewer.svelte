@@ -3,7 +3,7 @@
   import { untrack } from 'svelte'
   import type { PDFDocumentLoadingTask, PDFDocumentProxy } from 'pdfjs-dist/legacy/build/pdf.mjs'
   import type { PDFViewer } from 'pdfjs-dist/legacy/web/pdf_viewer.mjs'
-  import { type Capture, capture as captureContext, type Pick } from './context'
+  import { type Capture, capture as captureContext, type Heading, headings, type Pick } from './context'
   import { attachZoomGestures, type Origin } from './gestures'
   import { assetOptions, loadPdfjs } from './pdfjs'
   import { isClick, isOnSelection, NOT_PICKABLE, pickAtPoint, pickSelection } from './picking'
@@ -285,6 +285,11 @@
   /** Images and text for a question about a spot or a page, or undefined before the PDF has opened. */
   export async function capture(pick: Pick): Promise<Capture | undefined> {
     return pdfDocument ? captureContext(pdfDocument, pick) : undefined
+  }
+
+  /** The PDF's own bookmarks, flattened; empty when it has none or before it has opened. */
+  export function outline(): Promise<Heading[]> {
+    return pdfDocument ? headings(pdfDocument) : Promise.resolve([])
   }
 
   /** Scroll to a picked spot and flash it. */

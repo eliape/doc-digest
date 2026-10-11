@@ -89,6 +89,12 @@
   export function reveal(pick: Pick) {
     viewer?.reveal(pick)
   }
+  export function outline() {
+    return viewer?.outline() ?? Promise.resolve([])
+  }
+  export function goToPage(n: number) {
+    viewer?.goToPage(n)
+  }
   export function zoomIn() {
     viewer?.zoomIn()
   }

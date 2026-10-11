@@ -1,5 +1,6 @@
 <script lang="ts">
   import { type CitableDocs, renderMarkdown } from './markdown'
+  import type { QuizQuestion } from './api'
   import type { Quiz } from './workspace.svelte'
 
   type Props = {
@@ -27,9 +28,33 @@
   let question = $derived(quiz.questions[step])
   let picked = $derived(quiz.picked[step] ?? null)
 
-  /** Markdown on one line: choices and question titles have no paragraphs of their own. */
+  /** Markdown on one line: choices have no paragraphs of their own. */
   const inline = (text: string) => renderMarkdown(text, docs).replace(/^<p>|<\/p>\s*$/g, '')
+
+  // The results ring: a circle whose coloured part is the share of right answers.
+  const RADIUS = 15.5
+  // Whether the results show each question again with its choices and explanation.
+  let details = $state(false)
 </script>
+
+{#snippet choices(q: QuizQuestion, chosen: number | null, live: boolean)}
+  <div class="choices" role="group" aria-label="Choices">
+    {#each q.choices as choice, i (i)}
+      <button
+        type="button"
+        class="choice"
+        class:right={chosen !== null && i === q.answer}
+        class:wrong={chosen === i && i !== q.answer}
+        aria-pressed={chosen === i}
+        disabled={!live || chosen !== null}
+        onclick={() => onpick(step, i)}
+      >
+        <span class="letter" aria-hidden="true">{LETTERS[i]}</span>
+        <span class="markdown">{@html inline(choice)}</span>
+      </button>
+    {/each}
+  </div>
+{/snippet}
 
 <div class="quiz" role="group" aria-label={`Quiz: ${quiz.title}`}>
   <div class="head">
@@ -39,22 +64,7 @@
 
   {#if question}
     <div class="question markdown">{@html renderMarkdown(question.question, docs)}</div>
-    <div class="choices" role="group" aria-label="Choices">
-      {#each question.choices as choice, i (i)}
-        <button
-          type="button"
-          class="choice"
-          class:right={picked !== null && i === question.answer}
-          class:wrong={picked === i && i !== question.answer}
-          aria-pressed={picked === i}
-          disabled={picked !== null}
-          onclick={() => onpick(step, i)}
-        >
-          <span class="letter" aria-hidden="true">{LETTERS[i]}</span>
-          <span class="markdown">{@html inline(choice)}</span>
-        </button>
-      {/each}
-    </div>
+    {@render choices(question, picked, true)}
     {#if picked !== null}
       <div class="feedback" role="status">
         <p class="verdict" class:right={picked === question.answer}>
@@ -67,24 +77,22 @@
       </div>
     {/if}
   {:else}
-    <p class="score">You got {right} of {total} right.</p>
-    <ol class="summary">
-      {#each quiz.questions as q, i (i)}
-        {@const choice = quiz.picked[i]}
-        <li class:right={choice === q.answer}>
-          <span class="mark" aria-label={choice === q.answer ? 'Right' : 'Wrong'}>{choice === q.answer ? '✓' : '✗'}</span>
-          <span>
-            <span class="markdown">{@html inline(q.question)}</span>
-            {#if choice !== null && choice !== q.answer}
-              <span class="detail">
-                You said {LETTERS[choice]}, the answer is {LETTERS[q.answer]}:
-                <span class="markdown">{@html inline(q.choices[q.answer])}</span>
-              </span>
-            {/if}
-          </span>
-        </li>
-      {/each}
-    </ol>
+    <div class="score" role="img" aria-label={`You got ${right} of ${total} right`}>
+      <svg viewBox="0 0 36 36" aria-hidden="true">
+        <circle class="track" cx="18" cy="18" r={RADIUS} />
+        {#if right > 0}
+          <circle
+            class="done"
+            cx="18"
+            cy="18"
+            r={RADIUS}
+            pathLength="100"
+            stroke-dasharray={`${(100 * right) / total} 100`}
+          />
+        {/if}
+      </svg>
+      <span class="fraction" aria-hidden="true">{right}/{total}</span>
+    </div>
     {#if right === total}
       <p class="advice">Every answer right.</p>
     {:else if quiz.recommendation}
@@ -96,6 +104,26 @@
       <p class="advice muted">Writing a note on what to review…</p>
     {:else if quiz.reviewing === 'failed'}
       <p class="advice muted">Could not write a note on what to review.</p>
+    {/if}
+    <button type="button" class="details-toggle" aria-expanded={details} onclick={() => (details = !details)}>
+      {details ? 'Hide details' : 'Details'}
+    </button>
+    {#if details}
+      <ol class="details">
+        {#each quiz.questions as q, i (i)}
+          {@const choice = quiz.picked[i] ?? null}
+          <li>
+            <div class="question markdown">
+              <span class="mark" class:right={choice === q.answer} aria-label={choice === q.answer ? 'Right' : 'Wrong'}
+                >{choice === q.answer ? '✓' : '✗'}</span
+              >
+              {@html renderMarkdown(q.question, docs)}
+            </div>
+            {@render choices(q, choice, false)}
+            <div class="markdown explanation">{@html renderMarkdown(q.explanation, docs)}</div>
+          </li>
+        {/each}
+      </ol>
     {/if}
   {/if}
 </div>
@@ -202,38 +230,80 @@
   }
 
   .score {
-    margin: 0;
+    position: relative;
+    align-self: center;
+    width: 5.5rem;
+    height: 5.5rem;
+    margin: 0.25rem 0;
+  }
+  .score svg {
+    width: 100%;
+    height: 100%;
+    transform: rotate(-90deg);
+  }
+  .score circle {
+    fill: none;
+    stroke-width: 3.5;
+  }
+  .score .track {
+    stroke: var(--border);
+  }
+  .score .done {
+    stroke: var(--right);
+    stroke-linecap: round;
+  }
+  .fraction {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    font-size: 1.25rem;
     font-weight: 600;
   }
-  .summary {
+
+  .details-toggle {
+    align-self: flex-start;
+    padding: 0.2rem 0.6rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+    color: inherit;
+    font: inherit;
+    font-size: 0.85rem;
+    cursor: pointer;
+  }
+  .details-toggle:hover {
+    background: var(--hover);
+  }
+  .details-toggle:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+  }
+  .details {
     display: flex;
     flex-direction: column;
-    gap: 0.3rem;
+    gap: 0.9rem;
     margin: 0;
     padding: 0;
     list-style: none;
   }
-  .summary li {
+  .details li {
     display: flex;
-    gap: 0.4rem;
+    flex-direction: column;
+    gap: 0.35rem;
   }
   .mark {
-    flex-shrink: 0;
-    width: 1rem;
+    float: left;
+    width: 1.1rem;
     font-weight: 700;
     color: var(--danger);
   }
-  .summary li.right .mark {
+  .mark.right {
     color: var(--right);
   }
-  .detail {
-    display: block;
+  .explanation {
     color: var(--muted);
-    font-size: 0.85em;
-  }
-  .summary .markdown,
-  .detail .markdown {
-    display: inline;
+    font-size: 0.9em;
   }
 
   .advice {

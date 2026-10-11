@@ -418,9 +418,25 @@ describe('Workspace.ask', () => {
     expect(asked).toMatchObject({ role: 'user', text: 'the chain rule', mode: 'quiz' })
     expect(quiz).toMatchObject({ role: 'assistant', mode: 'quiz', status: 'done', text: '' })
     expect(quiz.quiz).toEqual({ ...written, picked: [null, null] })
-    // The mode stays, so another quiz is one Enter away; a blank box is fine for it.
+    // Sending a quiz goes back to Normal, so the next question is an ordinary one.
+    expect(topic.mode).toBe('normal')
+    expect(ws.canSend(topic.id)).toBe(false)
+  })
+
+  it('cancels Socratic or Quiz mode when the spot it was waiting for is taken off', () => {
+    const ws = new Workspace()
+    const doc = ws.addDoc('notes.pdf', bytes(1))
+    const topic = ws.activeTopic!
+    for (const mode of ['socratic', 'quiz'] as const) {
+      ws.attachContext(topic.id, context(doc.id, 5), mode)
+      ws.clearContext(topic.id)
+      expect(topic.context).toBeUndefined()
+      expect(topic.mode).toBe('normal')
+    }
+    // Picked from the menu with nothing attached, the mode stays.
+    ws.setMode(topic.id, 'quiz')
+    ws.clearContext(topic.id)
     expect(topic.mode).toBe('quiz')
-    expect(ws.canSend(topic.id)).toBe(true)
   })
 
   it('takes each quiz answer once, and asks for a note on what to review only after a wrong one', async () => {

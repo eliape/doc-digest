@@ -5,6 +5,7 @@ from pdfs import filler, make_pdf
 from doc_digest.ask import AskRequest, Turn, stream_answer
 from doc_digest.index import ChunkRecord, DocIndex, Entry, Section
 from doc_digest.library import Library
+from doc_digest.quiz import reading_so_far
 from doc_digest.tools import Toolbox, ToolError, TopicDoc, overview, terms
 from doc_digest.usage import UsageLog
 
@@ -171,3 +172,23 @@ async def test_must_answer_after_the_last_round(topic, monkeypatch) -> None:
     request = AskRequest(topic="Calc", messages=[Turn(role="user", text="?")])
     _ = [e async for e in stream_answer(client, request, topic)]
     assert client.requests[-1]["tool_choice"] == {"type": "none"}
+
+
+async def test_a_quiz_without_a_focus_reads_the_section_up_to_the_page(topic) -> None:
+    book = topic.docs["D2"].info
+    # On p. 5 the latest section to start is 2.1 (with its chapter on p. 4): pp. 4–5.
+    blocks = await reading_so_far(topic, book.id, 5)
+    assert blocks[0]["text"] == (
+        'The section they are reading, "2.1 Chain rule", from its start up to where they are '
+        "(book.pdf, pp. 4–5):"
+    )
+    assert [b["type"] for b in blocks[1:]] == ["text", "text", "image"]
+    assert "composite functions" in blocks[1]["text"]
+    # Nothing after the page they are on.
+    third = await reading_so_far(topic, book.id, 3)
+    assert '"1 Limits", from its start' in third[0]["text"] and "pp. 1–3" in third[0]["text"]
+    # Without sections, the pages just before.
+    slides = await reading_so_far(topic, topic.docs["D1"].info.id, 2)
+    assert slides[0]["text"].startswith("No sections are known")
+    assert "pp. 1–2" in slides[0]["text"]
+    assert await reading_so_far(topic, "missing", 1) == []

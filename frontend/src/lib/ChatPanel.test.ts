@@ -211,12 +211,29 @@ describe('ChatPanel', () => {
     expect(quiz.getByRole('status')).toHaveTextContent('Right.')
     await fireEvent.click(quiz.getByRole('button', { name: 'See results' }))
 
-    expect(quiz.getByText('You got 1 of 2 right.')).toBeInTheDocument()
+    // A ring coloured for the share of right answers, with the score inside.
+    const score = quiz.getByRole('img', { name: 'You got 1 of 2 right' })
+    expect(score).toHaveTextContent('1/2')
+    expect(score.querySelector('.done')).toHaveAttribute('stroke-dasharray', '50 100')
     expect(quiz.getByText('Writing a note on what to review…')).toBeInTheDocument()
     reviewed('Read the power rule again.')
     await vi.waitFor(() => expect(quiz.getByText('What to review')).toBeInTheDocument())
     expect(quiz.getByText('Read the power rule again.')).toBeInTheDocument()
     expect(topic.chat[1].quiz!.picked).toEqual([0, 0])
+
+    // Details shows the questions again with what was picked, and hides them again.
+    expect(quiz.queryByText('Derivative of x squared?')).not.toBeInTheDocument()
+    await fireEvent.click(quiz.getByRole('button', { name: 'Details' }))
+    expect(quiz.getByText('Derivative of x squared?')).toBeInTheDocument()
+    const groups = quiz.getAllByRole('group', { name: 'Choices' })
+    expect(groups).toHaveLength(2)
+    const first = within(groups[0]).getAllByRole('button')
+    expect(first[0]).toHaveClass('wrong')
+    expect(first[1]).toHaveClass('right')
+    expect(first.every((c) => (c as HTMLButtonElement).disabled)).toBe(true)
+    expect(quiz.getByText('The power rule.')).toBeInTheDocument()
+    await fireEvent.click(quiz.getByRole('button', { name: 'Hide details' }))
+    expect(quiz.queryByText('Derivative of x squared?')).not.toBeInTheDocument()
   })
 
   it('switches the mode from the menu on the left below the question box', async () => {

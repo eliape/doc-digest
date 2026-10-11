@@ -72,19 +72,23 @@ the equation or figure) or ask a smaller question.
 step briefly and carry on with a question.
 - Work towards the key idea of what they pointed at or asked about. Once they have it, say so, \
 sum up in a few lines what they worked out, and ask whether they want to go further.
-Turns without [Socratic] are ordinary questions (they switched back to normal answers): answer \
-them as usual, also right after a session.
+Turns without [Socratic] are ordinary questions: answer them as usual. The first one after a \
+session starts with [Socratic session ended], because they switched back to normal answers: \
+stop asking them questions and answer directly.
 
 Quizzes: they can ask for a multiple-choice quiz with a turn starting with [Quiz]. They click \
 through it in the chat, and how they did comes back in a turn starting with [Quiz results]. When \
 you write a quiz:
 - Ask 4 to 6 questions about what they pointed at, and about what they asked it to focus on, \
-unless they ask for another number.
+unless they ask for another number. When they give nothing to focus on, you get the section \
+they are reading up to where they are: ask about that, and nothing after that point.
 - Give each question 3 or 4 choices with exactly one right; make the wrong ones plausible \
 mistakes, not jokes.
 - Test understanding (why something holds, what follows, which case applies) rather than \
 recall of wording.
-- Explain each right answer in a sentence or two, citing pages as above.
+- Explain each right answer in a sentence or two. Don't cite pages as sources; refer to the \
+text only when it helps to look at something, e.g. "Look at equation (2.3) (book.pdf, p. 41)" \
+or "As in the worked example (book.pdf, p. 40)", in the citation form above.
 - Write it from what you are shown; there is no looking things up for a quiz.
 - After earlier quizzes, come back to what they got wrong.
 In your other answers, use quiz results to adapt: build on what they know, and go over what \
@@ -94,6 +98,16 @@ they got wrong when it comes up."""
 SOCRATIC_START = "Start a Socratic session about what they pointed at: ask your first question."
 # What a quiz request asks for; the reader's words, if any, say what to focus on.
 QUIZ_START = "Write a quiz about what they pointed at."
+# What a quiz request with nothing to focus on asks for; the section's pages come with it.
+QUIZ_SECTION = (
+    "Write a quiz on the section they are reading, up to where they are: nothing after the "
+    "spot they pointed at or the page they are on."
+)
+# Marks their first ordinary question after a Socratic session.
+SOCRATIC_END = (
+    "[Socratic session ended] They switched back to normal answers: stop asking them "
+    "questions and answer directly."
+)
 
 
 class Point(BaseModel):
@@ -215,21 +229,25 @@ def context_blocks(context: Context) -> list[dict[str, Any]]:
     return blocks
 
 
-def question_text(turn: Turn, starts_session: bool = False) -> str:
+def question_text(turn: Turn, starts_session: bool = False, ends_session: bool = False) -> str:
     """
-    What the reader said. Socratic turns and quiz requests are marked. A session or a quiz
-    starts from what they pointed at, and their words, if any, say what to focus on.
+    What the reader said. Socratic turns and quiz requests are marked, and so is the first
+    ordinary question after a session. A session or a quiz starts from what they pointed at,
+    and their words, if any, say what to focus on; a quiz without them covers the section.
     """
     text = turn.text.strip()
     if turn.mode == "quiz":
-        return f"[Quiz] {QUIZ_START}" + (f" Focus on: {text}" if text else "")
+        if text:
+            return f"[Quiz] {QUIZ_START} Focus on: {text}"
+        return f"[Quiz] {QUIZ_SECTION if turn.context else QUIZ_START}"
     if turn.mode == "socratic":
         if not text:
             return f"[Socratic] {SOCRATIC_START}"
         if starts_session and turn.context:
             return f"[Socratic] {SOCRATIC_START} Focus on: {text}"
         return f"[Socratic] {text}"
-    return f"Question: {turn.text}" if turn.context else turn.text
+    question = f"Question: {turn.text}" if turn.context else turn.text
+    return f"{SOCRATIC_END}\n{question}" if ends_session else question
 
 
 def build_messages(request: AskRequest, aliases: dict[str, str] | None = None) -> list[dict]:
@@ -260,7 +278,12 @@ def build_messages(request: AskRequest, aliases: dict[str, str] | None = None) -
             content.append(text_block(describe(turn.context, alias)))
             if i == last:
                 content.extend(context_blocks(turn.context))
-        content.append(text_block(question_text(turn, starts_session=not in_session)))
+        ends_session = in_session and turn.mode is None
+        content.append(
+            text_block(
+                question_text(turn, starts_session=not in_session, ends_session=ends_session)
+            )
+        )
         in_session = turn.mode == "socratic"
         # Two user turns in a row (an earlier answer failed) are merged into one.
         if messages and messages[-1]["role"] == "user":
@@ -305,17 +328,23 @@ async def write_quiz(
     request: AskRequest,
     usage: UsageLog | None = None,
     model: str = MODEL,
+    reading: list[dict[str, Any]] | None = None,
 ) -> Quiz:
     """
     A multiple-choice quiz for the newest turn (a [Quiz] request), from what the reader is
-    shown and the conversation so far, including how earlier quizzes went.
+    shown and the conversation so far, including how earlier quizzes went. `reading` is
+    the section the quiz covers when they gave nothing to focus on.
     """
+    messages = build_messages(request)
+    if reading:
+        # Before the request itself, which stays last.
+        messages[-1]["content"][-1:-1] = reading
     began = time.monotonic()
     response: Any = await client.messages.parse(
         model=model,
         max_tokens=16000,
         system=system_blocks(request.topic),  # type: ignore[arg-type]
-        messages=build_messages(request),  # type: ignore[arg-type]
+        messages=messages,  # type: ignore[arg-type]
         output_format=Quiz,
         output_config={"effort": EFFORT},
     )

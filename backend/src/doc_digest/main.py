@@ -13,7 +13,7 @@ from .ask import AskRequest, Turn, describe, stream_answer, write_quiz
 from .config import Settings, get_settings
 from .index import Indexer
 from .library import Library
-from .quiz import QuizRecord, recommend
+from .quiz import QuizRecord, reading_so_far, recommend
 from .saved import SavedWorkspace
 from .tools import Toolbox, topic_docs
 from .usage import UsageLog
@@ -180,12 +180,22 @@ async def quiz(
     client: Annotated[anthropic.AsyncAnthropic, Depends(get_client)],
     services: ServicesDep,
 ) -> dict[str, Any]:
-    """A multiple-choice quiz for the newest turn, which asks for one."""
-    if not request.messages or request.messages[-1].mode != "quiz":
+    """
+    A multiple-choice quiz for the newest turn, which asks for one. Without anything to focus
+    on, it covers the section being read, up to where the reader is.
+    """
+    last = request.messages[-1] if request.messages else None
+    if not last or last.mode != "quiz":
         raise HTTPException(status_code=422, detail="The last message must ask for a quiz.")
     try:
+        reading = []
+        if not last.text.strip() and last.context and last.context.doc_id:
+            doc_id = last.context.doc_id
+            ids = request.docs if doc_id in request.docs else [*request.docs, doc_id]
+            toolbox = Toolbox(services.library, topic_docs(services.library, services.indexer, ids))
+            reading = await reading_so_far(toolbox, doc_id, last.context.page)
         written = await write_quiz(
-            client, request, services.usage, request.model or services.answer_model
+            client, request, services.usage, request.model or services.answer_model, reading
         )
     except Exception as error:
         logger.exception("Quiz failed")
@@ -210,6 +220,8 @@ async def quiz_recommendation(
     asked = describe(about.context) if about.context else ""
     if about.text.strip():
         asked += f" They asked the quiz to focus on: {about.text.strip()}"
+    elif about.context:
+        asked += " The quiz covered the section they were reading, up to there."
     try:
         text = await recommend(client, request.topic, asked, request.quiz, services.usage)
     except Exception as error:

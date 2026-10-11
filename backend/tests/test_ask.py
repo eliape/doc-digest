@@ -6,7 +6,9 @@ from fastapi.testclient import TestClient
 
 from doc_digest import main
 from doc_digest.ask import (
+    QUIZ_SECTION,
     QUIZ_START,
+    SOCRATIC_END,
     SOCRATIC_START,
     SYSTEM_PROMPT,
     AskRequest,
@@ -132,17 +134,20 @@ def test_a_socratic_session_starts_from_a_spot_and_marks_its_turns() -> None:
             Turn(role="user", text=" A small change in x? ", mode="socratic"),
             Turn(role="assistant", text="Right. So what is dy/dx?"),
             Turn(role="user", text="What is a derivative?"),
+            Turn(role="assistant", text="A rate of change."),
+            Turn(role="user", text="And an integral?"),
         ],
     )
     messages = build_messages(request)
-    first, _, reply, _, after = messages
+    first, _, reply, _, after, _, later = messages
     # The reader only pointed at something, so the first turn asks for the first question.
     assert first["content"][0]["text"].startswith("They clicked a spot on p. 12")
     assert first["content"][-1]["text"] == f"[Socratic] {SOCRATIC_START}"
     assert reply["content"][-1]["text"] == "[Socratic] A small change in x?"
-    # Once the session is ended, questions go back to being plain questions.
-    assert after["content"][-1]["text"] == "What is a derivative?"
-    assert "[Socratic]" in SYSTEM_PROMPT
+    # Switching back to Normal tells the model to stop questioning; then questions are plain.
+    assert after["content"][-1]["text"] == f"{SOCRATIC_END}\nWhat is a derivative?"
+    assert later["content"][-1]["text"] == "And an integral?"
+    assert "[Socratic]" in SYSTEM_PROMPT and "[Socratic session ended]" in SYSTEM_PROMPT
 
 
 @pytest.fixture
@@ -279,7 +284,8 @@ def quiz(**overrides: object) -> QuizRecord:
 def test_a_quiz_request_is_marked_and_says_what_to_focus_on() -> None:
     spot = context(point=Point(x=0.5, y=0.5), page_image="PAGE")
     plain = AskRequest(topic="T", messages=[Turn(role="user", text="", context=spot, mode="quiz")])
-    assert build_messages(plain)[0]["content"][-1]["text"] == f"[Quiz] {QUIZ_START}"
+    # With nothing to focus on, the quiz covers the section they are reading.
+    assert build_messages(plain)[0]["content"][-1]["text"] == f"[Quiz] {QUIZ_SECTION}"
     focused = AskRequest(
         topic="T", messages=[Turn(role="user", text="the chain rule", context=spot, mode="quiz")]
     )
@@ -350,12 +356,16 @@ async def test_write_quiz_uses_the_chosen_model_and_drops_broken_questions() -> 
     request = AskRequest(
         topic="Calculus", messages=[Turn(role="user", text="", context=context(), mode="quiz")]
     )
-    result = await write_quiz(fake, request, model="claude-sonnet-5-5")  # type: ignore[arg-type]
+    reading = [{"type": "text", "text": "The section they are reading"}]
+    result = await write_quiz(fake, request, model="claude-sonnet-5-5", reading=reading)  # type: ignore[arg-type]
     assert [q.question for q in result.questions] == [q.question for q in quiz().questions]
     sent = fake.requests[0]
     assert sent["model"] == "claude-sonnet-5-5"
     assert sent["output_format"] is Quiz
-    assert sent["messages"][-1]["content"][-1]["text"] == f"[Quiz] {QUIZ_START}"
+    # The section's pages come just before the request.
+    *_, section, asked = sent["messages"][-1]["content"]
+    assert section == reading[0]
+    assert asked["text"] == f"[Quiz] {QUIZ_SECTION}"
 
 
 async def test_write_quiz_fails_when_no_questions_come_back() -> None:
@@ -366,8 +376,9 @@ async def test_write_quiz_fails_when_no_questions_come_back() -> None:
 
 
 def test_quiz_endpoint_only_writes_quizzes(client: TestClient, monkeypatch) -> None:
-    async def fake_write(_client, request, _usage, model):
+    async def fake_write(_client, request, _usage, model, reading):
         assert request.messages[-1].mode == "quiz"
+        assert reading == []
         return Quiz(title=f"By {model}", questions=quiz().questions)
 
     main.app.dependency_overrides[main.get_client] = lambda: object()
@@ -379,6 +390,9 @@ def test_quiz_endpoint_only_writes_quizzes(client: TestClient, monkeypatch) -> N
     assert response.status_code == 200
     assert response.json()["title"] == "By claude-sonnet-5-5"
     assert response.json()["questions"][0]["answer"] == 1
+    # A document the backend doesn't have adds no section to read.
+    at = {**turn, "context": {"doc_id": "missing", "doc_name": "a.pdf", "page": 3}}
+    assert client.post("/api/quiz", json={"topic": "T", "messages": [at]}).status_code == 200
     plain = client.post("/api/quiz", json={"topic": "T", "messages": [{**turn, "mode": None}]})
     assert plain.status_code == 422
 
@@ -399,10 +413,16 @@ def test_quiz_recommendation_comes_from_haiku_only_when_something_was_wrong(
     prompt = sent["messages"][0]["content"]
     assert "They are reading p. 3 of a.pdf." in prompt and "focus on: the power rule" in prompt
     assert "1. Wrong: they chose A) x" in prompt
+    # Without a focus, the quiz was about the section.
+    client.post(
+        "/api/quiz/recommendation",
+        json={"topic": "T", "about": {**about, "text": ""}, "quiz": wrong},
+    )
+    assert "covered the section they were reading" in fake.requests[1]["messages"][0]["content"]
 
     right = quiz(picked=[1, 0]).model_dump()
     response = client.post(
         "/api/quiz/recommendation", json={"topic": "T", "about": about, "quiz": right}
     )
     assert response.json() == {"text": None}
-    assert len(fake.requests) == 1
+    assert len(fake.requests) == 2

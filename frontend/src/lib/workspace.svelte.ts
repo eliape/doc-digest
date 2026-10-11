@@ -249,9 +249,15 @@ export class Workspace {
     if (topic) topic.context = context
   }
 
+  /**
+   * Take the attached spot off the topic's next question. A spot attached for a Socratic
+   * session or a quiz is what that mode was waiting for, so taking it off cancels the mode too.
+   */
   clearContext(topicId: string) {
     const topic = this.topics.find((t) => t.id === topicId)
-    if (topic) topic.context = undefined
+    if (!topic?.context) return
+    topic.context = undefined
+    topic.mode = 'normal'
   }
 
   /**
@@ -287,8 +293,8 @@ export class Workspace {
    * Send the topic's draft as a question, with the attached context or, when
    * nothing is attached, whatever `fallback` gives (the open page), and stream
    * the answer into the chat. In Socratic mode the model replies with questions;
-   * in Quiz mode it writes a quiz instead, about what the draft asks it to focus on.
-   * Ignored when the draft can't be sent (see canSend).
+   * in Quiz mode it writes a quiz instead, about what the draft asks it to focus on, and the
+   * chat goes back to Normal. Ignored when the draft can't be sent (see canSend).
    */
   async ask(
     topicId: string,
@@ -305,6 +311,7 @@ export class Workspace {
     topic.context = undefined
     const fill = context ? undefined : fallback
     if (topic.mode === 'quiz') {
+      topic.mode = 'normal'
       await this.converse(topic, question, fill, async (answer, request, signal) => {
         const written = await quizApi.create(request, signal)
         answer.quiz = { ...written, picked: written.questions.map(() => null) }

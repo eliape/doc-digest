@@ -35,6 +35,8 @@ uv run python -m doc_digest.evaluate questions.json book.pdf scanned-book.pdf pa
 
 `GET /api/usage` shows tokens, cache use, latency and cost of every model call so far.
 
+`make costs` sums up what the API has cost from that log: per question (straight answers and those with lookups), per quiz, for indexing each PDF, and per day. Narrow it with `make costs ARGS="--since 2026-10-10"` or `ARGS="--days 1"`.
+
 The menu under the question box picks the answering model, Claude Opus 5.5 or the cheaper Claude Sonnet 5.5 (about half the cost per question), and the browser remembers it. The evaluation above uses `ANSWER_MODEL` from `backend/.env` instead (default `claude-opus-5-5`), so set `ANSWER_MODEL=claude-sonnet-5-5` and run it again to compare.
 
 ## Tests and checks

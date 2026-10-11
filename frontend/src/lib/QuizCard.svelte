@@ -33,6 +33,9 @@
 
   // The results ring: a circle whose coloured part is the share of right answers.
   const RADIUS = 15.5
+  // Whether the ring fills up from empty: when the reader goes on to the results, not when a
+  // finished quiz is shown again (after a reload or a topic switch).
+  let filling = $state(false)
   // Whether the results show each question again with its choices and explanation.
   let details = $state(false)
 </script>
@@ -71,7 +74,7 @@
           {picked === question.answer ? 'Right.' : `Not quite: the answer is ${LETTERS[question.answer]}.`}
         </p>
         <div class="markdown">{@html renderMarkdown(question.explanation, docs)}</div>
-        <button type="button" class="next" onclick={() => (step += 1)}>
+        <button type="button" class="next" onclick={() => ((step += 1), (filling = step === total))}>
           {step + 1 < total ? 'Next question' : 'See results'}
         </button>
       </div>
@@ -83,6 +86,7 @@
         {#if right > 0}
           <circle
             class="done"
+            class:filling
             cx="18"
             cy="18"
             r={RADIUS}
@@ -251,6 +255,19 @@
   .score .done {
     stroke: var(--right);
     stroke-linecap: round;
+  }
+  .score .done.filling {
+    animation: fill 0.9s 0.15s cubic-bezier(0.33, 1, 0.68, 1) backwards;
+  }
+  @keyframes fill {
+    from {
+      stroke-dasharray: 0 100;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .score .done.filling {
+      animation: none;
+    }
   }
   .fraction {
     position: absolute;

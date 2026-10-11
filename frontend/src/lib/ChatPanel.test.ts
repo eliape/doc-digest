@@ -215,6 +215,8 @@ describe('ChatPanel', () => {
     const score = quiz.getByRole('img', { name: 'You got 1 of 2 right' })
     expect(score).toHaveTextContent('1/2')
     expect(score.querySelector('.done')).toHaveAttribute('stroke-dasharray', '50 100')
+    // Going on to the results fills the ring up from empty.
+    expect(score.querySelector('.done')).toHaveClass('filling')
     expect(quiz.getByText('Writing a note on what to review…')).toBeInTheDocument()
     reviewed('Read the power rule again.')
     await vi.waitFor(() => expect(quiz.getByText('What to review')).toBeInTheDocument())

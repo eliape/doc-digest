@@ -145,6 +145,9 @@ async def test_answers_after_looking_things_up(topic, tmp_path) -> None:
     assert "D2: book.pdf" in first_question[0]["text"]
     assert "D2: book.pdf" not in str(client.requests[0]["system"])
     assert usage.summary()["answer"]["calls"] == 3
+    # The conversation is cached only once a lookup has started.
+    assert "cache_control" not in client.requests[0]
+    assert all(r["cache_control"] == {"type": "ephemeral"} for r in client.requests[1:])
 
 
 async def test_bad_tool_calls_come_back_as_errors(topic) -> None:

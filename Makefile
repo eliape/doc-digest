@@ -1,4 +1,4 @@
-.PHONY: install dev test check
+.PHONY: install dev test check costs
 
 install:
 	cd backend && uv sync
@@ -14,3 +14,6 @@ test:
 check:
 	cd backend && uv run ruff check && uv run ruff format --check
 	cd frontend && npm run check
+
+costs:
+	cd backend && uv run python -m doc_digest.costs $(ARGS)

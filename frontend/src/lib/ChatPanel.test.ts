@@ -140,9 +140,16 @@ describe('ChatPanel', () => {
 
   it('marks the model’s Socratic questions and tints the question box, but not the reader’s messages', async () => {
     const { workspace, topic, context, panel } = setup()
-    await workspace.startSocratic(topic.id, context, undefined, async function* () {
+    workspace.attachContext(topic.id, context, 'socratic')
+    await tick()
+    const box = panel.getByLabelText('Ask a question')
+    // What to focus on is optional, so the box can be sent blank.
+    expect(box).toHaveAttribute('placeholder', 'What should it focus on? (optional)')
+    expect(panel.getByRole('button', { name: 'Send' })).toBeEnabled()
+    await workspace.ask(topic.id, undefined, async function* () {
       yield { type: 'text', text: 'What does the integral add up?' }
     })
+    await tick()
     const log = panel.getByRole('log')
     const [start, question] = log.querySelectorAll('.message')
     // The session starts from the right-clicked spot, with nothing typed, and looks like any question.
@@ -153,10 +160,63 @@ describe('ChatPanel', () => {
     expect(question).toHaveClass('socratic')
     expect(question).toHaveTextContent('What does the integral add up?')
 
-    const box = panel.getByLabelText('Ask a question')
     expect(box.closest('form')).toHaveClass('socratic')
     expect(box).toHaveAttribute('placeholder', 'Answer, or ask for a hint…')
+    expect(panel.getByRole('button', { name: 'Send' })).toBeDisabled()
     expect(panel.getByRole('button', { name: 'Mode: Socratic' })).toBeInTheDocument()
+  })
+
+  it('shows a quiz to click through, with feedback on each answer and a summary at the end', async () => {
+    const { workspace, topic, context, panel } = setup()
+    workspace.attachContext(topic.id, context, 'quiz')
+    await tick()
+    const box = panel.getByLabelText('Ask a question')
+    expect(box.closest('form')).toHaveClass('quiz')
+    expect(box).toHaveAttribute('placeholder', 'What should the quiz cover? (optional)')
+    expect(panel.getByRole('button', { name: 'Mode: Quiz' })).toBeInTheDocument()
+    let reviewed!: (text: string) => void
+    const api = {
+      create: async () => ({
+        title: 'Derivatives',
+        questions: [
+          { question: 'Derivative of x squared?', choices: ['x', '2x'], answer: 1, explanation: 'The power rule.' },
+          { question: 'What is dx?', choices: ['A small change', 'A constant'], answer: 0, explanation: 'An infinitesimal.' },
+        ],
+      }),
+      recommend: () => new Promise<string>((resolve) => (reviewed = resolve)),
+    }
+    await fireEvent.input(box, { target: { value: 'the power rule' } })
+    workspace.quizApi = api
+    await workspace.ask(topic.id)
+    await tick()
+    const [asked] = panel.getByRole('log').querySelectorAll('.message')
+    expect(asked).toHaveTextContent('Quiz')
+    expect(asked).toHaveTextContent('the power rule')
+
+    const quiz = within(panel.getByRole('group', { name: 'Quiz: Derivatives' }))
+    expect(quiz.getByText('Question 1 of 2')).toBeInTheDocument()
+    // jsdom can't style KaTeX's MathML, so these questions have no maths.
+    const choices = within(quiz.getByRole('group', { name: 'Choices' })).getAllByRole('button')
+    expect(choices.map((c) => c.textContent?.trim())).toEqual(['A x', 'B 2x'])
+    await fireEvent.click(choices[0])
+    expect(choices[0]).toHaveClass('wrong')
+    expect(choices[1]).toHaveClass('right')
+    expect(choices.every((c) => (c as HTMLButtonElement).disabled)).toBe(true)
+    expect(quiz.getByRole('status')).toHaveTextContent('Not quite: the answer is B.')
+    expect(quiz.getByRole('status')).toHaveTextContent('The power rule.')
+
+    await fireEvent.click(quiz.getByRole('button', { name: 'Next question' }))
+    expect(quiz.getByText('Question 2 of 2')).toBeInTheDocument()
+    await fireEvent.click(quiz.getByRole('button', { name: 'A small change' }))
+    expect(quiz.getByRole('status')).toHaveTextContent('Right.')
+    await fireEvent.click(quiz.getByRole('button', { name: 'See results' }))
+
+    expect(quiz.getByText('You got 1 of 2 right.')).toBeInTheDocument()
+    expect(quiz.getByText('Writing a note on what to review…')).toBeInTheDocument()
+    reviewed('Read the power rule again.')
+    await vi.waitFor(() => expect(quiz.getByText('What to review')).toBeInTheDocument())
+    expect(quiz.getByText('Read the power rule again.')).toBeInTheDocument()
+    expect(topic.chat[1].quiz!.picked).toEqual([0, 0])
   })
 
   it('switches the mode from the menu on the left below the question box', async () => {
@@ -170,7 +230,7 @@ describe('ChatPanel', () => {
     await fireEvent.click(mode)
     const menu = panel.getByRole('menu', { name: 'Mode' })
     const items = within(menu).getAllByRole('menuitemradio')
-    expect(items.map((i) => i.textContent?.trim())).toEqual(['Normal', 'Socratic'])
+    expect(items.map((i) => i.textContent?.trim())).toEqual(['Normal', 'Socratic', 'Quiz'])
     expect(items[0]).toHaveAttribute('aria-checked', 'true')
     expect(items[1].querySelector('svg')).not.toBeNull()
     await fireEvent.click(items[1])

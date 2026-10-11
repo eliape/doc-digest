@@ -1,9 +1,17 @@
 import { describe, expect, it } from 'vitest'
-import type { AskRequest, IndexStatus } from './api'
+import type { AskRequest, IndexStatus, RecommendationRequest, WrittenQuiz } from './api'
 import type { PageContext } from './context'
-import { Workspace, askRequest, topicNameFor } from './workspace.svelte'
+import { type QuizApi, Workspace, askRequest, topicNameFor } from './workspace.svelte'
 
 const bytes = (...values: number[]) => new Uint8Array(values)
+
+const written: WrittenQuiz = {
+  title: 'Derivatives',
+  questions: [
+    { question: 'What is the derivative of $x^2$?', choices: ['$x$', '$2x$', '$x^2$'], answer: 1, explanation: 'The power rule.' },
+    { question: 'What does $dx$ stand for?', choices: ['A small change in x', 'A constant'], answer: 0, explanation: 'An infinitesimal.' },
+  ],
+}
 
 describe('topicNameFor', () => {
   it('drops the .pdf extension', () => {
@@ -285,46 +293,51 @@ describe('Workspace.ask', () => {
     expect(models).toEqual([undefined, 'claude-sonnet-5-5'])
   })
 
-  it('starts a Socratic session with the model asking first, leaving the draft and attached spot alone', async () => {
+  it('starts a Socratic session about a spot attached for it, with what to focus on optional', async () => {
     const ws = new Workspace()
     const doc = ws.addDoc('notes.pdf', bytes(1))
     const topic = ws.activeTopic!
-    ws.attachContext(topic.id, context(doc.id, 2))
-    topic.draft = 'my own question'
-    const about = { docId: doc.id, docName: 'notes.pdf', page: 5, point: { x: 0.3, y: 0.6 }, pageTexts: [] }
     const requests: AskRequest[] = []
     const stream = async function* (request: AskRequest) {
       requests.push(request)
       yield { type: 'text' as const, text: 'What does dx stand for?' }
     }
-    await ws.startSocratic(topic.id, about, async () => context(doc.id, 5), stream)
-
+    // Nothing goes out until the reader sends; a blank box is fine once a spot is attached.
+    expect(ws.canSend(topic.id)).toBe(false)
+    ws.attachContext(topic.id, context(doc.id, 5), 'socratic')
     expect(topic.mode).toBe('socratic')
+    expect(topic.chat).toEqual([])
+    expect(ws.canSend(topic.id)).toBe(true)
+    await ws.ask(topic.id, undefined, stream)
+
     expect(topic.chat.map((m) => [m.role, m.text, m.mode])).toEqual([
       ['user', '', 'socratic'],
       ['assistant', 'What does dx stand for?', 'socratic'],
     ])
-    // The spot's images arrived before the question went out.
     expect(requests[0].messages).toEqual([
       { role: 'user', text: '', mode: 'socratic', context: expect.objectContaining({ page: 5, page_image: 'PAGE' }) },
     ])
-    expect(topic.draft).toBe('my own question')
-    expect(topic.context?.page).toBe(2)
+    expect(topic.context).toBeUndefined()
 
-    // The reader's replies are Socratic turns until the mode is switched back.
+    // The reader's replies are Socratic turns until the mode is switched back; they can't be blank.
+    expect(ws.canSend(topic.id)).toBe(false)
     topic.draft = 'A small change in x?'
     await ws.ask(topic.id, undefined, stream)
     expect(requests[1].messages.at(-1)).toMatchObject({ role: 'user', text: 'A small change in x?', mode: 'socratic' })
     expect(topic.chat.at(-1)?.mode).toBe('socratic')
 
     ws.setMode(topic.id, 'normal')
-    expect(topic.mode).toBe('normal')
     topic.draft = 'Thanks. What is a derivative?'
     await ws.ask(topic.id, undefined, stream)
     expect(requests[2].messages.at(-1)).not.toHaveProperty('mode')
-    expect(topic.chat.at(-1)?.mode).toBeUndefined()
     // Earlier turns keep their mark, so the model can tell where the session was.
     expect(requests[2].messages.map((m) => m.mode)).toEqual(['socratic', undefined, 'socratic', undefined, undefined])
+
+    // With what to focus on typed, the session starts with it.
+    ws.attachContext(topic.id, context(doc.id, 7), 'socratic')
+    topic.draft = 'the limit'
+    await ws.ask(topic.id, undefined, stream)
+    expect(requests[3].messages.at(-1)).toMatchObject({ text: 'the limit', mode: 'socratic', context: { page: 7 } })
   })
 
   it('asks typed questions Socratically once the mode is picked, until a spot is clicked', async () => {
@@ -354,22 +367,151 @@ describe('Workspace.ask', () => {
     expect(modes).toEqual(['socratic', undefined])
   })
 
-  it('does not start a Socratic session while an answer is arriving', async () => {
+  it('sends nothing while an answer is arriving, not even to start a session or a quiz', async () => {
     const ws = new Workspace()
     const doc = ws.addDoc('notes.pdf', bytes(1))
     const topic = ws.activeTopic!
-    const about = { docId: doc.id, docName: 'notes.pdf', page: 5, point: { x: 0.3, y: 0.6 }, pageTexts: [] }
     topic.draft = 'first'
     let finish!: () => void
     const pending = ws.ask(topic.id, undefined, async function* () {
       await new Promise<void>((resolve) => (finish = resolve))
     })
     await Promise.resolve()
-    await ws.startSocratic(topic.id, about, undefined, async function* () {})
-    expect(topic.mode).toBe('normal')
+    ws.attachContext(topic.id, context(doc.id, 5), 'quiz')
+    expect(ws.canSend(topic.id)).toBe(false)
+    await ws.ask(topic.id, undefined, undefined, fakeQuizApi().api)
     expect(topic.chat).toHaveLength(2)
     finish()
     await pending
+  })
+
+
+  function fakeQuizApi(recommendation: string | null = 'Read p. 12 again.') {
+    const created: AskRequest[] = []
+    const recommended: RecommendationRequest[] = []
+    const api: QuizApi = {
+      create: async (request) => {
+        created.push(request)
+        return structuredClone(written)
+      },
+      recommend: async (request) => {
+        recommended.push(request)
+        return recommendation
+      },
+    }
+    return { api, created, recommended }
+  }
+
+  it('writes a quiz in Quiz mode, about the attached spot and what the reader asked it to cover', async () => {
+    const ws = new Workspace()
+    const doc = ws.addDoc('notes.pdf', bytes(1))
+    const topic = ws.activeTopic!
+    const { api, created } = fakeQuizApi()
+    ws.attachContext(topic.id, context(doc.id, 5), 'quiz')
+    topic.draft = ' the chain rule '
+    await ws.ask(topic.id, undefined, undefined, api)
+
+    expect(created[0].messages).toEqual([
+      { role: 'user', text: 'the chain rule', mode: 'quiz', context: expect.objectContaining({ page: 5, page_image: 'PAGE' }) },
+    ])
+    const [asked, quiz] = topic.chat
+    expect(asked).toMatchObject({ role: 'user', text: 'the chain rule', mode: 'quiz' })
+    expect(quiz).toMatchObject({ role: 'assistant', mode: 'quiz', status: 'done', text: '' })
+    expect(quiz.quiz).toEqual({ ...written, picked: [null, null] })
+    // The mode stays, so another quiz is one Enter away; a blank box is fine for it.
+    expect(topic.mode).toBe('quiz')
+    expect(ws.canSend(topic.id)).toBe(true)
+  })
+
+  it('takes each quiz answer once, and asks for a note on what to review only after a wrong one', async () => {
+    const ws = new Workspace()
+    const doc = ws.addDoc('notes.pdf', bytes(1))
+    const topic = ws.activeTopic!
+    const { api, recommended } = fakeQuizApi()
+    ws.attachContext(topic.id, context(doc.id, 5), 'quiz')
+    topic.draft = 'the power rule'
+    await ws.ask(topic.id, undefined, undefined, api)
+    const message = topic.chat[1]
+
+    await ws.answerQuiz(topic.id, message.id, 0, 0, api)
+    await ws.answerQuiz(topic.id, message.id, 0, 1, api)
+    expect(message.quiz!.picked).toEqual([0, null])
+    expect(recommended).toEqual([])
+
+    await ws.answerQuiz(topic.id, message.id, 1, 0, api)
+    expect(message.quiz!.picked).toEqual([0, 0])
+    expect(recommended).toEqual([
+      {
+        topic: 'notes',
+        about: { role: 'user', text: 'the power rule', context: expect.objectContaining({ page: 5, doc_name: 'notes.pdf' }) },
+        quiz: { ...written, picked: [0, 0] },
+      },
+    ])
+    expect(recommended[0].about.context).not.toHaveProperty('page_image')
+    expect(message.quiz).toMatchObject({ recommendation: 'Read p. 12 again.', reviewing: undefined })
+
+    // All right: nothing to review, and no call.
+    ws.attachContext(topic.id, context(doc.id, 5), 'quiz')
+    await ws.ask(topic.id, undefined, undefined, api)
+    const perfect = topic.chat[3]
+    await ws.answerQuiz(topic.id, perfect.id, 0, 1, api)
+    await ws.answerQuiz(topic.id, perfect.id, 1, 0, api)
+    expect(recommended).toHaveLength(1)
+    expect(perfect.quiz!.recommendation).toBeUndefined()
+  })
+
+  it('says so when the note on what to review could not be written', async () => {
+    const ws = new Workspace()
+    ws.addDoc('notes.pdf', bytes(1))
+    const topic = ws.activeTopic!
+    const api: QuizApi = {
+      create: async () => structuredClone(written),
+      recommend: async () => {
+        throw new Error('offline')
+      },
+    }
+    ws.setMode(topic.id, 'quiz')
+    await ws.ask(topic.id, undefined, undefined, api)
+    const message = topic.chat[1]
+    await ws.answerQuiz(topic.id, message.id, 0, 0, api)
+    await ws.answerQuiz(topic.id, message.id, 1, 1, api)
+    expect(message.quiz!.reviewing).toBe('failed')
+  })
+
+  it('shows a quiz that could not be written as an error', async () => {
+    const ws = new Workspace()
+    ws.addDoc('notes.pdf', bytes(1))
+    const topic = ws.activeTopic!
+    ws.setMode(topic.id, 'quiz')
+    await ws.ask(topic.id, undefined, undefined, {
+      create: async () => {
+        throw new Error('The model service returned an error (529). Try again.')
+      },
+      recommend: async () => null,
+    })
+    expect(topic.chat[1]).toMatchObject({ status: 'error', text: 'The model service returned an error (529). Try again.' })
+  })
+
+  it('sends a quiz and how it went with later questions, so the model can adapt', async () => {
+    const ws = new Workspace()
+    const doc = ws.addDoc('notes.pdf', bytes(1))
+    const topic = ws.activeTopic!
+    const { api } = fakeQuizApi()
+    ws.attachContext(topic.id, context(doc.id, 5), 'quiz')
+    await ws.ask(topic.id, undefined, undefined, api)
+    await ws.answerQuiz(topic.id, topic.chat[1].id, 0, 0, api)
+    await ws.answerQuiz(topic.id, topic.chat[1].id, 1, 0, api)
+    ws.setMode(topic.id, 'normal')
+    topic.draft = 'Why 2x?'
+    const requests: AskRequest[] = []
+    await ws.ask(topic.id, undefined, async function* (request) {
+      requests.push(request)
+    })
+    expect(requests[0].messages[1]).toEqual({
+      role: 'assistant',
+      text: '',
+      quiz: { ...written, picked: [0, 0], recommendation: 'Read p. 12 again.' },
+    })
   })
 
   it('only sends images with the newest question', () => {
@@ -610,6 +752,21 @@ describe('Workspace saving', () => {
       ['meanwhile', 1],
     ])
     expect(back.activeTopic?.name).toBe('meanwhile')
+  })
+
+  it('saves quizzes with their answers, and a note still being written comes back as failed', async () => {
+    const { ws, topic } = await saved()
+    topic.chat.push({
+      id: 'quiz',
+      role: 'assistant',
+      text: '',
+      mode: 'quiz',
+      status: 'done',
+      quiz: { ...structuredClone(written), picked: [0, 1], reviewing: 'writing' },
+    })
+    const back = new Workspace()
+    await back.restore(JSON.parse(JSON.stringify(ws.snapshot())), async () => bytes(1))
+    expect(back.activeTopic!.chat.at(-1)!.quiz).toEqual({ ...written, picked: [0, 1], reviewing: 'failed' })
   })
 
   it('ignores something that is not a saved workspace', async () => {

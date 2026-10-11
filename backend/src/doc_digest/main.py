@@ -7,11 +7,13 @@ from typing import Annotated, Any
 import anthropic
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, StreamingResponse
+from pydantic import BaseModel
 
-from .ask import AskRequest, stream_answer
+from .ask import AskRequest, Turn, describe, stream_answer, write_quiz
 from .config import Settings, get_settings
 from .index import Indexer
 from .library import Library
+from .quiz import QuizRecord, recommend
 from .saved import SavedWorkspace
 from .tools import Toolbox, topic_docs
 from .usage import UsageLog
@@ -170,3 +172,47 @@ def ask(
     if not request.messages or request.messages[-1].role != "user":
         raise HTTPException(status_code=422, detail="The last message must be a question.")
     return StreamingResponse(events(client, request, services), media_type="application/x-ndjson")
+
+
+@app.post("/api/quiz")
+async def quiz(
+    request: AskRequest,
+    client: Annotated[anthropic.AsyncAnthropic, Depends(get_client)],
+    services: ServicesDep,
+) -> dict[str, Any]:
+    """A multiple-choice quiz for the newest turn, which asks for one."""
+    if not request.messages or request.messages[-1].mode != "quiz":
+        raise HTTPException(status_code=422, detail="The last message must ask for a quiz.")
+    try:
+        written = await write_quiz(
+            client, request, services.usage, request.model or services.answer_model
+        )
+    except Exception as error:
+        logger.exception("Quiz failed")
+        raise HTTPException(status_code=502, detail=error_message(error)) from error
+    return written.model_dump()
+
+
+class RecommendRequest(BaseModel):
+    topic: str
+    about: Turn
+    quiz: QuizRecord
+
+
+@app.post("/api/quiz/recommendation")
+async def quiz_recommendation(
+    request: RecommendRequest,
+    client: Annotated[anthropic.AsyncAnthropic, Depends(get_client)],
+    services: ServicesDep,
+) -> dict[str, str | None]:
+    """What to review after a quiz, or no text when every answer was right."""
+    about = request.about
+    asked = describe(about.context) if about.context else ""
+    if about.text.strip():
+        asked += f" They asked the quiz to focus on: {about.text.strip()}"
+    try:
+        text = await recommend(client, request.topic, asked, request.quiz, services.usage)
+    except Exception as error:
+        logger.exception("Recommendation failed")
+        raise HTTPException(status_code=502, detail=error_message(error)) from error
+    return {"text": text}

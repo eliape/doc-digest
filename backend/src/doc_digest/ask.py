@@ -11,6 +11,7 @@ from typing import Any, Literal
 from anthropic import AsyncAnthropic
 from pydantic import BaseModel, Field
 
+from .quiz import Quiz, QuizRecord, clean, quiz_text, results_text
 from .tools import TOOLS, Toolbox, ToolError, TopicDoc, overview
 from .usage import UsageLog, call_from_response
 
@@ -72,10 +73,27 @@ step briefly and carry on with a question.
 - Work towards the key idea of what they pointed at or asked about. Once they have it, say so, \
 sum up in a few lines what they worked out, and ask whether they want to go further.
 Turns without [Socratic] are ordinary questions (they switched back to normal answers): answer \
-them as usual, also right after a session."""
+them as usual, also right after a session.
 
-# What a Socratic session's first turn asks for: the reader only pointed at something.
+Quizzes: they can ask for a multiple-choice quiz with a turn starting with [Quiz]. They click \
+through it in the chat, and how they did comes back in a turn starting with [Quiz results]. When \
+you write a quiz:
+- Ask 4 to 6 questions about what they pointed at, and about what they asked it to focus on, \
+unless they ask for another number.
+- Give each question 3 or 4 choices with exactly one right; make the wrong ones plausible \
+mistakes, not jokes.
+- Test understanding (why something holds, what follows, which case applies) rather than \
+recall of wording.
+- Explain each right answer in a sentence or two, citing pages as above.
+- Write it from what you are shown; there is no looking things up for a quiz.
+- After earlier quizzes, come back to what they got wrong.
+In your other answers, use quiz results to adapt: build on what they know, and go over what \
+they got wrong when it comes up."""
+
+# What a Socratic session's first turn asks for, when the reader typed nothing.
 SOCRATIC_START = "Start a Socratic session about what they pointed at: ask your first question."
+# What a quiz request asks for; the reader's words, if any, say what to focus on.
+QUIZ_START = "Write a quiz about what they pointed at."
 
 
 class Point(BaseModel):
@@ -115,8 +133,12 @@ class Turn(BaseModel):
     role: Literal["user", "assistant"]
     text: str
     context: Context | None = None
-    mode: Literal["socratic"] | None = Field(
-        default=None, description="Set on the reader's turns while the chat is in Socratic mode"
+    mode: Literal["socratic", "quiz"] | None = Field(
+        default=None,
+        description="Set on the reader's turns in Socratic mode, and on their quiz requests",
+    )
+    quiz: QuizRecord | None = Field(
+        default=None, description="On the model's side: the quiz it wrote, with how they did"
     )
 
 
@@ -193,10 +215,20 @@ def context_blocks(context: Context) -> list[dict[str, Any]]:
     return blocks
 
 
-def question_text(turn: Turn) -> str:
-    """What the reader said. A Socratic session's turns are marked, and its first one is empty."""
+def question_text(turn: Turn, starts_session: bool = False) -> str:
+    """
+    What the reader said. Socratic turns and quiz requests are marked. A session or a quiz
+    starts from what they pointed at, and their words, if any, say what to focus on.
+    """
+    text = turn.text.strip()
+    if turn.mode == "quiz":
+        return f"[Quiz] {QUIZ_START}" + (f" Focus on: {text}" if text else "")
     if turn.mode == "socratic":
-        return f"[Socratic] {turn.text.strip() or SOCRATIC_START}"
+        if not text:
+            return f"[Socratic] {SOCRATIC_START}"
+        if starts_session and turn.context:
+            return f"[Socratic] {SOCRATIC_START} Focus on: {text}"
+        return f"[Socratic] {text}"
     return f"Question: {turn.text}" if turn.context else turn.text
 
 
@@ -208,9 +240,18 @@ def build_messages(request: AskRequest, aliases: dict[str, str] | None = None) -
     aliases = aliases or {}
     messages: list[dict[str, Any]] = []
     last = len(request.messages) - 1
+    in_session = False
     for i, turn in enumerate(request.messages):
         if turn.role == "assistant":
-            if turn.text.strip():
+            if turn.quiz:
+                # The quiz as written, then how they did, on their side of the conversation.
+                messages.append(
+                    {"role": "assistant", "content": [text_block(quiz_text(turn.quiz))]}
+                )
+                results = results_text(turn.quiz)
+                if results:
+                    messages.append({"role": "user", "content": [text_block(results)]})
+            elif turn.text.strip():
                 messages.append({"role": "assistant", "content": [text_block(turn.text)]})
             continue
         content: list[dict[str, Any]] = []
@@ -219,7 +260,8 @@ def build_messages(request: AskRequest, aliases: dict[str, str] | None = None) -
             content.append(text_block(describe(turn.context, alias)))
             if i == last:
                 content.extend(context_blocks(turn.context))
-        content.append(text_block(question_text(turn)))
+        content.append(text_block(question_text(turn, starts_session=not in_session)))
+        in_session = turn.mode == "socratic"
         # Two user turns in a row (an earlier answer failed) are merged into one.
         if messages and messages[-1]["role"] == "user":
             messages[-1]["content"].extend(content)
@@ -256,6 +298,33 @@ def map_block(docs: list[TopicDoc], current: str | None) -> dict[str, Any] | Non
 
 
 Event = dict[str, Any]
+
+
+async def write_quiz(
+    client: AsyncAnthropic,
+    request: AskRequest,
+    usage: UsageLog | None = None,
+    model: str = MODEL,
+) -> Quiz:
+    """
+    A multiple-choice quiz for the newest turn (a [Quiz] request), from what the reader is
+    shown and the conversation so far, including how earlier quizzes went.
+    """
+    began = time.monotonic()
+    response: Any = await client.messages.parse(
+        model=model,
+        max_tokens=16000,
+        system=system_blocks(request.topic),  # type: ignore[arg-type]
+        messages=build_messages(request),  # type: ignore[arg-type]
+        output_format=Quiz,
+        output_config={"effort": EFFORT},
+    )
+    if usage:
+        usage.record(call_from_response("quiz", model, response, time.monotonic() - began))
+    quiz = clean(response.parsed_output) if response.parsed_output else None
+    if not quiz or not quiz.questions:
+        raise RuntimeError(f"No quiz came back ({response.stop_reason})")
+    return quiz
 
 
 async def stream_answer(

@@ -89,9 +89,6 @@
   export function reveal(pick: Pick) {
     viewer?.reveal(pick)
   }
-  export function markBriefly(pick: Pick) {
-    viewer?.markBriefly(pick)
-  }
   export function zoomIn() {
     viewer?.zoomIn()
   }

@@ -529,7 +529,7 @@ describe('App', () => {
     expect(within(panel).getByLabelText('Ask a question')).toHaveAttribute('placeholder', 'Ask about p. 3…')
   })
 
-  it('opens a menu on a right-click on the page, whose Socratic starts a session in the chat', async () => {
+  it('opens a menu on a right-click on the page, whose Socratic and Quiz me attach the spot and wait for a focus', async () => {
     renderOffline()
     await pick(pdf('slides.pdf'))
     await screen.findByRole('tab', { name: 'slides.pdf' })
@@ -547,18 +547,22 @@ describe('App', () => {
       .getAllByRole('menuitem')
       .map((item) => item.querySelector('.text > span')?.textContent)
     expect(labels).toEqual(['Ask', 'Socratic', 'Quiz me'])
-    expect(within(menu).getByRole('menuitem', { name: /^Quiz me/ })).toHaveAttribute('aria-disabled', 'true')
+    expect(within(menu).getByRole('menuitem', { name: /^Quiz me/ })).not.toHaveAttribute('aria-disabled')
     await fireEvent.click(within(menu).getByRole('menuitem', { name: /^Socratic/ }))
     expect(screen.queryByRole('menu')).not.toBeInTheDocument()
 
-    // The spot is marked for a moment, not attached.
-    expect(page.querySelector('.context-marker.fade')).not.toBeNull()
-    expect(page.querySelector('.context-marker:not(.fade)')).toBeNull()
+    // Like Ask, the spot is attached and nothing is sent until the reader says what to focus on, if anything.
+    expect(page.querySelector('.context-marker:not(.fade)')).not.toBeNull()
     const panel = screen.getByRole('complementary', { name: 'Chat' }) as HTMLElement & { inert: boolean }
     expect(panel.inert).toBe(false)
-    expect(within(panel).getByRole('log')).toHaveTextContent('Socratic session')
+    expect(within(panel).queryByText('Socratic session')).not.toBeInTheDocument()
     expect(within(panel).getByRole('button', { name: 'Mode: Socratic' })).toBeInTheDocument()
-    expect(within(panel).getByLabelText('Ask a question')).toHaveValue('')
+    expect(within(panel).getByLabelText('Ask a question')).toHaveAttribute('placeholder', 'What should it focus on? (optional)')
+
+    await fireEvent.contextMenu(page, { clientX: 220, clientY: 160 })
+    await fireEvent.click(screen.getByRole('menuitem', { name: /^Quiz me/ }))
+    expect(within(panel).getByRole('button', { name: 'Mode: Quiz' })).toBeInTheDocument()
+    expect(within(panel).getByLabelText('Attached to your question')).toBeInTheDocument()
 
     // A left click with Click to ask attaches the spot and switches back to normal answers.
     await fireEvent.click(screen.getByRole('button', { name: 'Click to ask' }))

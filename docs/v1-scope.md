@@ -96,11 +96,14 @@ A **right-click on page content** (or on the selected text) opens a small menu i
 - **Ask** attaches the text or spot to the chat and opens it, like a click with Click to ask (Step 3b).
 - **Copy** is there when you right-click selected text.
 
-- The chat has two **modes**, picked from a menu on the left below the question box (the model menu is on the right): **Normal** answers questions; **Socratic** has the model ask you questions that lead you to the answer instead of explaining. In Socratic mode the question box takes on a purple shade and the model's messages get a purple edge; your own messages look as always.
-- **Socratic** in the right-click menu switches to Socratic mode and starts a session about what you right-clicked: the model asks the first question straight away. The spot or selection is marked for a moment and the marker fades out at once, since nothing is attached. You answer, and it replies with a line of feedback and the next question, giving hints rather than the answer when you are stuck. When you have the key idea it sums up what you worked out. The question you were typing and any attached spot stay as they are.
+- The chat has three **modes**, picked from a menu on the left below the question box (the model menu is on the right): **Normal** answers questions; **Socratic** has the model ask you questions that lead you to the answer instead of explaining; **Quiz** has the model write a short multiple-choice quiz. In Socratic mode the question box takes on a purple shade and the model's messages get a purple edge; Quiz uses teal the same way. Your own messages look as always.
+- **Socratic** and **Quiz me** in the right-click menu work like Ask: they attach the spot or selection, open the chat and switch the mode, then wait. You can type what to focus on, or just press Enter. The send button works with an empty box in these modes.
+- In a **Socratic** session the model asks the first question. You answer, and it replies with a line of feedback and the next question, giving hints rather than the answer when you are stuck. When you have the key idea it sums up what you worked out.
+- A **quiz** arrives as its own message in the chat: a card with 4 to 6 questions, one at a time. You click a choice, see right or wrong with a short explanation (citations work as in answers), then go on. At the end it shows your score and each question you got wrong with the right answer. If anything was wrong, Haiku writes a one or two sentence note on what to review ("Try reading … again"). The quiz is written by the model picked in the model menu.
+- **Quiz results go into the chat history** the model sees: the quiz with its answers, then which choice you picked for each question and the review note. Later answers, Socratic sessions and quizzes can build on what you got wrong. A quiz left halfway carries on where it was after a reload.
 - **Ask, or a left click (or selection) with Click to ask, switches back to Normal**, since pointing at something is for asking about it. New chat goes back to Normal.
-- The model knows which turns are Socratic because each one is marked `[Socratic]`, and the system prompt says how to tutor; unmarked turns are ordinary questions.
-- **Quiz me** is in the right-click menu but greyed out ("Coming soon"). The menu reads Ask, Socratic, Quiz me, then Copy below a line.
+- The model knows which turns are Socratic or quizzes because each one is marked `[Socratic]`, `[Quiz]` or `[Quiz results]`, and the system prompt says how to handle each; unmarked turns are ordinary questions.
+- The menu reads Ask, Socratic, Quiz me, then Copy below a line.
 
 ## Step 4. Architecture that survives the move to Mac
 
@@ -119,11 +122,12 @@ Defaults I picked (easy to change): Python backend rather than Node, and v1 runs
 - Side panel chat with streaming answers
 - Right-click anything (text, equation, figure, scanned page) or selected text and pick Ask, or click it with the Click to ask tool, to attach it as context, then type the question
 - A Socratic mode, from a menu or a right-click, where the model asks the questions
+- Multiple-choice quizzes in the chat, with results the model can build on
 - Whole-document and whole-topic context, with clickable citations to a PDF and page
 - Topics, their PDFs and each topic's chat history saved, so they are still there after a reload
 
 **Out (later versions):**
-- Quizzes, flashcards and spaced repetition (the natural v2 for learning)
+- Flashcards and spaced repetition (the natural v2 for learning)
 - Saved highlights and notes, and exporting them
 - Search across all topics, and sharing one stored PDF between topics
 - Generated questions for a clicked spot
@@ -144,7 +148,7 @@ Defaults I picked (easy to change): Python backend rather than Node, and v1 runs
 
 Each step works on its own, so steps 1 and 2 already give a usable tool.
 
-Status (October 2026): steps 1 to 3 are built. A citation in an answer is a link that switches to its PDF's tab and goes to the page. The PDF toolbar has Select and Click to ask tools (Step 3b). The chat has a Normal/Socratic mode, and a right-click menu asks about a spot or selection or starts a Socratic session on it (Step 3e); Quiz me is a placeholder. Persistence (step 4) is built: topics, tabs, the page each tab was on, chats (with their spots and Socratic marks) and each topic's mode are saved shortly after each change and come back on load. The draft and an attached but unsent spot are not saved; the model choice stays remembered per browser.
+Status (October 2026): steps 1 to 3 are built. A citation in an answer is a link that switches to its PDF's tab and goes to the page. The PDF toolbar has Select and Click to ask tools (Step 3b). The chat has Normal, Socratic and Quiz modes, and the right-click menu attaches a spot or selection for a question, a Socratic session or a quiz, each with an optional focus (Step 3e). Persistence (step 4) is built: topics, tabs, the page each tab was on, chats (with their spots, Socratic marks and quizzes with your answers) and each topic's mode are saved shortly after each change and come back on load. The draft and an attached but unsent spot are not saved; the model choice stays remembered per browser.
 
 ## Step 7. How we know v1 works
 

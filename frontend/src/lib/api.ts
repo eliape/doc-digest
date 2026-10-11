@@ -1,10 +1,21 @@
+/** One multiple-choice question: `answer` is the index of the right choice. */
+export type QuizQuestion = { question: string; choices: string[]; answer: number; explanation: string }
+
+/** A quiz as the model writes it. */
+export type WrittenQuiz = { title: string; questions: QuizQuestion[] }
+
+/** A quiz as the chat keeps it: with the reader's pick for each question, and what to review. */
+export type QuizRecord = WrittenQuiz & { picked: (number | null)[]; recommendation?: string }
+
 /** One turn of the conversation, as the backend reads it. */
 export type AskTurn = {
   role: 'user' | 'assistant'
   text: string
   context?: Record<string, unknown>
-  /** Set on the reader's turns in a Socratic session, where the model asks the questions. */
-  mode?: 'socratic'
+  /** Set on the reader's turns in a Socratic session, where the model asks the questions, and on quiz requests. */
+  mode?: 'socratic' | 'quiz'
+  /** On the model's side: a quiz it wrote, with how the reader did. */
+  quiz?: QuizRecord
 }
 
 export type AskRequest = {
@@ -114,4 +125,30 @@ export async function saveWorkspace(json: string, fetchFn: typeof fetch = fetch,
     keepalive,
   })
   if (!res.ok) throw await backendError(res)
+}
+
+/** Have the model write a multiple-choice quiz for the newest turn, which asks for one. */
+export async function createQuiz(request: AskRequest, signal?: AbortSignal, fetchFn: typeof fetch = fetch): Promise<WrittenQuiz> {
+  const res = await fetchFn('/api/quiz', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request),
+    signal,
+  })
+  if (!res.ok) throw await backendError(res)
+  return (await res.json()) as WrittenQuiz
+}
+
+/** What a finished quiz was about (the request for it) and how it went. */
+export type RecommendationRequest = { topic: string; about: AskTurn; quiz: QuizRecord }
+
+/** A short note on what to review after a quiz, or null when every answer was right. */
+export async function fetchRecommendation(request: RecommendationRequest, fetchFn: typeof fetch = fetch): Promise<string | null> {
+  const res = await fetchFn('/api/quiz/recommendation', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request),
+  })
+  if (!res.ok) throw await backendError(res)
+  return ((await res.json()) as { text: string | null }).text
 }

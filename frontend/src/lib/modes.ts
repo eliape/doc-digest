@@ -9,6 +9,9 @@ export const SOCRATIC_ICON =
 export const ASK_ICON =
   'M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.4 8.4 0 0 1 3.8-.9h.5a8.5 8.5 0 0 1 8 8z'
 
+/** A list of ticked boxes: a quiz. */
+export const QUIZ_ICON = 'M10 6h10M10 12h10M10 18h10M4 6l1.5 1.5L8 5M4 12l1.5 1.5L8 11M4 18l1.5 1.5L8 17'
+
 /** The chat's modes, as its mode menu offers them. */
 export const MODES: Option<Mode>[] = [
   {
@@ -22,5 +25,11 @@ export const MODES: Option<Mode>[] = [
     label: 'Socratic',
     title: 'Asks you questions that lead you to the answer, instead of explaining',
     icon: SOCRATIC_ICON,
+  },
+  {
+    value: 'quiz',
+    label: 'Quiz',
+    title: 'Writes a multiple-choice quiz for you to click through',
+    icon: QUIZ_ICON,
   },
 ]

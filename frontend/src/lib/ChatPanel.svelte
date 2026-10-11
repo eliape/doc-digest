@@ -7,6 +7,7 @@
   import { type CitableDocs, renderMarkdown } from './markdown'
   import { MODELS, savedModel, saveModel } from './models'
   import { MODES } from './modes'
+  import QuizCard from './QuizCard.svelte'
   import type { Topic, Workspace } from './workspace.svelte'
 
   type Props = {
@@ -86,7 +87,6 @@
     }).length ?? 0,
   )
 
-  let answering = $derived(topic ? workspace.isAnswering(topic.id) : false)
 
   // The model that answers, picked next to the send button and remembered in this browser.
   let model = $state(savedModel())
@@ -118,10 +118,22 @@
     return several ? `${contextLabel(context)} · ${context.docName}` : contextLabel(context)
   }
 
-  /** What the question box asks for: once the model has asked a Socratic question, the reader's answer. */
+  /**
+   * What the question box asks for. A quiz, or a Socratic session about the attached spot,
+   * starts with what to focus on, which is optional; once the model has asked a Socratic
+   * question, the box takes the reader's answer.
+   */
   function placeholder(t: Topic) {
+    if (t.mode === 'quiz') return 'What should the quiz cover? (optional)'
+    if (t.mode === 'socratic' && t.context) return 'What should it focus on? (optional)'
     if (t.mode === 'socratic' && t.chat.at(-1)?.mode === 'socratic') return 'Answer, or ask for a hint…'
     return t.context ? `Ask about ${contextLabel(t.context)}…` : 'Ask a question…'
+  }
+
+  /** Whether a message of the reader's starts a Socratic session (rather than answering in one). */
+  function startsSession(t: Topic, index: number) {
+    const before = t.chat.findLast((m, i) => i < index && m.role === 'user')
+    return t.chat[index].mode === 'socratic' && before?.mode !== 'socratic'
   }
 
   function chipTitle(context: PageContext) {
@@ -194,7 +206,7 @@
 
   function send(event?: SubmitEvent) {
     event?.preventDefault()
-    if (!topic || answering) return
+    if (!topic || !workspace.canSend(topic.id)) return
     if (onsend) onsend(topic.id)
     else workspace.ask(topic.id)
   }
@@ -278,10 +290,13 @@
           <div
             class="message {message.role}"
             class:socratic={message.role === 'assistant' && message.mode === 'socratic'}
+            class:quiz={message.role === 'assistant' && message.mode === 'quiz'}
             class:error={message.status === 'error'}
           >
-            {#if message.role === 'user' && message.mode === 'socratic' && !message.text}
-              <!-- A session starts from a right-click, with nothing typed. -->
+            <!-- What the reader typed is only what to focus on, or nothing, so the message says what it starts. -->
+            {#if message.role === 'user' && message.mode === 'quiz'}
+              <span class="session-start">Quiz</span>
+            {:else if message.role === 'user' && startsSession(topic, index)}
               <span class="session-start">Socratic session</span>
             {/if}
             {#if message.context && pointedAt(message.context)}
@@ -301,7 +316,13 @@
               </ul>
             {/if}
             {#if message.status === 'streaming' && !message.text}
-              <span class="thinking">Thinking…</span>
+              <span class="thinking">{message.mode === 'quiz' ? 'Writing a quiz…' : 'Thinking…'}</span>
+            {:else if message.quiz}
+              <QuizCard
+                quiz={message.quiz}
+                docs={citable(index)}
+                onpick={(question, choice) => workspace.answerQuiz(topic.id, message.id, question, choice)}
+              />
             {:else if message.role === 'assistant'}
               <!-- Answers are Markdown with LaTeX maths; renderMarkdown sanitizes the HTML. -->
               <div class="text markdown">{@html renderMarkdown(message.text, citable(index))}</div>
@@ -324,7 +345,7 @@
         </p>
       {/if}
 
-      <form class="composer" class:socratic={topic.mode === 'socratic'} onsubmit={send}>
+      <form class="composer" class:socratic={topic.mode === 'socratic'} class:quiz={topic.mode === 'quiz'} onsubmit={send}>
         {#if topic.context}
           {@const context = topic.context}
           <div class="attached" aria-label="Attached to your question">
@@ -357,7 +378,7 @@
               class="send"
               aria-label="Send"
               title="Send (Enter)"
-              disabled={!topic.draft.trim() || answering}
+              disabled={!workspace.canSend(topic.id)}
             >
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 10l-5 5 5 5" /><path d="M20 4v7a4 4 0 0 1-4 4H4" /></svg>
             </button>
@@ -366,7 +387,7 @@
       </form>
       <!-- Below the box, so it never takes room from the question's lines. -->
       <div class="below">
-        <div class="mode" style:--dropdown-color={topic.mode === 'socratic' ? 'var(--socratic)' : undefined}>
+        <div class="mode" style:--dropdown-color={topic.mode === 'normal' ? undefined : `var(--${topic.mode})`}>
           <Dropdown
             label="Mode"
             value={topic.mode}
@@ -640,7 +661,11 @@
   .message.socratic {
     box-shadow: inset 3px 0 0 var(--socratic);
   }
-  /* A session started by a right-click has nothing typed, so its message says what it is. */
+  /* A quiz's frame has the quiz colour, like a Socratic session's. */
+  .message.quiz {
+    box-shadow: inset 3px 0 0 var(--quiz);
+  }
+  /* A session or a quiz may start with nothing typed, so its message says what it is. */
   .session-start {
     display: block;
     margin-bottom: 0.375rem;
@@ -772,6 +797,13 @@
   .composer.socratic:focus-within {
     border-color: var(--socratic);
     box-shadow: 0 0 0 3px color-mix(in srgb, var(--socratic) 22%, transparent);
+  }
+  .composer.quiz {
+    border-color: color-mix(in srgb, var(--quiz) 45%, var(--border));
+  }
+  .composer.quiz:focus-within {
+    border-color: var(--quiz);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--quiz) 22%, transparent);
   }
 
   .input {

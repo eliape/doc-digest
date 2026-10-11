@@ -1,24 +1,44 @@
-import { type AnswerStream, type AskRequest, fetchAnswer, fetchIndexStatus, type IndexStatus, uploadDoc } from './api'
+import {
+  type AnswerStream,
+  type AskRequest,
+  createQuiz,
+  fetchAnswer,
+  fetchIndexStatus,
+  fetchRecommendation,
+  type IndexStatus,
+  type QuizRecord,
+  type RecommendationRequest,
+  uploadDoc,
+  type WrittenQuiz,
+} from './api'
 import type { PageContext } from './context'
 
 /** A PDF opened in a topic. Each one is a tab. */
 export type Doc = { id: string; name: string; data: Uint8Array }
 
 /**
+ * A quiz in the chat, with the reader's pick for each question (null until answered) and,
+ * once they have answered them all, a note on what to review while `reviewing` is 'writing'.
+ */
+export type Quiz = QuizRecord & { reviewing?: 'writing' | 'failed' }
+
+/**
  * One message in a topic's chat. A question carries the context it was asked
  * about; an answer is `streaming` while it arrives and `error` if it failed.
- * `mode` marks the messages of a Socratic session; its first question is empty,
- * since the reader only pointed at something.
+ * `mode` marks the messages of a Socratic session, and a quiz request with the
+ * model's quiz. The reader's words in either may be empty: they only pointed at something.
  */
 export type ChatMessage = {
   id: string
   role: 'user' | 'assistant'
   text: string
   context?: PageContext
-  mode?: 'socratic'
+  mode?: 'socratic' | 'quiz'
   status?: 'streaming' | 'done' | 'error'
   /** The lookups the model made while answering, e.g. "Read book.pdf, pp. 4–5". */
   steps?: string[]
+  /** On the model's side: the quiz it wrote, which the reader clicks through. */
+  quiz?: Quiz
 }
 
 /**
@@ -41,11 +61,20 @@ export type IndexApi = {
 
 const realIndexApi: IndexApi = { upload: (name, data) => uploadDoc(name, data), status: (id) => fetchIndexStatus(id) }
 
+/** The backend calls quizzes use. Tests pass fakes. */
+export type QuizApi = {
+  create: (request: AskRequest, signal?: AbortSignal) => Promise<WrittenQuiz>
+  recommend: (request: RecommendationRequest) => Promise<string | null>
+}
+
+const realQuizApi: QuizApi = { create: (r, signal) => createQuiz(r, signal), recommend: (r) => fetchRecommendation(r) }
+
 /**
  * How a topic's chat answers: `normal` answers questions; `socratic` has the model
- * ask the reader questions that lead them to the answer instead of explaining.
+ * ask the reader questions that lead them to the answer instead of explaining;
+ * `quiz` has it write a multiple-choice quiz to click through.
  */
-export type Mode = 'normal' | 'socratic'
+export type Mode = 'normal' | 'socratic' | 'quiz'
 
 /**
  * A named group of PDFs that are read and asked about together. Each topic has
@@ -108,6 +137,8 @@ export class Workspace {
   private uploads: Record<string, Promise<unknown>> = {}
   // Stops each topic's answer that is still arriving. Not state: nothing renders from it.
   private answering = new Map<string, AbortController>()
+  /** Where quizzes and notes on what to review come from. Tests swap in a fake. */
+  quizApi: QuizApi = realQuizApi
 
   activeTopic = $derived(this.topics.find((t) => t.id === this.activeTopicId))
   activeDoc = $derived(this.activeTopic?.activeDocId ? this.docs[this.activeTopic.activeDocId] : undefined)
@@ -201,14 +232,21 @@ export class Workspace {
   }
 
   /**
-   * Attach what the reader pointed at to the topic's next question, replacing what was attached.
-   * Pointing at something is for asking about it, so it also turns Socratic mode off.
+   * Attach what the reader pointed at to the topic's next question, replacing what was attached,
+   * and switch to the mode it is for: a plain click or Ask is for asking (Normal); Socratic and
+   * Quiz me in the right-click menu wait for what to focus on, then start.
    */
-  attachContext(topicId: string, context: PageContext) {
+  attachContext(topicId: string, context: PageContext, mode: Mode = 'normal') {
     const topic = this.topics.find((t) => t.id === topicId)
     if (!topic) return
     topic.context = context
-    topic.mode = 'normal'
+    topic.mode = mode
+  }
+
+  /** Replace the attached spot with the same spot and its images, once they are rendered. */
+  fillContext(topicId: string, context: PageContext) {
+    const topic = this.topics.find((t) => t.id === topicId)
+    if (topic) topic.context = context
   }
 
   clearContext(topicId: string) {
@@ -235,43 +273,88 @@ export class Workspace {
   }
 
   /**
+   * Whether the topic's draft can be sent now: not while an answer is arriving, and not
+   * blank, except to start a quiz, or a Socratic session about the attached spot, where
+   * what to focus on is optional.
+   */
+  canSend(topicId: string): boolean {
+    const topic = this.topics.find((t) => t.id === topicId)
+    if (!topic || this.isAnswering(topicId)) return false
+    return !!topic.draft.trim() || topic.mode === 'quiz' || (topic.mode === 'socratic' && !!topic.context)
+  }
+
+  /**
    * Send the topic's draft as a question, with the attached context or, when
    * nothing is attached, whatever `fallback` gives (the open page), and stream
-   * the answer into the chat. Blank questions are ignored, and so is a new
-   * question while an answer is still arriving. In Socratic mode the model
-   * replies with questions.
+   * the answer into the chat. In Socratic mode the model replies with questions;
+   * in Quiz mode it writes a quiz instead, about what the draft asks it to focus on.
+   * Ignored when the draft can't be sent (see canSend).
    */
   async ask(
     topicId: string,
     fallback?: () => Promise<PageContext | undefined>,
     stream: AnswerStream = fetchAnswer,
+    quizApi: QuizApi = this.quizApi,
   ): Promise<void> {
     const topic = this.topics.find((t) => t.id === topicId)
-    if (!topic || !topic.draft.trim() || this.isAnswering(topicId)) return
+    if (!topic || !this.canSend(topicId)) return
     const { context } = topic
-    const mode = topic.mode === 'socratic' && { mode: 'socratic' as const }
+    const mode = topic.mode !== 'normal' && { mode: topic.mode }
     const question = { text: topic.draft.trim(), context, ...mode }
     topic.draft = ''
     topic.context = undefined
-    await this.converse(topic, question, context ? undefined : fallback, stream)
+    const fill = context ? undefined : fallback
+    if (topic.mode === 'quiz') {
+      await this.converse(topic, question, fill, async (answer, request, signal) => {
+        const written = await quizApi.create(request, signal)
+        answer.quiz = { ...written, picked: written.questions.map(() => null) }
+      })
+    } else {
+      await this.converse(topic, question, fill, async (answer, request, signal) => {
+        for await (const event of stream(request, signal)) {
+          if (signal.aborted) break
+          if (event.type === 'text') answer.text += event.text
+          else answer.steps = [...(answer.steps ?? []), event.text]
+        }
+      })
+    }
   }
 
   /**
-   * Start a Socratic session about a spot: the topic switches to Socratic mode and the
-   * model asks the first question about it straight away. `capture` gives the spot with
-   * its images once they are rendered. The draft and the attached spot are left for the
-   * reader's own question. Ignored while an answer is still arriving.
+   * Record the reader's pick for one of a quiz's questions (each is answered once). Once
+   * all are answered and some were wrong, Haiku writes a note on what to review.
    */
-  async startSocratic(
+  async answerQuiz(
     topicId: string,
-    about: PageContext,
-    capture?: () => Promise<PageContext | undefined>,
-    stream: AnswerStream = fetchAnswer,
+    messageId: string,
+    question: number,
+    choice: number,
+    api: QuizApi = this.quizApi,
   ): Promise<void> {
     const topic = this.topics.find((t) => t.id === topicId)
-    if (!topic || this.isAnswering(topicId)) return
-    topic.mode = 'socratic'
-    await this.converse(topic, { text: '', context: about, mode: 'socratic' }, capture, stream)
+    const index = topic?.chat.findIndex((m) => m.id === messageId) ?? -1
+    const quiz = topic?.chat[index]?.quiz
+    if (!topic || !quiz || quiz.picked[question] !== null || !quiz.questions[question]?.choices[choice]) return
+    quiz.picked[question] = choice
+    const right = quiz.questions.filter((q, i) => quiz.picked[i] === q.answer).length
+    if (quiz.picked.some((p) => p === null) || right === quiz.questions.length) return
+    const asked = topic.chat[index - 1]
+    quiz.reviewing = 'writing'
+    try {
+      const recommendation = await api.recommend({
+        topic: topic.name,
+        about: {
+          role: 'user',
+          text: asked?.text ?? '',
+          ...(asked?.context && { context: contextForRequest(asked.context, false, this.indexing[asked.context.docId]?.serverId) }),
+        },
+        quiz: quizRecord(quiz),
+      })
+      if (recommendation) quiz.recommendation = recommendation
+      quiz.reviewing = undefined
+    } catch {
+      quiz.reviewing = 'failed'
+    }
   }
 
   /** Switch how the topic's chat answers, from the next question on. */
@@ -281,14 +364,15 @@ export class Workspace {
   }
 
   /**
-   * Add a question to the chat and stream its answer under it. `fill` gives the
-   * question's context (the open page, or the spot with its images) before it is sent.
+   * Add a question to the chat and an answer under it, which `respond` fills in from the
+   * backend (streaming text, or a quiz). `fill` gives the question's context (the open
+   * page, or the spot with its images) before it is sent.
    */
   private async converse(
     topic: Topic,
     asked: Pick<ChatMessage, 'text' | 'context' | 'mode'>,
     fill: (() => Promise<PageContext | undefined>) | undefined,
-    stream: AnswerStream,
+    respond: (answer: ChatMessage, request: AskRequest, signal: AbortSignal) => Promise<void>,
   ): Promise<void> {
     const mode = asked.mode && { mode: asked.mode }
     topic.chat.push({ id: newId(), role: 'user', ...asked })
@@ -305,11 +389,7 @@ export class Workspace {
       const uploading = topic.docIds.filter((id) => id in this.uploads).map((id) => this.uploads[id])
       if (uploading.length) await Promise.all(uploading)
       const serverId = (id: string) => this.indexing[id]?.serverId
-      for await (const event of stream(askRequest(topic, serverId, this.answerModel), controller.signal)) {
-        if (controller.signal.aborted) break
-        if (event.type === 'text') answer.text += event.text
-        else answer.steps = [...(answer.steps ?? []), event.text]
-      }
+      await respond(answer, askRequest(topic, serverId, this.answerModel), controller.signal)
       answer.status = 'done'
     } catch (error) {
       answer.status = 'error'
@@ -399,7 +479,7 @@ export class Workspace {
         activeDocId: t.activeDocId && docIds.includes(t.activeDocId) ? t.activeDocId : docIds[0],
         chat: t.chat.map(restoredMessage),
         draft: '',
-        mode: t.mode === 'socratic' ? 'socratic' : 'normal',
+        mode: t.mode === 'socratic' || t.mode === 'quiz' ? t.mode : 'normal',
       }
     })
     this.topics = [...restored, ...this.topics]
@@ -423,10 +503,17 @@ function savedMessage(message: ChatMessage): ChatMessage {
   return { ...rest, context: { ...spot, pageTexts: [] } }
 }
 
-/** An answer that was still arriving when the app closed did not finish. */
+/** An answer (or a note on what to review) that was still arriving when the app closed did not finish. */
 function restoredMessage(message: ChatMessage): ChatMessage {
+  if (message.quiz?.reviewing === 'writing') return { ...message, quiz: { ...message.quiz, reviewing: 'failed' } }
   if (message.status !== 'streaming') return message
-  return { ...message, status: 'error', text: message.text || 'The answer stopped when the app was closed.' }
+  const stopped = message.mode === 'quiz' ? 'The quiz stopped when the app was closed.' : 'The answer stopped when the app was closed.'
+  return { ...message, status: 'error', text: message.text || stopped }
+}
+
+/** A quiz as the backend reads it. */
+function quizRecord({ title, questions, picked, recommendation }: Quiz): QuizRecord {
+  return { title, questions, picked, ...(recommendation && { recommendation }) }
 }
 
 /**
@@ -449,6 +536,7 @@ export function askRequest(
       text: m.status === 'error' ? '' : m.text,
       context: m.context && contextForRequest(m.context, i === turns.length - 1, serverId(m.context.docId)),
       ...(m.role === 'user' && m.mode && { mode: m.mode }),
+      ...(m.quiz && { quiz: quizRecord(m.quiz) }),
     })),
   }
 }

@@ -304,11 +304,6 @@
     flashTimer = setTimeout(() => (flash = undefined), 1600)
   }
 
-  /** Mark a spot for a moment: the marker fades out straight away. */
-  export function markBriefly(pick: Pick) {
-    fadeOut(pick)
-  }
-
   export function goToPage(n: number) {
     if (viewer && n >= 1 && n <= viewer.pagesCount) viewer.currentPageNumber = n
   }

@@ -6,11 +6,11 @@
   import ContextMenu, { type MenuItem } from './lib/ContextMenu.svelte'
   import DocPane from './lib/DocPane.svelte'
   import type { PageContext, Pick } from './lib/context'
-  import { ASK_ICON, SOCRATIC_ICON } from './lib/modes'
+  import { ASK_ICON, QUIZ_ICON, SOCRATIC_ICON } from './lib/modes'
   import { isPdfFile } from './lib/pages'
   import { savedTool, saveTool, type Tool } from './lib/tools'
   import TopicsSidebar from './lib/TopicsSidebar.svelte'
-  import { Workspace } from './lib/workspace.svelte'
+  import { type Mode, Workspace } from './lib/workspace.svelte'
 
   const workspace = new Workspace()
   let error = $state('')
@@ -119,25 +119,26 @@
   const pane = (): DocPane | undefined => (doc ? panes[doc.id] : undefined)
 
   // Asking about a spot (or selected text), by a click with the Click to ask tool or
-  // from the right-click menu, attaches it to the topic's chat and opens the chat.
-  // Its images render in the background; a question sent meanwhile waits for them.
+  // from the right-click menu, attaches it to the topic's chat in the mode it is for
+  // and opens the chat. Its images render in the background; a question sent
+  // meanwhile waits for them.
   // Per topic, so a pick in another topic can't drop this one's images.
   const latestPick: Record<string, number> = {}
   const capturing: Record<string, Promise<unknown>> = {}
 
-  function onPick(docId: string, pick: Pick) {
+  function onPick(docId: string, pick: Pick, mode: Mode = 'normal') {
     const picked = workspace.docs[docId]
     const topic = workspace.topicOf(docId)
     if (!picked || !topic) return
     const n = (latestPick[topic.id] = (latestPick[topic.id] ?? 0) + 1)
-    workspace.attachContext(topic.id, { ...pick, docId, docName: picked.name, pageTexts: [] })
+    workspace.attachContext(topic.id, { ...pick, docId, docName: picked.name, pageTexts: [] }, mode)
     chatOpen = true
     tick().then(() => chatPanel?.focus())
     capturing[topic.id] = (panes[docId]?.capture(pick) ?? Promise.resolve(undefined))
       .then((captured) => {
         // Unless another pick replaced it or it was removed meanwhile.
         if (captured && n === latestPick[topic.id] && topic.context?.docId === docId) {
-          workspace.attachContext(topic.id, { ...captured, docId, docName: picked.name })
+          workspace.fillContext(topic.id, { ...captured, docId, docName: picked.name })
         }
       })
       .catch(() => {})
@@ -146,26 +147,6 @@
   // Right-clicking a spot (or the selection) opens a menu of ways to study it, with either tool.
   type MenuTarget = { docId: string; pick: Pick; x: number; y: number }
   let menu = $state.raw<MenuTarget>()
-
-  /**
-   * Start a Socratic session about a right-clicked spot: the chat opens and the model asks
-   * the first question. The spot is marked for a moment. Its images render while the
-   * question is on its way.
-   */
-  function startSocratic(docId: string, pick: Pick) {
-    const picked = workspace.docs[docId]
-    const topic = workspace.topicOf(docId)
-    if (!picked || !topic) return
-    chatOpen = true
-    tick().then(() => chatPanel?.focus())
-    // Show what the session is about, without attaching it.
-    panes[docId]?.markBriefly(pick)
-    const about = { docId, docName: picked.name }
-    workspace.startSocratic(topic.id, { ...pick, ...about, pageTexts: [] }, async () => {
-      const captured = await panes[docId]?.capture(pick)
-      return captured && { ...captured, ...about }
-    })
-  }
 
   /** Put text on the clipboard, as the browser's own Copy would. */
   async function copy(text: string) {
@@ -178,13 +159,11 @@
   }
 
   /**
-   * What the menu offers for a right-clicked spot or selection. Ask does what a click does
-   * with the Click to ask tool. Quiz me is still to come.
+   * What the menu offers for a right-clicked spot or selection. Each of Ask, Socratic and
+   * Quiz me attaches it to the chat, as a click with the Click to ask tool does, in the mode
+   * it is for: Ask waits for a question, Socratic and Quiz me for what to focus on, if anything.
    */
   function menuItems({ docId, pick }: MenuTarget): MenuItem[] {
-    const topic = workspace.topicOf(docId)
-    // A session starts with the model's question, which has to wait for the answer still arriving.
-    const busy = !!topic && workspace.isAnswering(topic.id)
     const items: MenuItem[] = [
       {
         label: 'Ask',
@@ -195,16 +174,14 @@
       {
         label: 'Socratic',
         icon: SOCRATIC_ICON,
-        hint: busy ? 'Wait for the answer to finish' : 'Work it out by answering questions',
-        disabled: busy,
-        onselect: () => startSocratic(docId, pick),
+        hint: 'Work it out by answering questions',
+        onselect: () => onPick(docId, pick, 'socratic'),
       },
       {
         label: 'Quiz me',
-        hint: 'Coming soon',
-        // A list of ticked boxes.
-        icon: 'M10 6h10M10 12h10M10 18h10M4 6l1.5 1.5L8 5M4 12l1.5 1.5L8 11M4 18l1.5 1.5L8 17',
-        disabled: true,
+        icon: QUIZ_ICON,
+        hint: 'Test yourself with a few questions',
+        onselect: () => onPick(docId, pick, 'quiz'),
       },
     ]
     const text = pick.selection

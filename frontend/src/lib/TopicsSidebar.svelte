@@ -418,7 +418,7 @@
     border-radius: 0.375rem;
   }
   li:hover {
-    background: var(--hover);
+    background: var(--row-hover);
   }
   li.active {
     background: var(--selected);
@@ -576,7 +576,7 @@
     border-radius: 0.375rem;
   }
   .row:hover {
-    background: var(--hover);
+    background: var(--row-hover);
   }
   .row.active {
     background: var(--selected);

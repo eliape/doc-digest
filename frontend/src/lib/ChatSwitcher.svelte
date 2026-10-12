@@ -16,8 +16,8 @@
   let trigger = $state<HTMLButtonElement>()
 
   let current = $derived(chatOf(topic))
-  // The open discussion is listed even while it is still empty, as "New chat", at the top.
-  let listed = $derived(current.messages.length ? discussions(topic) : [current, ...discussions(topic)])
+  // Only discussions with something in them are listed, never an empty "New chat".
+  let listed = $derived(discussions(topic))
 
   const items = () => Array.from(root?.querySelectorAll<HTMLElement>('[role="menuitemradio"]') ?? [])
 
@@ -67,6 +67,12 @@
 </script>
 
 <div class="switcher" bind:this={root}>
+  {#if !listed.length}
+    <!-- Nothing to switch to: just the title, without the arrow. -->
+    <h2 class="trigger static" title={`${chatTitle(current)} · ${topic.name}`}>
+      <span class="title" class:empty={!current.messages.length}>{chatTitle(current)}</span>
+    </h2>
+  {:else}
   <!-- The title and the arrow are one button. -->
   <button
     type="button"
@@ -84,10 +90,11 @@
       }
     }}
   >
-    <span class="title">{chatTitle(current)}</span>
+    <span class="title" class:empty={!current.messages.length}>{chatTitle(current)}</span>
     <svg class="chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" /></svg>
   </button>
-  {#if open}
+  {/if}
+  {#if open && listed.length}
     <!-- svelte-ignore a11y_interactive_supports_focus -->
     <div class="popup-menu" role="menu" aria-label={`Discussions in ${topic.name}`} onkeydown={onMenuKeydown}>
       {#each listed as chat (chat.id)}
@@ -131,7 +138,12 @@
     font-weight: 600;
     cursor: pointer;
   }
-  .trigger:hover,
+  .static {
+    margin-top: 0;
+    margin-bottom: 0;
+    cursor: default;
+  }
+  .trigger:not(.static):hover,
   .trigger[aria-expanded='true'] {
     background: var(--hover);
   }
@@ -144,6 +156,10 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  /* An empty "New chat" is greyed, so it reads as not started yet. */
+  .title.empty {
+    color: var(--muted);
   }
   .chevron {
     flex-shrink: 0;

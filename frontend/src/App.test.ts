@@ -713,6 +713,30 @@ describe('App', () => {
     }
   })
 
+  it('remembers per topic whether the chat is open', async () => {
+    renderOffline()
+    await pick(pdf('slides.pdf'))
+    const sidebar = within(screen.getByRole('complementary', { name: 'Topics' }))
+    await showTopics()
+    await fireEvent.click(sidebar.getByRole('button', { name: 'New topic' }))
+    const name = sidebar.getByLabelText('Topic name')
+    await fireEvent.input(name, { target: { value: 'Stats' } })
+    await fireEvent.submit(name)
+    await pick(pdf('notes.pdf'))
+    await screen.findByRole('tab', { name: 'notes.pdf' })
+    const chat = () => screen.getByRole('complementary', { name: 'Chat' })
+
+    // Stats is read with the chat closed; slides has it open.
+    await showTopics()
+    await fireEvent.click(sidebar.getByRole('button', { name: /^slides/ }))
+    await fireEvent.click(screen.getByRole('button', { name: 'Show chat' }))
+    expect(chat()).toHaveClass('open')
+    await fireEvent.click(sidebar.getByRole('button', { name: /^Stats/ }))
+    expect(chat()).not.toHaveClass('open')
+    await fireEvent.click(sidebar.getByRole('button', { name: /^slides/ }))
+    expect(chat()).toHaveClass('open')
+  })
+
   it('opens the chat from New discussion under the open topic in the sidebar', async () => {
     renderOffline()
     await pick(pdf('slides.pdf'))
@@ -721,12 +745,9 @@ describe('App', () => {
     await fireEvent.click(sidebar.getByRole('button', { name: 'New discussion' }))
     expect(screen.getByRole('button', { name: 'Show topics' })).toBeInTheDocument()
     expect(screen.getByRole('complementary', { name: 'Chat' })).toHaveClass('open')
-    // The open discussion is only marked while the chat shows it.
-    const row = () => sidebar.getByRole('button', { name: 'New discussion' }).parentElement
+    // New discussion is an action, never marked as the open discussion.
     await showTopics()
-    expect(row()).toHaveClass('active')
-    await fireEvent.click(screen.getByRole('button', { name: 'Close chat' }))
-    expect(row()).not.toHaveClass('active')
+    expect(sidebar.getByRole('button', { name: 'New discussion' }).parentElement).not.toHaveClass('active')
   })
 
   it('swaps the chat icon for the close button in the same corner, with the discussion title', async () => {
@@ -745,7 +766,9 @@ describe('App', () => {
     const panel = within(screen.getByRole('complementary', { name: 'Chat' }))
     expect(panel.getByRole('button', { name: 'Close chat' })).toHaveClass('icon-button')
     // The title is the open discussion's, which opens the topic's list of discussions.
-    expect(panel.getByRole('button', { name: 'Discussion: New chat' })).toHaveAttribute('title', 'New chat · slides')
+    // With nothing to switch to, it is just the title, without the arrow.
+    expect(panel.getByRole('heading', { name: 'New chat' })).toHaveAttribute('title', 'New chat · slides')
+    expect(panel.queryByRole('button', { name: /^Discussion:/ })).not.toBeInTheDocument()
     expect(panel.queryByRole('heading', { name: 'Chat' })).not.toBeInTheDocument()
     expect(panel.getByRole('button', { name: 'New chat' })).toHaveTextContent('New chat')
 

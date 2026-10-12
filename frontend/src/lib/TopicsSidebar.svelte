@@ -88,9 +88,9 @@
 
 <svelte:window onpointerdown={closeMenu} onkeydown={(e) => e.key === 'Escape' && (menuId = undefined)} />
 
-<aside class="topics-sidebar" class:collapsed={!expanded} class:closed={!open} id="topics-sidebar" aria-label="Topics">
+<aside class="topics-sidebar" class:closed={!open} id="topics-sidebar" aria-label="Topics">
   <div class="top">
-    {#if expanded}<h1>Leqtern</h1>{/if}
+    {#if expanded}<h1 class="fade">Leqtern</h1>{/if}
     <button
       type="button"
       class="toggle"
@@ -102,12 +102,12 @@
   </div>
 
   <button type="button" class="new" aria-label="New topic" title="New topic" onclick={newTopic}>
-    <span aria-hidden="true">＋</span>
-    {#if expanded}<span>New topic</span>{/if}
+    <span class="plus" aria-hidden="true">＋</span>
+    {#if expanded}<span class="fade">New topic</span>{/if}
   </button>
 
   {#if expanded}
-    <div id="topics-list" class="list">
+    <div id="topics-list" class="list fade">
       <h2>Topics</h2>
 
       {#if workspace.topics.length === 0}
@@ -240,20 +240,29 @@
     flex-shrink: 0;
   }
 
+  /*
+   * The two buttons sit in the same place whether the sidebar is open or shut (the menu button at the
+   * right edge, the plus in a fixed cell at the left), and the text beside them fades out while the
+   * sidebar narrows. So when the text is finally taken away at the end, nothing moves.
+   */
+  .fade {
+    transition: opacity 0.15s ease;
+  }
+  .closed .fade {
+    opacity: 0;
+  }
+
   .top {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    padding: 0 0.25rem 0 0.5rem;
-  }
-  .collapsed .top {
-    justify-content: center;
-    padding: 0;
   }
 
   h1 {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    margin: 0 0 0 0.5rem;
     font-size: 1rem;
-    margin: 0;
   }
 
   .toggle,
@@ -266,24 +275,26 @@
     border-radius: 0.375rem;
   }
   .toggle {
+    flex-shrink: 0;
+    width: 2.125rem;
+    height: 2.125rem;
+    margin-left: auto;
+    padding: 0;
     font-size: 1.1rem;
-    padding: 0.25rem 0.5rem;
   }
   .new {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
-    padding: 0.375rem 0.5rem;
-    text-align: left;
-  }
-  /* Collapsed, both buttons are the same square, centred in the strip. */
-  .collapsed .toggle,
-  .collapsed .new {
-    align-self: center;
-    justify-content: center;
-    width: 2.125rem;
+    width: 100%;
     height: 2.125rem;
     padding: 0;
+    overflow: hidden;
+    text-align: left;
+  }
+  .plus {
+    flex-shrink: 0;
+    width: 2.125rem;
+    text-align: center;
   }
   .toggle:hover,
   .new:hover {

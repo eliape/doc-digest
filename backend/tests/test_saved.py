@@ -2,9 +2,9 @@ import pytest
 from fastapi.testclient import TestClient
 from pdfs import filler, make_pdf
 
-from doc_digest import main
-from doc_digest.config import Settings
-from doc_digest.saved import SavedWorkspace
+from leqtern import main
+from leqtern.config import Settings
+from leqtern.saved import SavedWorkspace
 
 
 @pytest.fixture

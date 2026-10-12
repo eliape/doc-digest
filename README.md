@@ -1,4 +1,4 @@
-# doc-digest
+# Leqtern
 
 A PDF reader for learning. Open a document, point at a passage, figure or equation, and ask about it. Answers know exactly where you are in the document and cite pages you can click to jump back to.
 
@@ -26,11 +26,11 @@ The frontend dev server forwards `/api/*` to the backend, so open http://localho
 
 ## Checking retrieval and cost
 
-Each PDF you add is indexed in the background with a cheap model, and answers look things up across the topic. To check how well that finds the right pages, and what it costs, write a few questions with known answer pages (format in [evaluate.py](backend/src/doc_digest/evaluate.py)) and run:
+Each PDF you add is indexed in the background with a cheap model, and answers look things up across the topic. To check how well that finds the right pages, and what it costs, write a few questions with known answer pages (format in [evaluate.py](backend/src/leqtern/evaluate.py)) and run:
 
 ```sh
 cd backend
-uv run python -m doc_digest.evaluate questions.json book.pdf scanned-book.pdf paper.pdf
+uv run python -m leqtern.evaluate questions.json book.pdf scanned-book.pdf paper.pdf
 ```
 
 `GET /api/usage` shows tokens, cache use, latency and cost of every model call so far.

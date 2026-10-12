@@ -90,7 +90,7 @@
 
 <aside class="topics-sidebar" class:collapsed={!expanded} class:closed={!open} id="topics-sidebar" aria-label="Topics">
   <div class="top">
-    {#if expanded}<h1>doc-digest</h1>{/if}
+    {#if expanded}<h1>Leqtern</h1>{/if}
     <button
       type="button"
       class="toggle"

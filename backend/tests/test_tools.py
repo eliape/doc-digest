@@ -2,12 +2,12 @@ import pytest
 from fakes import FakeAnswerClient, text, tool_use
 from pdfs import filler, make_pdf
 
-from doc_digest.ask import AskRequest, Turn, stream_answer
-from doc_digest.index import ChunkRecord, DocIndex, Entry, Section
-from doc_digest.library import Library
-from doc_digest.quiz import reading_so_far
-from doc_digest.tools import Toolbox, ToolError, TopicDoc, overview, terms
-from doc_digest.usage import UsageLog
+from leqtern.ask import AskRequest, Turn, stream_answer
+from leqtern.index import ChunkRecord, DocIndex, Entry, Section
+from leqtern.library import Library
+from leqtern.quiz import reading_so_far
+from leqtern.tools import Toolbox, ToolError, TopicDoc, overview, terms
+from leqtern.usage import UsageLog
 
 
 @pytest.fixture
@@ -165,7 +165,7 @@ async def test_bad_tool_calls_come_back_as_errors(topic) -> None:
 
 
 async def test_must_answer_after_the_last_round(topic, monkeypatch) -> None:
-    monkeypatch.setattr("doc_digest.ask.MAX_ROUNDS", 2)
+    monkeypatch.setattr("leqtern.ask.MAX_ROUNDS", 2)
     client = FakeAnswerClient(
         [
             ([tool_use("t1", "search", {"query": "x"})], "tool_use"),

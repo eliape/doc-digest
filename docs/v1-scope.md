@@ -1,4 +1,4 @@
-# doc-digest v1: what the first version should contain
+# Leqtern v1: what the first version should contain
 
 ## Step 1. Who it is for, and the one job it does
 
@@ -83,7 +83,7 @@ Printed page labels (like "xii" or "41") are kept next to PDF page numbers. Inde
 
 **Tools.** `search` looks in the indexes and in the full page text (so it finds things the index missed and works before indexing finishes), `get_outline` gives a document's full outline with entries for a page range, and `read_pages` returns the actual pages, as images when they are scanned or when asked. The index is a guide, not a filter: the model can search again with other words, try another PDF or read neighbouring pages. Answers cite the pages actually read.
 
-**Measured, not estimated.** Every model call is logged with input, output, cache tokens, latency and cost (`GET /api/usage`), and indexing calls record how many pages went as text and as images. `python -m doc_digest.evaluate` runs a set of PDFs and questions with known answer pages and reports whether the model read and cited the right pages, and what it cost.
+**Measured, not estimated.** Every model call is logged with input, output, cache tokens, latency and cost (`GET /api/usage`), and indexing calls record how many pages went as text and as images. `python -m leqtern.evaluate` runs a set of PDFs and questions with known answer pages and reports whether the model read and cited the right pages, and what it cost.
 
 ## Step 3c. Why a click and not a box
 

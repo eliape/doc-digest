@@ -1,6 +1,6 @@
 from fastapi.testclient import TestClient
 
-from doc_digest.main import app
+from leqtern.main import app
 
 client = TestClient(app)
 

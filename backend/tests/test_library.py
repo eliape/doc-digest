@@ -1,7 +1,7 @@
 import pytest
 from pdfs import filler, make_pdf
 
-from doc_digest.library import Library, garbled, page_name
+from leqtern.library import Library, garbled, page_name
 
 LABELS = "<< /Nums [0 << /S /r >> 2 << /S /D /St 1 >>] >>"
 

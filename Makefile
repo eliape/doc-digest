@@ -16,4 +16,4 @@ check:
 	cd frontend && npm run check
 
 costs:
-	cd backend && uv run python -m doc_digest.costs $(ARGS)
+	cd backend && uv run python -m leqtern.costs $(ARGS)

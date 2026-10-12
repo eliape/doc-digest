@@ -224,9 +224,9 @@
             <li class="discussions" transition:slide={listSlide()}>
               <h3 id={`discussions-${topic.id}`}>Discussions</h3>
               <ul aria-labelledby={`discussions-${topic.id}`}>
-                <!-- Opens an empty discussion in the chat; shaded while that is the one open. -->
+                <!-- Opens an empty discussion in the chat. Never marked: it is an action, not a discussion. -->
                 <li class="discussion">
-                  <div class="row" class:active={chatOpen && !chatOf(topic).messages.length}>
+                  <div class="row">
                     <button type="button" class="topic new-discussion" onclick={() => newDiscussion(topic.id)}>
                       <span aria-hidden="true">＋</span>
                       <span class="name">New discussion</span>
@@ -595,9 +595,6 @@
   .new-discussion {
     gap: 0.375rem;
     color: var(--muted);
-  }
-  .row.active .new-discussion {
-    color: inherit;
   }
   .row:hover .dots,
   .row.active .dots {

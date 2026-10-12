@@ -57,7 +57,13 @@
 
   // Every load starts with the topics open and the chat closed.
   let sidebarOpen = $state(true)
-  let chatOpen = $state(false)
+  // Whether each topic's chat is showing, so a topic opens the way it was left. Not saved:
+  // the chat starts hidden on every load.
+  let chatOpenBy = $state<Record<string, boolean>>({})
+  const chatOpen = $derived(!!workspace.activeTopicId && !!chatOpenBy[workspace.activeTopicId])
+  function setChatOpen(open: boolean, topicId = workspace.activeTopicId) {
+    if (topicId) chatOpenBy[topicId] = open
+  }
 
   // What a left click on the PDF does. Each topic keeps its own, the same in all its tabs,
   // remembered in this browser; `picked` holds the picks made since the page loaded.
@@ -151,7 +157,7 @@
     if (!picked || !topic) return
     const n = (latestPick[topic.id] = (latestPick[topic.id] ?? 0) + 1)
     workspace.attachContext(topic.id, { ...pick, docId, docName: picked.name, pageTexts: [] }, mode)
-    chatOpen = true
+    setChatOpen(true, topic.id)
     tick().then(() => chatPanel?.focus())
     capturing[topic.id] = (panes[docId]?.capture(pick) ?? Promise.resolve(undefined))
       .then((captured) => {
@@ -368,7 +374,7 @@
     if (event.key === 'Enter' && !mod && !event.shiftKey && !event.altKey && !event.isComposing) {
       if (workspace.activeTopic && !keyIsForTarget(event.target)) {
         event.preventDefault()
-        chatOpen = true
+        setChatOpen(true)
         chatPanel?.focus()
       }
       return
@@ -411,7 +417,7 @@
     if (!target.closest('#topics-sidebar, #doc-outline, .outline-toggle')) outlineOpen = false
   }}
 >
-  <TopicsSidebar {workspace} bind:open={sidebarOpen} {chatOpen} onopenchat={() => (chatOpen = true)} />
+  <TopicsSidebar {workspace} bind:open={sidebarOpen} {chatOpen} onopenchat={() => setChatOpen(true)} />
 
   <div class="main">
     <input
@@ -497,7 +503,7 @@
           aria-expanded={chatOpen}
           aria-controls="chat-panel"
           title={`Chat about ${workspace.activeTopic.name}`}
-          onclick={() => (chatOpen = !chatOpen)}
+          onclick={() => setChatOpen(!chatOpen)}
         >
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path
@@ -573,7 +579,7 @@
   <ChatPanel
     bind:this={chatPanel}
     {workspace}
-    bind:open={chatOpen}
+    bind:open={() => chatOpen, setChatOpen}
     onclose={() => tick().then(() => chatToggle?.focus())}
     onsend={send}
     onreveal={reveal}

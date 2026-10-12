@@ -120,8 +120,13 @@
     outline: 2px solid var(--accent);
     outline-offset: -2px;
   }
+  /* The section being read: a darker gray band. */
   button[aria-current='true'] {
+    background: color-mix(in srgb, currentColor 16%, transparent);
     font-weight: 600;
+  }
+  button[aria-current='true']:hover {
+    background: color-mix(in srgb, currentColor 22%, transparent);
   }
 
   .level-1 {

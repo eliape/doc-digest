@@ -120,15 +120,13 @@
     outline: 2px solid var(--accent);
     outline-offset: -2px;
   }
-  /* The section being read: a band in the accent colour with a bar on its left edge. */
+  /* The section being read: a darker gray band. */
   button[aria-current='true'] {
-    background: color-mix(in srgb, var(--accent) 16%, transparent);
-    box-shadow: inset 3px 0 0 var(--accent);
-    color: color-mix(in srgb, var(--accent) 70%, var(--outline-text));
+    background: color-mix(in srgb, currentColor 16%, transparent);
     font-weight: 600;
   }
   button[aria-current='true']:hover {
-    background: color-mix(in srgb, var(--accent) 24%, transparent);
+    background: color-mix(in srgb, currentColor 22%, transparent);
   }
 
   .level-1 {

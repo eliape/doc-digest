@@ -155,6 +155,16 @@
     stroke-linecap: round;
     stroke-linejoin: round;
     color: var(--muted);
+    /* Points down while the list is closed and turns to point up while it is open. */
+    transition: transform 0.18s ease;
+  }
+  .trigger[aria-expanded='true'] .chevron {
+    transform: rotate(180deg);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .chevron {
+      transition: none;
+    }
   }
 
   /* Opens downwards from the header; a long list scrolls. */

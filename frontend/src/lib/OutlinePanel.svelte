@@ -2,27 +2,25 @@
   import { tick } from 'svelte'
   import { fade } from 'svelte/transition'
   import type { Heading } from './context'
-  import { currentEntry } from './outline'
 
   type Props = {
     /** The chapters and sections, or undefined while they load. */
     entries?: Heading[]
     /** What to say when there are no entries. */
     empty: string
-    /** The page being read, to mark the section it is in. */
-    page: number
-    /** Called with the page of the entry clicked. */
-    ongo: (page: number) => void
+    /** The index of the entry for the section being read, or -1. */
+    current: number
+    /** Called with the entry clicked. */
+    ongo: (entry: Heading) => void
     onclose: () => void
   }
 
-  let { entries, empty, page, ongo, onclose }: Props = $props()
+  let { entries, empty, current, ongo, onclose }: Props = $props()
 
   // Fades in and out as it is toggled, or just appears for those who prefer less motion.
   const fadeMs = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 0 : 180
 
   let list = $state<HTMLElement>()
-  let current = $derived(entries ? currentEntry(entries, page) : -1)
 
   // Open at the section being read.
   $effect(() => {
@@ -54,7 +52,7 @@
             class="level-{entry.level}"
             aria-current={i === current}
             title={entry.title}
-            onclick={() => ongo(entry.page)}>{entry.title}</button
+            onclick={() => ongo(entry)}>{entry.title}</button
           >
         </li>
       {/each}

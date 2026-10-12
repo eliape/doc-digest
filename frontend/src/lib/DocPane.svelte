@@ -1,6 +1,7 @@
 <script lang="ts">
   import { untrack } from 'svelte'
-  import type { Pick } from './context'
+  import type { Heading, Pick } from './context'
+  import type { ReadingSpot } from './outline'
   import { formatScale, parsePageInput } from './pages'
   import PdfViewer from './PdfViewer.svelte'
   import { type Tool, TOOLS } from './tools'
@@ -12,6 +13,8 @@
     startPage?: number
     /** Called as the reader moves to another page, so it can be saved. */
     onpagechange?: (page: number) => void
+    /** Called as the reader scrolls, with the page and spot on it being read. */
+    onreadingspot?: (spot: ReadingSpot) => void
     /** Whether this is the open tab. Only the open tab's controls are shown. */
     active?: boolean
     /** Where the controls go: a slot in the tab row, so they share its space. */
@@ -33,6 +36,7 @@
     data,
     startPage,
     onpagechange,
+    onreadingspot,
     active = true,
     controlsTarget,
     marker,
@@ -92,8 +96,11 @@
   export function outline() {
     return viewer?.outline() ?? Promise.resolve([])
   }
-  export function goToPage(n: number) {
-    viewer?.goToPage(n)
+  export function goToHeading(heading: Heading) {
+    return viewer?.goToHeading(heading)
+  }
+  export function spotOf(heading: Heading) {
+    return viewer?.spotOf(heading) ?? Promise.resolve(undefined)
   }
   export function zoomIn() {
     viewer?.zoomIn()
@@ -198,6 +205,7 @@
     {oncontextpick}
     {onmarkerclick}
     {onerror}
+    {onreadingspot}
   />
 </div>
 

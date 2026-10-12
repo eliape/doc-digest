@@ -102,8 +102,11 @@ export async function fetchIndexStatus(id: string, fetchFn: typeof fetch = fetch
   return (await res.json()) as IndexStatus
 }
 
-/** A section the index found: its heading, level (1 is the top) and first page. */
-export type IndexSection = { title: string; level: number; start_page: number }
+/**
+ * A section the index found: its heading, level (1 is the top), first page and, when
+ * known, how far down that page the heading is (0 top, 1 bottom).
+ */
+export type IndexSection = { title: string; level: number; start_page: number; top?: number | null }
 
 /** The sections indexed so far, in page order. Empty before the first pages are indexed. */
 export async function fetchIndexSections(id: string, fetchFn: typeof fetch = fetch): Promise<IndexSection[]> {

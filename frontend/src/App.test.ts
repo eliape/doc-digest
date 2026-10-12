@@ -766,7 +766,9 @@ describe('App', () => {
     const panel = within(screen.getByRole('complementary', { name: 'Chat' }))
     expect(panel.getByRole('button', { name: 'Close chat' })).toHaveClass('icon-button')
     // The title is the open discussion's, which opens the topic's list of discussions.
-    expect(panel.getByRole('button', { name: 'Discussion: New chat' })).toHaveAttribute('title', 'New chat · slides')
+    // With nothing to switch to, it is just the title, without the arrow.
+    expect(panel.getByRole('heading', { name: 'New chat' })).toHaveAttribute('title', 'New chat · slides')
+    expect(panel.queryByRole('button', { name: /^Discussion:/ })).not.toBeInTheDocument()
     expect(panel.queryByRole('heading', { name: 'Chat' })).not.toBeInTheDocument()
     expect(panel.getByRole('button', { name: 'New chat' })).toHaveTextContent('New chat')
 

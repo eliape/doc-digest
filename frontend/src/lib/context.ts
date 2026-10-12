@@ -144,9 +144,10 @@ export function truncate(text: string, max: number): string {
 
 /**
  * Outline entries with the page they start on; level 1 is the top. A bookmark keeps
- * its destination, which usually says where on the page the heading is.
+ * its destination, which usually says where on the page the heading is; a section from
+ * the index may have `top`, how far down the page the indexing model saw it.
  */
-export type Heading = { title: string; page: number; level: number; dest?: unknown[] }
+export type Heading = { title: string; page: number; level: number; dest?: unknown[]; top?: number }
 
 /** The heading a page belongs to: the last one that starts on or before it. */
 export function sectionFor<H extends { title: string; page: number }>(headings: H[], page: number): string | undefined {
@@ -223,7 +224,8 @@ export function findHeading(items: PlacedText[], title: string): number | undefi
 
 /**
  * Where on its page a heading is (see findHeading): from a bookmark's destination when it
- * gives one, else by looking for the heading in the page's text. Undefined for scans.
+ * gives one, else by looking for the heading in the page's text, else where the index
+ * placed it (the only way for a scan). Undefined when none of those know.
  */
 export async function headingSpot(doc: PDFDocumentProxy, heading: Heading): Promise<number | undefined> {
   try {
@@ -235,9 +237,9 @@ export async function headingSpot(doc: PDFDocumentProxy, heading: Heading): Prom
       const [, y] = viewport.convertToViewportPoint(0, top)
       return Math.min(1, Math.max(0, y / viewport.height))
     }
-    return findHeading(await placedText(page), heading.title)
+    return findHeading(await placedText(page), heading.title) ?? heading.top
   } catch {
-    return undefined
+    return heading.top
   }
 }
 

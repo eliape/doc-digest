@@ -7,7 +7,7 @@
   import DocPane from './lib/DocPane.svelte'
   import type { Heading, PageContext, Pick } from './lib/context'
   import { ASK_ICON, QUIZ_ICON, SOCRATIC_ICON } from './lib/modes'
-  import { fromIndex } from './lib/outline'
+  import { currentEntry, fromIndex, type ReadingSpot } from './lib/outline'
   import OutlinePanel from './lib/OutlinePanel.svelte'
   import { isPdfFile } from './lib/pages'
   import { savedTool, saveTool, type Tool } from './lib/tools'
@@ -298,6 +298,33 @@
     }
   })
 
+  // Where each tab is being read, and where the headings on that page are, so the outline
+  // can mark the section being read, switching as a heading scrolls past.
+  let reading = $state<Record<string, ReadingSpot>>({})
+  let pageSpots = $state.raw<{ entries: Heading[]; page: number; spots: (number | undefined)[] }>()
+
+  $effect(() => {
+    if (!outlineOpen || !doc || outline?.docId !== doc.id) return
+    const id = doc.id
+    const entries = outline.entries
+    const page = reading[id]?.page ?? workspace.pages[id] ?? 1
+    if (pageSpots?.entries === entries && pageSpots.page === page) return
+    let stale = false
+    Promise.all(entries.map((e) => (e.page === page ? (panes[id]?.spotOf(e) ?? undefined) : undefined))).then((spots) => {
+      if (!stale) pageSpots = { entries, page, spots }
+    })
+    return () => {
+      stale = true
+    }
+  })
+
+  let currentSection = $derived.by(() => {
+    if (!doc || outline?.docId !== doc.id) return -1
+    const at = reading[doc.id] ?? { page: workspace.pages[doc.id] ?? 1, y: 0 }
+    const spots = pageSpots?.entries === outline.entries && pageSpots.page === at.page ? pageSpots.spots : []
+    return currentEntry(outline.entries, at, spots)
+  })
+
   function outlineEmpty(docId: string): string {
     const state = workspace.indexing[docId]
     if (state?.status === 'error') return 'This PDF has no outline of its own, and it could not be indexed to make one.'
@@ -474,6 +501,7 @@
               data={d.data}
               startPage={workspace.pages[id]}
               onpagechange={(page) => (workspace.pages[id] = page)}
+              onreadingspot={(spot) => (reading[id] = spot)}
               active={id === doc?.id}
               controlsTarget={controlsEl}
               marker={markerFor(id)}
@@ -499,7 +527,7 @@
         <OutlinePanel
           entries={outline?.docId === doc.id ? outline.entries : undefined}
           empty={outlineEmpty(doc.id)}
-          page={workspace.pages[doc.id] ?? 1}
+          current={currentSection}
           ongo={goToSection}
           onclose={() => (outlineOpen = false)}
         />

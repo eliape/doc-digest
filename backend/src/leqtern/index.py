@@ -36,6 +36,11 @@ class Section(BaseModel):
     level: int = Field(description="1 for a chapter or top-level part, 2 for a section, 3 below")
     start_page: int = Field(description="PDF page number where it starts")
     end_page: int = Field(description="PDF page number where it ends (within these pages)")
+    top: float | None = Field(
+        default=None,
+        description="How far down its start page the heading is printed: 0 at the top edge, "
+        "1 at the bottom, two decimals",
+    )
     summary: str = Field(description="One or two sentences on what it covers")
 
 
@@ -93,8 +98,8 @@ These are pages {start}–{end} of "{name}" ({count} pages in all). Index them s
 someone answering questions about the document can find where things are.
 
 - sections: every chapter, section and subsection that appears or continues on these pages, \
-with the PDF page numbers it spans here. A section that started earlier and continues here \
-is listed again with its title.
+with the PDF page numbers it spans here and how far down its start page the heading is \
+(top). A section that started earlier and continues here is listed again with its title.
 - entries: key terms, acronyms, definitions, numbered or important equations, figures and \
 tables, each with the PDF pages it is on. Skip passing mentions.
 - references: explicit pointers to other parts of this document or to other works, such as \

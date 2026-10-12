@@ -4,6 +4,7 @@
   import type { PDFDocumentLoadingTask, PDFDocumentProxy } from 'pdfjs-dist/legacy/build/pdf.mjs'
   import type { PDFViewer } from 'pdfjs-dist/legacy/web/pdf_viewer.mjs'
   import { type Capture, capture as captureContext, type Heading, headingSpot, headings, type Pick } from './context'
+  import type { ReadingSpot } from './outline'
   import { attachZoomGestures, type Origin } from './gestures'
   import { assetOptions, loadPdfjs } from './pdfjs'
   import { isClick, isOnSelection, NOT_PICKABLE, pickAtPoint, pickSelection } from './picking'
@@ -41,6 +42,8 @@
     /** Called when the reader clicks the marker, to take it off the chat. */
     onmarkerclick?: () => void
     onerror?: (error: unknown) => void
+    /** Called as the reader scrolls, with the spot being read (see readingSpot). */
+    onreadingspot?: (spot: ReadingSpot) => void
   }
 
   let {
@@ -56,6 +59,7 @@
     oncontextpick,
     onmarkerclick,
     onerror,
+    onreadingspot,
   }: Props = $props()
 
   let container: HTMLDivElement
@@ -323,6 +327,37 @@
     scrollTo(heading.page, y === undefined ? undefined : y - 0.04)
   }
 
+  /** Where a heading is on its page, as a fraction of the page height, if it can be told. */
+  export function spotOf(heading: Heading): Promise<number | undefined> {
+    return pdfDocument ? headingSpot(pdfDocument, heading) : Promise.resolve(undefined)
+  }
+
+  // The line the reader is taken to be reading at, as a share of the view's height from its top.
+  // Headings jumped to land just above it.
+  const READING_LINE = 0.2
+
+  /** The page and spot on it (a fraction of its height) at the reading line. */
+  function readingSpot(): ReadingSpot | undefined {
+    if (!container) return undefined
+    const line = container.scrollTop + container.clientHeight * READING_LINE
+    for (const el of container.querySelectorAll<HTMLElement>('.page[data-page-number]')) {
+      if (el.offsetTop + el.offsetHeight < line) continue
+      return { page: Number(el.dataset.pageNumber), y: Math.max(0, (line - el.offsetTop) / el.offsetHeight) }
+    }
+    return undefined
+  }
+
+  let spotFrame = 0
+  function onScroll() {
+    if (!onreadingspot || spotFrame) return
+    spotFrame = requestAnimationFrame(() => {
+      spotFrame = 0
+      const spot = readingSpot()
+      if (spot) onreadingspot?.(spot)
+    })
+  }
+  $effect(() => () => cancelAnimationFrame(spotFrame))
+
   export function goToPage(n: number) {
     if (viewer && n >= 1 && n <= viewer.pagesCount) viewer.currentPageNumber = n
   }
@@ -352,6 +387,7 @@
   bind:this={container}
   data-testid="pdf-viewer"
   role="presentation"
+  onscroll={onScroll}
   onpointerdown={onPointerDown}
   onpointerup={onPointerUp}
   oncontextmenu={onContextMenu}

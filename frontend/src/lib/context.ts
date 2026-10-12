@@ -192,12 +192,18 @@ export function headings(doc: PDFDocumentProxy): Promise<Heading[]> {
 
 const normalize = (text: string) => text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '')
 
+// Lines this close to the top or bottom edge are taken for running headers and footers,
+// which often repeat a chapter or section title.
+const MARGIN_BAND = 0.07
+
 /**
  * Where a heading is printed on its page, as a fraction of the page height down to its
  * first line, or undefined when it can't be found. Lines are joined with the next two,
- * so a heading that wraps still matches; spacing and punctuation are ignored.
+ * so a heading that wraps still matches; spacing and punctuation are ignored. When the
+ * title appears more than once, the one nearest `near` (a rough position, e.g. from the
+ * index) wins, or else the first one outside the header and footer bands.
  */
-export function findHeading(items: PlacedText[], title: string): number | undefined {
+export function findHeading(items: PlacedText[], title: string, near?: number): number | undefined {
   const lines: { text: string; y: number }[] = []
   let line: { text: string; y: number } | undefined
   for (const item of items) {
@@ -214,12 +220,16 @@ export function findHeading(items: PlacedText[], title: string): number | undefi
   // Also without a leading number, for headings printed without theirs (or the other way round).
   const unnumbered = normalize(title.replace(/^\s*[\d.]+\s+/, '')).slice(0, 40)
   if (!wanted) return undefined
+  const found: number[] = []
   for (let i = 0; i < lines.length; i++) {
     if (!normalize(lines[i].text)) continue
     const joined = normalize(lines.slice(i, i + 3).map((l) => l.text).join(' '))
-    if (joined.startsWith(wanted) || (unnumbered.length >= 4 && joined.startsWith(unnumbered))) return lines[i].y
+    if (joined.startsWith(wanted) || (unnumbered.length >= 4 && joined.startsWith(unnumbered))) found.push(lines[i].y)
   }
-  return undefined
+  if (near !== undefined && found.length) {
+    return found.reduce((best, y) => (Math.abs(y - near) < Math.abs(best - near) ? y : best))
+  }
+  return found.find((y) => y > MARGIN_BAND && y < 1 - MARGIN_BAND) ?? found[0]
 }
 
 /**
@@ -237,7 +247,7 @@ export async function headingSpot(doc: PDFDocumentProxy, heading: Heading): Prom
       const [, y] = viewport.convertToViewportPoint(0, top)
       return Math.min(1, Math.max(0, y / viewport.height))
     }
-    return findHeading(await placedText(page), heading.title) ?? heading.top
+    return findHeading(await placedText(page), heading.title, heading.top) ?? heading.top
   } catch {
     return heading.top
   }

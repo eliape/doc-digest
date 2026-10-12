@@ -125,6 +125,18 @@ describe('findHeading', () => {
     expect(findHeading(page, '2.1.4 More text')).toBe(0.6)
   })
 
+  it('skips a running header that repeats the title', () => {
+    const withHeader = [...at(0.04, 'Limits and continuity'), ...at(0.2, 'Text.'), ...at(0.45, '2 Limits and continuity')]
+    expect(findHeading(withHeader, '2 Limits and continuity')).toBe(0.45)
+    expect(findHeading(withHeader.slice(0, 2), '2 Limits and continuity')).toBe(0.04)
+  })
+
+  it('takes the match nearest a rough position', () => {
+    const twice = [...at(0.2, 'Summary'), ...at(0.7, 'Summary')]
+    expect(findHeading(twice, 'Summary', 0.65)).toBe(0.7)
+    expect(findHeading(twice, 'Summary')).toBe(0.2)
+  })
+
   it('is undefined when the heading is not on the page', () => {
     expect(findHeading(page, '3 Derivatives')).toBeUndefined()
     expect(findHeading([], 'Anything')).toBeUndefined()

@@ -142,8 +142,11 @@ export function truncate(text: string, max: number): string {
   return text.length <= max ? text : `${text.slice(0, max).trimEnd()} …`
 }
 
-/** Outline entries with the page they start on; level 1 is the top. */
-export type Heading = { title: string; page: number; level: number }
+/**
+ * Outline entries with the page they start on; level 1 is the top. A bookmark keeps
+ * its destination, which usually says where on the page the heading is.
+ */
+export type Heading = { title: string; page: number; level: number; dest?: unknown[] }
 
 /** The heading a page belongs to: the last one that starts on or before it. */
 export function sectionFor<H extends { title: string; page: number }>(headings: H[], page: number): string | undefined {
@@ -170,7 +173,7 @@ export function headings(doc: PDFDocumentProxy): Promise<Heading[]> {
             const ref = dest?.[0]
             if (ref != null) {
               const index = typeof ref === 'number' ? ref : await doc.getPageIndex(ref as never)
-              result.push({ title: node.title, page: index + 1, level })
+              result.push({ title: node.title, page: index + 1, level, dest: Array.isArray(dest) ? dest : undefined })
             }
           } catch {
             // Outlines can point at things that aren't pages; skip those.
@@ -184,6 +187,58 @@ export function headings(doc: PDFDocumentProxy): Promise<Heading[]> {
     outlines.set(doc, found)
   }
   return found
+}
+
+const normalize = (text: string) => text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '')
+
+/**
+ * Where a heading is printed on its page, as a fraction of the page height down to its
+ * first line, or undefined when it can't be found. Lines are joined with the next two,
+ * so a heading that wraps still matches; spacing and punctuation are ignored.
+ */
+export function findHeading(items: PlacedText[], title: string): number | undefined {
+  const lines: { text: string; y: number }[] = []
+  let line: { text: string; y: number } | undefined
+  for (const item of items) {
+    line ??= { text: '', y: item.y }
+    line.text += item.text
+    if (item.eol) {
+      lines.push(line)
+      line = undefined
+    }
+  }
+  if (line) lines.push(line)
+
+  const wanted = normalize(title).slice(0, 40)
+  // Also without a leading number, for headings printed without theirs (or the other way round).
+  const unnumbered = normalize(title.replace(/^\s*[\d.]+\s+/, '')).slice(0, 40)
+  if (!wanted) return undefined
+  for (let i = 0; i < lines.length; i++) {
+    if (!normalize(lines[i].text)) continue
+    const joined = normalize(lines.slice(i, i + 3).map((l) => l.text).join(' '))
+    if (joined.startsWith(wanted) || (unnumbered.length >= 4 && joined.startsWith(unnumbered))) return lines[i].y
+  }
+  return undefined
+}
+
+/**
+ * Where on its page a heading is (see findHeading): from a bookmark's destination when it
+ * gives one, else by looking for the heading in the page's text. Undefined for scans.
+ */
+export async function headingSpot(doc: PDFDocumentProxy, heading: Heading): Promise<number | undefined> {
+  try {
+    const page = await doc.getPage(heading.page)
+    const kind = (heading.dest?.[1] as { name?: string } | undefined)?.name
+    const top = kind === 'XYZ' ? heading.dest?.[3] : kind === 'FitH' || kind === 'FitBH' ? heading.dest?.[2] : kind === 'FitR' ? heading.dest?.[5] : null
+    if (typeof top === 'number') {
+      const viewport = page.getViewport({ scale: 1 })
+      const [, y] = viewport.convertToViewportPoint(0, top)
+      return Math.min(1, Math.max(0, y / viewport.height))
+    }
+    return findHeading(await placedText(page), heading.title)
+  } catch {
+    return undefined
+  }
 }
 
 async function placedText(page: PDFPageProxy): Promise<PlacedText[]> {

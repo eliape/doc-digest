@@ -1,6 +1,6 @@
 <script lang="ts">
   import { untrack } from 'svelte'
-  import type { Pick } from './context'
+  import type { Heading, Pick } from './context'
   import { formatScale, parsePageInput } from './pages'
   import PdfViewer from './PdfViewer.svelte'
   import { type Tool, TOOLS } from './tools'
@@ -92,8 +92,8 @@
   export function outline() {
     return viewer?.outline() ?? Promise.resolve([])
   }
-  export function goToPage(n: number) {
-    viewer?.goToPage(n)
+  export function goToHeading(heading: Heading) {
+    return viewer?.goToHeading(heading)
   }
   export function zoomIn() {
     viewer?.zoomIn()

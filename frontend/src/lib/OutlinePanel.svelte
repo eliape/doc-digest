@@ -11,8 +11,8 @@
     empty: string
     /** The page being read, to mark the section it is in. */
     page: number
-    /** Called with the page of the entry clicked. */
-    ongo: (page: number) => void
+    /** Called with the entry clicked. */
+    ongo: (entry: Heading) => void
     onclose: () => void
   }
 
@@ -54,7 +54,7 @@
             class="level-{entry.level}"
             aria-current={i === current}
             title={entry.title}
-            onclick={() => ongo(entry.page)}>{entry.title}</button
+            onclick={() => ongo(entry)}>{entry.title}</button
           >
         </li>
       {/each}

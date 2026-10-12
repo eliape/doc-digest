@@ -3,7 +3,7 @@
   import { untrack } from 'svelte'
   import type { PDFDocumentLoadingTask, PDFDocumentProxy } from 'pdfjs-dist/legacy/build/pdf.mjs'
   import type { PDFViewer } from 'pdfjs-dist/legacy/web/pdf_viewer.mjs'
-  import { type Capture, capture as captureContext, type Heading, headings, type Pick } from './context'
+  import { type Capture, capture as captureContext, type Heading, headingSpot, headings, type Pick } from './context'
   import { attachZoomGestures, type Origin } from './gestures'
   import { assetOptions, loadPdfjs } from './pdfjs'
   import { isClick, isOnSelection, NOT_PICKABLE, pickAtPoint, pickSelection } from './picking'
@@ -297,16 +297,30 @@
     if (!viewer || pick.page < 1 || pick.page > viewer.pagesCount) return
     const view = viewer.getPageView(pick.page - 1) as { viewport: { width: number; height: number; convertToPdfPoint(x: number, y: number): number[] } } | undefined
     const spot = pick.box ? { x: pick.box.x, y: pick.box.y } : pick.point
-    if (view && spot) {
-      // Leave some of the page above the spot in view.
-      const [x, y] = view.viewport.convertToPdfPoint(0, Math.max(0, spot.y - 0.08) * view.viewport.height)
-      viewer.scrollPageIntoView({ pageNumber: pick.page, destArray: [null, { name: 'XYZ' }, x, y, null] })
-    } else {
-      viewer.currentPageNumber = pick.page
-    }
+    // Leave some of the page above the spot in view.
+    scrollTo(pick.page, spot && spot.y - 0.08)
     clearTimeout(flashTimer)
     flash = pick
     flashTimer = setTimeout(() => (flash = undefined), 1600)
+  }
+
+  /** Scroll so a point `y` down the page (a fraction of its height) is at the top, or to the page's top. */
+  function scrollTo(pageNumber: number, y: number | undefined) {
+    if (!viewer) return
+    const view = viewer.getPageView(pageNumber - 1) as { viewport: { height: number; convertToPdfPoint(x: number, y: number): number[] } } | undefined
+    if (view && y !== undefined) {
+      const [x, top] = view.viewport.convertToPdfPoint(0, Math.max(0, y) * view.viewport.height)
+      viewer.scrollPageIntoView({ pageNumber, destArray: [null, { name: 'XYZ' }, x, top, null] })
+    } else {
+      viewer.currentPageNumber = pageNumber
+    }
+  }
+
+  /** Scroll to an outline entry: its heading where it can be found on the page, else the page's top. */
+  export async function goToHeading(heading: Heading) {
+    if (!viewer || !pdfDocument || heading.page < 1 || heading.page > viewer.pagesCount) return
+    const y = await headingSpot(pdfDocument, heading)
+    scrollTo(heading.page, y === undefined ? undefined : y - 0.04)
   }
 
   export function goToPage(n: number) {

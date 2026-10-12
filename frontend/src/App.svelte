@@ -305,8 +305,8 @@
     return 'No chapters or sections were found in this PDF.'
   }
 
-  function goToSection(page: number) {
-    pane()?.goToPage(page)
+  function goToSection(heading: Heading) {
+    pane()?.goToHeading(heading)
     outlineOpen = false
   }
 

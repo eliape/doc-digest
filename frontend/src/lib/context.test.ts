@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest'
-import { contextLabel, cropRegion, joinText, sectionFor, textInRegion, truncate, windowSlices } from './context'
+import {
+  contextLabel,
+  cropRegion,
+  findHeading,
+  joinText,
+  sectionFor,
+  textInRegion,
+  truncate,
+  windowSlices,
+} from './context'
 
 describe('cropRegion', () => {
   it('centres a wide close-up on a clicked spot', () => {
@@ -93,5 +102,31 @@ describe('windowSlices', () => {
   it('stays inside the document on its first and last page', () => {
     expect(close(windowSlices(1, 0.1, 10))).toEqual([{ page: 1, from: 0, to: 0.8 }])
     expect(close(windowSlices(10, 0.95, 10))).toEqual([{ page: 10, from: 0.2, to: 1 }])
+  })
+})
+
+describe('findHeading', () => {
+  const at = (y: number, ...texts: string[]) =>
+    texts.map((text, i) => ({ text, x: 0.1 + i * 0.05, y, eol: i === texts.length - 1 }))
+  const page = [
+    ...at(0.05, 'Chapter 2. Limits'),
+    ...at(0.3, 'Some body text about limits.'),
+    ...at(0.5, '2.1', ' ', 'The epsilon–delta'),
+    ...at(0.53, 'definition'),
+    ...at(0.6, 'More text.'),
+  ]
+
+  it('finds a heading split into pieces and across lines', () => {
+    expect(findHeading(page, '2.1 The epsilon-delta definition')).toBe(0.5)
+  })
+
+  it('ignores a number the page does not print', () => {
+    expect(findHeading(page, '2 Chapter 2. Limits')).toBe(0.05)
+    expect(findHeading(page, '2.1.4 More text')).toBe(0.6)
+  })
+
+  it('is undefined when the heading is not on the page', () => {
+    expect(findHeading(page, '3 Derivatives')).toBeUndefined()
+    expect(findHeading([], 'Anything')).toBeUndefined()
   })
 })

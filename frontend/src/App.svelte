@@ -94,6 +94,12 @@
 
   let doc = $derived(workspace.activeDoc)
 
+  // The browser tab names the open topic.
+  $effect(() => {
+    const name = workspace.activeTopic?.name.trim()
+    document.title = name ? `${name} · Leqtern` : 'Leqtern'
+  })
+
   $effect(() => {
     if (doc && !mounted.includes(doc.id)) mounted.push(doc.id)
   })

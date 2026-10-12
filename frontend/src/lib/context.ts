@@ -142,12 +142,12 @@ export function truncate(text: string, max: number): string {
   return text.length <= max ? text : `${text.slice(0, max).trimEnd()} …`
 }
 
-/** Outline entries with the page they start on. */
-export type Heading = { title: string; page: number }
+/** Outline entries with the page they start on; level 1 is the top. */
+export type Heading = { title: string; page: number; level: number }
 
 /** The heading a page belongs to: the last one that starts on or before it. */
-export function sectionFor(headings: Heading[], page: number): string | undefined {
-  let best: Heading | undefined
+export function sectionFor<H extends { title: string; page: number }>(headings: H[], page: number): string | undefined {
+  let best: H | undefined
   for (const heading of headings) {
     if (heading.page <= page && (!best || heading.page >= best.page)) best = heading
   }
@@ -157,28 +157,28 @@ export function sectionFor(headings: Heading[], page: number): string | undefine
 const outlines = new WeakMap<PDFDocumentProxy, Promise<Heading[]>>()
 
 /** The PDF's outline (bookmarks), flattened, with page numbers. Empty when it has none. */
-function headings(doc: PDFDocumentProxy): Promise<Heading[]> {
+export function headings(doc: PDFDocumentProxy): Promise<Heading[]> {
   let found = outlines.get(doc)
   if (!found) {
     found = (async () => {
       const result: Heading[] = []
       type Node = { title: string; dest: string | unknown[] | null; items: Node[] }
-      const visit = async (nodes: Node[]) => {
+      const visit = async (nodes: Node[], level: number) => {
         for (const node of nodes) {
           try {
             const dest = typeof node.dest === 'string' ? await doc.getDestination(node.dest) : node.dest
             const ref = dest?.[0]
             if (ref != null) {
               const index = typeof ref === 'number' ? ref : await doc.getPageIndex(ref as never)
-              result.push({ title: node.title, page: index + 1 })
+              result.push({ title: node.title, page: index + 1, level })
             }
           } catch {
             // Outlines can point at things that aren't pages; skip those.
           }
-          await visit(node.items ?? [])
+          await visit(node.items ?? [], level + 1)
         }
       }
-      await visit(((await doc.getOutline()) ?? []) as Node[])
+      await visit(((await doc.getOutline()) ?? []) as Node[], 1)
       return result
     })().catch(() => [])
     outlines.set(doc, found)

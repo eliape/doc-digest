@@ -1,12 +1,14 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte'
-  import { fetchPdf, fetchSavedWorkspace, saveWorkspace } from './lib/api'
+  import { fetchIndexSections, fetchPdf, fetchSavedWorkspace, saveWorkspace } from './lib/api'
   import { chatReserve } from './lib/chatWidth'
   import ChatPanel from './lib/ChatPanel.svelte'
   import ContextMenu, { type MenuItem } from './lib/ContextMenu.svelte'
   import DocPane from './lib/DocPane.svelte'
-  import type { PageContext, Pick } from './lib/context'
+  import type { Heading, PageContext, Pick } from './lib/context'
   import { ASK_ICON, QUIZ_ICON, SOCRATIC_ICON } from './lib/modes'
+  import { fromIndex } from './lib/outline'
+  import OutlinePanel from './lib/OutlinePanel.svelte'
   import { isPdfFile } from './lib/pages'
   import { savedTool, saveTool, type Tool } from './lib/tools'
   import TopicsSidebar from './lib/TopicsSidebar.svelte'
@@ -270,8 +272,50 @@
     open(event.dataTransfer?.files)
   }
 
+  // The open tab's chapters and sections, shown over the PDF by the button left of the tabs.
+  // The PDF's own bookmarks when it has them, else the sections the index has found so far.
+  let outlineOpen = $state(false)
+  let outline = $state<{ docId: string; entries: Heading[] }>()
+
+  $effect(() => {
+    if (!outlineOpen || !doc) return
+    const id = doc.id
+    const serverId = workspace.indexing[id]?.serverId
+    // Look again as indexing gets further, so a new PDF's outline fills in.
+    void workspace.indexing[id]?.pagesDone
+    let stale = false
+    ;(async () => {
+      const bookmarks = (await panes[id]?.outline()) ?? []
+      const entries = bookmarks.length
+        ? bookmarks.map((b) => ({ ...b, level: Math.min(b.level, 3) }))
+        : serverId
+          ? fromIndex(await fetchIndexSections(serverId).catch(() => []))
+          : []
+      if (!stale) outline = { docId: id, entries }
+    })()
+    return () => {
+      stale = true
+    }
+  })
+
+  function outlineEmpty(docId: string): string {
+    const state = workspace.indexing[docId]
+    if (state?.status === 'error') return 'This PDF has no outline of its own, and it could not be indexed to make one.'
+    if (state && state.status !== 'ready') return 'This PDF has no outline of its own. One will appear here as it is indexed.'
+    return 'No chapters or sections were found in this PDF.'
+  }
+
+  function goToSection(page: number) {
+    pane()?.goToPage(page)
+    outlineOpen = false
+  }
+
   function onKeydown(event: KeyboardEvent) {
     const mod = event.ctrlKey || event.metaKey
+    if (event.key === 'Escape' && outlineOpen && !(event.target as Element | null)?.closest?.('#chat-panel')) {
+      outlineOpen = false
+      return
+    }
     if (mod && event.key === 'o') {
       event.preventDefault()
       fileInput.click()
@@ -317,7 +361,10 @@
   onpointerdown={(e) => {
     // Pressing anywhere but the sidebar (the PDF, the tabs, the chat) folds the topics away.
     // A pointer shortcut: the menu button does the same by keyboard.
-    if (!(e.target as Element).closest('#topics-sidebar')) sidebarOpen = false
+    const target = e.target as Element
+    if (!target.closest('#topics-sidebar')) sidebarOpen = false
+    // The outline closes too, unless the press is in it or on its button.
+    if (!target.closest('#topics-sidebar, #doc-outline, .outline-toggle')) outlineOpen = false
   }}
 >
   <TopicsSidebar {workspace} bind:open={sidebarOpen} />
@@ -343,6 +390,19 @@
     {#if workspace.activeTopic}
       <!-- One row: the tabs scroll sideways when there are many, the controls never shrink. -->
       <div class="tabrow" class:chat-closed={!chatOpen}>
+        <button
+          type="button"
+          class="icon-button outline-toggle"
+          class:pressed={outlineOpen}
+          disabled={!doc}
+          aria-label="Outline"
+          aria-expanded={outlineOpen}
+          aria-controls="doc-outline"
+          title="Outline"
+          onclick={() => (outlineOpen = !outlineOpen)}
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M8 12h12M8 18h12" /></svg>
+        </button>
         <div
           class="tabs"
           role="tablist"
@@ -434,6 +494,16 @@
           </div>
         {/if}
       {/each}
+
+      {#if outlineOpen && doc}
+        <OutlinePanel
+          entries={outline?.docId === doc.id ? outline.entries : undefined}
+          empty={outlineEmpty(doc.id)}
+          page={workspace.pages[doc.id] ?? 1}
+          ongo={goToSection}
+          onclose={() => (outlineOpen = false)}
+        />
+      {/if}
 
       {#if !workspace.activeTopic}
         <div class="empty">
@@ -611,6 +681,21 @@
   }
   .add-tab:hover {
     color: inherit;
+  }
+
+  .outline-toggle {
+    color: var(--muted);
+  }
+  .outline-toggle:hover,
+  .outline-toggle.pressed {
+    color: inherit;
+  }
+  .outline-toggle.pressed {
+    background: var(--hover);
+  }
+  .outline-toggle:disabled {
+    opacity: 0.4;
+    cursor: default;
   }
 
   .chat-toggle {

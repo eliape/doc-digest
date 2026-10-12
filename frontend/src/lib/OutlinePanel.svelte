@@ -1,5 +1,6 @@
 <script lang="ts">
   import { tick } from 'svelte'
+  import { fade } from 'svelte/transition'
   import type { Heading } from './context'
   import { currentEntry } from './outline'
 
@@ -17,6 +18,9 @@
 
   let { entries, empty, page, ongo, onclose }: Props = $props()
 
+  // Fades in and out as it is toggled, or just appears for those who prefer less motion.
+  const fadeMs = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 0 : 180
+
   let list = $state<HTMLElement>()
   let current = $derived(entries ? currentEntry(entries, page) : -1)
 
@@ -33,6 +37,7 @@
   id="doc-outline"
   class="outline"
   aria-label="Outline"
+  transition:fade|global={{ duration: fadeMs }}
   onkeydown={(e) => {
     if (e.key === 'Escape') {
       e.preventDefault()

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { tick } from 'svelte'
+  import { slide } from 'svelte/transition'
   import { chatOf, chatTitle, discussions, type Workspace } from './workspace.svelte'
 
   type Props = {
@@ -8,9 +9,16 @@
     open?: boolean
     /** Called when a discussion is picked, to show it in the chat. */
     onopenchat?: () => void
+    /** Whether the chat is showing. Only then is its discussion marked as the open one. */
+    chatOpen?: boolean
   }
 
-  let { workspace, open = $bindable(true), onopenchat }: Props = $props()
+  let { workspace, open = $bindable(true), onopenchat, chatOpen = false }: Props = $props()
+
+  // A topic's discussions slide open and shut, quickly, unless motion is reduced.
+  const listSlide = () => ({
+    duration: typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 150,
+  })
 
   // On collapse the contents stay until the sidebar has narrowed, so they slide away with it.
   const SLIDE_MS = 200
@@ -163,11 +171,7 @@
                 class="topic"
                 aria-current={topic.id === workspace.activeTopicId ? 'true' : undefined}
                 title="Double-click to rename"
-                onclick={() => {
-                  workspace.selectTopic(topic.id)
-                  // Chosen: get out of the way of its PDF.
-                  open = false
-                }}
+                onclick={() => workspace.selectTopic(topic.id)}
                 ondblclick={() => startRename(topic.id, topic.name)}
               >
                 <span class="name">{topic.name}</span>
@@ -217,12 +221,12 @@
           {#if topic.id === workspace.activeTopicId && renamingId !== topic.id}
             {@const listed = discussions(topic)}
             <!-- The open topic's discussions, on a soft line that forks out to each title. -->
-            <li class="discussions">
+            <li class="discussions" transition:slide={listSlide()}>
               <h3 id={`discussions-${topic.id}`}>Discussions</h3>
               <ul aria-labelledby={`discussions-${topic.id}`}>
                 <!-- Opens an empty discussion in the chat; shaded while that is the one open. -->
                 <li class="discussion">
-                  <div class="row" class:active={!chatOf(topic).messages.length}>
+                  <div class="row" class:active={chatOpen && !chatOf(topic).messages.length}>
                     <button type="button" class="topic new-discussion" onclick={() => newDiscussion(topic.id)}>
                       <span aria-hidden="true">＋</span>
                       <span class="name">New discussion</span>
@@ -231,7 +235,7 @@
                 </li>
                 {#each listed as chat (chat.id)}
                   {@const title = chatTitle(chat)}
-                  {@const current = chat.id === chatOf(topic).id}
+                  {@const current = chatOpen && chat.id === chatOf(topic).id}
                   <li class="discussion">
                     <div class="row" class:active={current}>
                       <button

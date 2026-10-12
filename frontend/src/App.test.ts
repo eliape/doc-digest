@@ -325,13 +325,14 @@ describe('App', () => {
     expect(screen.getByRole('button', { name: 'Show topics' })).toBeInTheDocument()
   })
 
-  it('folds the sidebar away when a topic is clicked', async () => {
+  it('keeps the sidebar open when a topic is clicked, so a discussion can be picked', async () => {
     renderOffline()
     await pick(pdf('slides.pdf'))
     await screen.findByRole('tab', { name: 'slides.pdf' })
     await showTopics()
     await fireEvent.click(screen.getByRole('button', { name: /^slides/ }))
-    expect(screen.getByRole('button', { name: 'Show topics' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Hide topics' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'New discussion' })).toBeInTheDocument()
   })
 
   it('expands the sidebar when New topic is pressed while it is collapsed', async () => {
@@ -549,7 +550,7 @@ describe('App', () => {
     await fireEvent.click(sidebar.getByRole('button', { name: /^slides/ }))
     await screen.findByRole('tab', { name: 'slides.pdf' })
     expect((await tool('Click to ask')).getAttribute('aria-pressed')).toBe('true')
-    await showTopics()
+    // Clicking a topic leaves the sidebar open.
     await fireEvent.click(sidebar.getByRole('button', { name: /^Stats/ }))
     await screen.findByRole('tab', { name: 'notes.pdf' })
     expect((await tool('Select')).getAttribute('aria-pressed')).toBe('true')
@@ -720,6 +721,12 @@ describe('App', () => {
     await fireEvent.click(sidebar.getByRole('button', { name: 'New discussion' }))
     expect(screen.getByRole('button', { name: 'Show topics' })).toBeInTheDocument()
     expect(screen.getByRole('complementary', { name: 'Chat' })).toHaveClass('open')
+    // The open discussion is only marked while the chat shows it.
+    const row = () => sidebar.getByRole('button', { name: 'New discussion' }).parentElement
+    await showTopics()
+    expect(row()).toHaveClass('active')
+    await fireEvent.click(screen.getByRole('button', { name: 'Close chat' }))
+    expect(row()).not.toHaveClass('active')
   })
 
   it('swaps the chat icon for the close button in the same corner, with the discussion title', async () => {

@@ -7,7 +7,7 @@ pages, plus tokens, cache use, latency and cost. Indexing cost is reported
 separately for text pages and scanned pages.
 
     cd backend
-    uv run python -m doc_digest.evaluate questions.json book.pdf scan.pdf paper.pdf
+    uv run python -m leqtern.evaluate questions.json book.pdf scan.pdf paper.pdf
 
 questions.json is a list of questions like this. "open" is the page the reader
 is on when asking (optional); "expect" lists where the answer is.

@@ -23,7 +23,7 @@ fi
 # /dev/null because a background process group that reads the terminal is
 # suspended.
 set -m
-(cd backend && exec uv run uvicorn doc_digest.main:app --reload --port "$BACKEND_PORT") </dev/null &
+(cd backend && exec uv run uvicorn leqtern.main:app --reload --port "$BACKEND_PORT") </dev/null &
 backend_pid=$!
 (cd frontend && exec npm run dev) </dev/null &
 frontend_pid=$!

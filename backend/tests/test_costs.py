@@ -1,5 +1,5 @@
-from doc_digest.costs import questions, report
-from doc_digest.usage import Call
+from leqtern.costs import questions, report
+from leqtern.usage import Call
 
 
 def call(kind: str, at: float, cache_write: int, cache_read: int, cost: float, **extra) -> Call:

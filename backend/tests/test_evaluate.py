@@ -1,8 +1,8 @@
 from fakes import FakeAnswerClient, FakeIndexClient, text, tool_use
 from pdfs import filler, make_pdf
 
-from doc_digest.evaluate import Question, cited_pages, evaluate
-from doc_digest.index import ChunkIndex, DocSummary
+from leqtern.evaluate import Question, cited_pages, evaluate
+from leqtern.index import ChunkIndex, DocSummary
 
 
 def test_reads_page_citations() -> None:

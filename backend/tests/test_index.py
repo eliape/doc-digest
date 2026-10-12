@@ -4,7 +4,7 @@ import pytest
 from fakes import FakeIndexClient
 from pdfs import filler, make_pdf
 
-from doc_digest.index import (
+from leqtern.index import (
     ChunkIndex,
     DocSummary,
     Entry,
@@ -16,8 +16,8 @@ from doc_digest.index import (
     merge_sections,
     render_outline,
 )
-from doc_digest.library import Library
-from doc_digest.usage import UsageLog
+from leqtern.library import Library
+from leqtern.usage import UsageLog
 
 
 def test_splits_documents_into_twenty_page_chunks() -> None:

@@ -1,9 +1,9 @@
 """
 What the API has cost, from the usage log: per question, per quiz, for indexing, and per day.
 
-    uv run python -m doc_digest.costs                  # everything in data/usage.jsonl
-    uv run python -m doc_digest.costs --since 2026-10-10
-    uv run python -m doc_digest.costs --days 1         # the last 24 hours
+    uv run python -m leqtern.costs                  # everything in data/usage.jsonl
+    uv run python -m leqtern.costs --since 2026-10-10
+    uv run python -m leqtern.costs --days 1         # the last 24 hours
 """
 
 import argparse

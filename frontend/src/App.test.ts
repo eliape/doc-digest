@@ -60,7 +60,7 @@ describe('App', () => {
     expect(screen.queryByRole('banner')).not.toBeInTheDocument()
     expect(screen.queryByText(/Backend/)).not.toBeInTheDocument()
     const sidebar = within(screen.getByRole('complementary', { name: 'Topics' }))
-    expect(sidebar.getByRole('heading', { name: 'doc-digest' })).toBeInTheDocument()
+    expect(sidebar.getByRole('heading', { name: 'Leqtern' })).toBeInTheDocument()
     expect(sidebar.getByRole('heading', { name: 'Topics' })).toBeInTheDocument()
   })
 
@@ -193,7 +193,7 @@ describe('App', () => {
 
     // The contents stay while the sidebar slides shut, then go.
     await waitFor(() => expect(within(sidebar).queryByRole('heading', { name: 'Topics' })).not.toBeInTheDocument())
-    expect(within(sidebar).queryByRole('heading', { name: 'doc-digest' })).not.toBeInTheDocument()
+    expect(within(sidebar).queryByRole('heading', { name: 'Leqtern' })).not.toBeInTheDocument()
     expect(within(sidebar).getByRole('button', { name: 'Show topics' })).toHaveAttribute('aria-expanded', 'false')
     expect(within(sidebar).getByRole('button', { name: 'New topic' })).toBeInTheDocument()
 

@@ -4,8 +4,8 @@ import pytest
 from fakes import FakeIndexClient
 from fastapi.testclient import TestClient
 
-from doc_digest import main
-from doc_digest.ask import (
+from leqtern import main
+from leqtern.ask import (
     QUIZ_SECTION,
     QUIZ_START,
     SOCRATIC_END,
@@ -19,8 +19,8 @@ from doc_digest.ask import (
     describe,
     write_quiz,
 )
-from doc_digest.config import Settings, get_settings
-from doc_digest.quiz import Quiz, QuizQuestion, QuizRecord, Recommendation
+from leqtern.config import Settings, get_settings
+from leqtern.quiz import Quiz, QuizQuestion, QuizRecord, Recommendation
 
 
 def context(**overrides: object) -> Context:

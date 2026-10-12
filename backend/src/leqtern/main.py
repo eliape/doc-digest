@@ -20,7 +20,7 @@ from .usage import UsageLog
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="doc-digest")
+app = FastAPI(title="Leqtern")
 
 
 @app.get("/api/health")

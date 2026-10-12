@@ -70,7 +70,7 @@
   {#if !listed.length}
     <!-- Nothing to switch to: just the title, without the arrow. -->
     <h2 class="trigger static" title={`${chatTitle(current)} · ${topic.name}`}>
-      <span class="title">{chatTitle(current)}</span>
+      <span class="title" class:empty={!current.messages.length}>{chatTitle(current)}</span>
     </h2>
   {:else}
   <!-- The title and the arrow are one button. -->
@@ -90,7 +90,7 @@
       }
     }}
   >
-    <span class="title">{chatTitle(current)}</span>
+    <span class="title" class:empty={!current.messages.length}>{chatTitle(current)}</span>
     <svg class="chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" /></svg>
   </button>
   {/if}
@@ -156,6 +156,10 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  /* An empty "New chat" is greyed, so it reads as not started yet. */
+  .title.empty {
+    color: var(--muted);
   }
   .chevron {
     flex-shrink: 0;

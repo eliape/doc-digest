@@ -508,6 +508,34 @@ describe('App', () => {
     expect(await screen.findByRole('button', { name: 'Click to ask', pressed: true })).toBeInTheDocument()
   })
 
+  it('keeps the tool with the topic', async () => {
+    renderOffline()
+    await pick(pdf('slides.pdf'))
+    const tool = (name: string) => screen.findByRole('button', { name })
+    await fireEvent.click(await tool('Click to ask'))
+
+    // A new topic starts on the tool picked last; picking Select there leaves slides alone.
+    const sidebar = within(screen.getByRole('complementary', { name: 'Topics' }))
+    await showTopics()
+    await fireEvent.click(sidebar.getByRole('button', { name: 'New topic' }))
+    const name = sidebar.getByLabelText('Topic name')
+    await fireEvent.input(name, { target: { value: 'Stats' } })
+    await fireEvent.submit(name)
+    await pick(pdf('notes.pdf'))
+    await screen.findByRole('tab', { name: 'notes.pdf' })
+    expect((await tool('Click to ask')).getAttribute('aria-pressed')).toBe('true')
+    await fireEvent.click(await tool('Select'))
+
+    await showTopics()
+    await fireEvent.click(sidebar.getByRole('button', { name: /^slides/ }))
+    await screen.findByRole('tab', { name: 'slides.pdf' })
+    expect((await tool('Click to ask')).getAttribute('aria-pressed')).toBe('true')
+    await showTopics()
+    await fireEvent.click(sidebar.getByRole('button', { name: /^Stats/ }))
+    await screen.findByRole('tab', { name: 'notes.pdf' })
+    expect((await tool('Select')).getAttribute('aria-pressed')).toBe('true')
+  })
+
   it('attaches nothing on a left click with Select, and the clicked spot with Click to ask', async () => {
     renderOffline()
     await pick(pdf('slides.pdf'))

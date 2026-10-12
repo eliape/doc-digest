@@ -23,20 +23,42 @@ export const TOOLS: { value: Tool; label: string; title: string; icon: string }[
   },
 ]
 
+// The tool each topic was left on, by topic id, and the one picked last anywhere, which a
+// topic starts with until it has its own. Kept in this browser, like the model choice.
+const TOPICS_KEY = 'doc-digest.topic-tools'
 const KEY = 'doc-digest.tool'
 
-/** The tool picked last time in this browser, or Select. */
-export function savedTool(): Tool {
+const isTool = (value: unknown): value is Tool => TOOLS.some((t) => t.value === value)
+
+function topicTools(): Record<string, Tool> {
   try {
-    const value = localStorage.getItem(KEY)
-    return TOOLS.find((t) => t.value === value)?.value ?? 'select'
+    const saved: unknown = JSON.parse(localStorage.getItem(TOPICS_KEY) ?? '{}')
+    if (!saved || typeof saved !== 'object') return {}
+    return Object.fromEntries(Object.entries(saved).filter(([, tool]) => isTool(tool)))
+  } catch {
+    return {}
+  }
+}
+
+/** The tool the topic was left on, or else the one picked last in this browser, or Select. */
+export function savedTool(topicId: string): Tool {
+  const own = topicTools()[topicId]
+  if (own) return own
+  try {
+    const last = localStorage.getItem(KEY)
+    return isTool(last) ? last : 'select'
   } catch {
     return 'select'
   }
 }
 
-export function saveTool(tool: Tool) {
+/** Remember the tool for the topic. Topics not in `topicIds` (deleted ones) are forgotten. */
+export function saveTool(topicId: string, tool: Tool, topicIds: string[] = [topicId]) {
+  const tools = topicTools()
+  tools[topicId] = tool
+  const kept = Object.fromEntries(Object.entries(tools).filter(([id]) => topicIds.includes(id)))
   try {
+    localStorage.setItem(TOPICS_KEY, JSON.stringify(kept))
     localStorage.setItem(KEY, tool)
   } catch {
     // Storage can be unavailable (private windows); the pick just isn't remembered.

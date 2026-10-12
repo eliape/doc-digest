@@ -59,12 +59,23 @@
   let sidebarOpen = $state(true)
   let chatOpen = $state(false)
 
-  // What a left click on the PDF does, the same in every tab and remembered in this browser.
-  let tool = $state<Tool>(savedTool())
+  // What a left click on the PDF does. Each topic keeps its own, the same in all its tabs,
+  // remembered in this browser; `picked` holds the picks made since the page loaded.
+  let picked = $state<Record<string, Tool>>({})
+  let tool = $derived.by<Tool>(() => {
+    const id = workspace.activeTopic?.id
+    return id ? (picked[id] ?? savedTool(id)) : 'select'
+  })
 
   function setTool(value: Tool) {
-    tool = value
-    saveTool(value)
+    const id = workspace.activeTopic?.id
+    if (!id) return
+    picked[id] = value
+    saveTool(
+      id,
+      value,
+      workspace.topics.map((t) => t.id),
+    )
   }
 
   let chatToggle = $state<HTMLButtonElement>()

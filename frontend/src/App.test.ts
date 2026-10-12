@@ -226,6 +226,25 @@ describe('App', () => {
     expect(screen.getByRole('button', { name: 'Hide topics' })).toBeInTheDocument()
   })
 
+  it('names the browser tab after the open topic', async () => {
+    renderOffline()
+    expect(document.title).toBe('Leqtern')
+    const sidebar = within(screen.getByRole('complementary', { name: 'Topics' }))
+    await fireEvent.click(sidebar.getByRole('button', { name: 'New topic' }))
+    const name = sidebar.getByLabelText('Topic name')
+    await fireEvent.input(name, { target: { value: 'Statistics' } })
+    await fireEvent.submit(name)
+    expect(document.title).toBe('Statistics · Leqtern')
+
+    await showTopics()
+    await fireEvent.click(sidebar.getByRole('button', { name: 'Actions for Statistics' }))
+    await fireEvent.click(sidebar.getByRole('menuitem', { name: 'Rename' }))
+    const again = sidebar.getByLabelText('Topic name')
+    await fireEvent.input(again, { target: { value: 'Stats' } })
+    await fireEvent.submit(again)
+    expect(document.title).toBe('Stats · Leqtern')
+  })
+
   it('folds the sidebar away once a new topic is named, but not when a topic is only renamed', async () => {
     renderOffline()
     const sidebar = within(screen.getByRole('complementary', { name: 'Topics' }))

@@ -130,7 +130,7 @@ describe('App', () => {
 
     const topics = within(screen.getByRole('complementary', { name: 'Topics' }))
     expect(topics.getByRole('button', { name: /^Lecture 4/ })).toHaveAttribute('aria-current', 'true')
-    expect(topics.getAllByRole('listitem')).toHaveLength(1)
+    expect(topics.getAllByRole('button', { name: /^Actions for / })).toHaveLength(1)
     expect(book).toHaveAttribute('aria-selected', 'true')
     expect(screen.getAllByTestId('pdf-viewer')).toHaveLength(2)
 
@@ -663,6 +663,16 @@ describe('App', () => {
     } finally {
       delete (navigator as { clipboard?: unknown }).clipboard
     }
+  })
+
+  it('opens the chat from New discussion under the open topic in the sidebar', async () => {
+    renderOffline()
+    await pick(pdf('slides.pdf'))
+    await showTopics()
+    const sidebar = within(screen.getByRole('complementary', { name: 'Topics' }))
+    await fireEvent.click(sidebar.getByRole('button', { name: 'New discussion' }))
+    expect(screen.getByRole('button', { name: 'Show topics' })).toBeInTheDocument()
+    expect(screen.getByRole('complementary', { name: 'Chat' })).toHaveClass('open')
   })
 
   it('swaps the chat icon for the close button in the same corner, with the discussion title', async () => {

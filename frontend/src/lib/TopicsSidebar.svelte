@@ -91,6 +91,12 @@
     onopenchat?.()
   }
 
+  function newDiscussion(topicId: string) {
+    workspace.newChat(topicId)
+    open = false
+    onopenchat?.()
+  }
+
   function removeChat(topicId: string, chatId: string, title: string) {
     if (confirm(`Delete the discussion “${title}”?`)) workspace.deleteChat(topicId, chatId)
   }
@@ -208,12 +214,21 @@
               {/if}
             {/if}
           </li>
-          {@const listed = topic.id === workspace.activeTopicId && renamingId !== topic.id ? discussions(topic) : []}
-          {#if listed.length}
+          {#if topic.id === workspace.activeTopicId && renamingId !== topic.id}
+            {@const listed = discussions(topic)}
             <!-- The open topic's discussions, on a soft line that forks out to each title. -->
             <li class="discussions">
               <h3 id={`discussions-${topic.id}`}>Discussions</h3>
               <ul aria-labelledby={`discussions-${topic.id}`}>
+                <!-- Opens an empty discussion in the chat; shaded while that is the one open. -->
+                <li class="discussion">
+                  <div class="row" class:active={!chatOf(topic).messages.length}>
+                    <button type="button" class="topic new-discussion" onclick={() => newDiscussion(topic.id)}>
+                      <span aria-hidden="true">＋</span>
+                      <span class="name">New discussion</span>
+                    </button>
+                  </div>
+                </li>
                 {#each listed as chat (chat.id)}
                   {@const title = chatTitle(chat)}
                   {@const current = chat.id === chatOf(topic).id}
@@ -553,6 +568,13 @@
   .row .topic {
     padding: 0.25rem 0.5rem;
     font-size: 0.8rem;
+  }
+  .new-discussion {
+    gap: 0.375rem;
+    color: var(--muted);
+  }
+  .row.active .new-discussion {
+    color: inherit;
   }
   .row:hover .dots,
   .row.active .dots {

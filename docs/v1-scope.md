@@ -30,7 +30,7 @@ Open PDF (as a tab in a topic) → read → right-click the thing you are stuck 
 
 ### The interaction
 
-Two **tools** sit in the PDF toolbar, to the right of zoom, and decide what a left click does. The choice is the same in every tab and remembered in the browser; it starts on Select.
+Two **tools** sit in the PDF toolbar, to the right of zoom, and decide what a left click does. Each topic keeps its own choice, the same in all its tabs and remembered in the browser. A topic starts on the tool picked last anywhere, and the very first one on Select.
 - **Select** (an arrow) works like any PDF reader: click, drag, select and copy text. Nothing goes to the chat. To ask about something, right-click it and pick **Ask** (Step 3e).
 - **Click to ask** (a pointing hand) makes a **plain left click on page content** attach what is under it to the chat, and the pointer is a hand over the pages. A drag still selects text as before, and a selection attaches exactly that text when you release the mouse.
 

@@ -261,7 +261,9 @@
     flex: 1;
     min-width: 0;
     overflow: hidden;
-    margin: 0 0 0 0.5rem;
+    margin: 0;
+    /* An indent, not a margin: a margin can't shrink, so it would shove the menu button out of the narrowing sidebar. */
+    text-indent: 0.5rem;
     font-size: 1rem;
   }
 

@@ -130,7 +130,7 @@ describe('App', () => {
 
     const topics = within(screen.getByRole('complementary', { name: 'Topics' }))
     expect(topics.getByRole('button', { name: /^Lecture 4/ })).toHaveAttribute('aria-current', 'true')
-    expect(topics.getAllByRole('listitem')).toHaveLength(1)
+    expect(topics.getAllByRole('button', { name: /^Actions for / })).toHaveLength(1)
     expect(book).toHaveAttribute('aria-selected', 'true')
     expect(screen.getAllByTestId('pdf-viewer')).toHaveLength(2)
 
@@ -712,7 +712,17 @@ describe('App', () => {
     }
   })
 
-  it('swaps the chat icon for the close button in the same corner, with just the topic name as title', async () => {
+  it('opens the chat from New discussion under the open topic in the sidebar', async () => {
+    renderOffline()
+    await pick(pdf('slides.pdf'))
+    await showTopics()
+    const sidebar = within(screen.getByRole('complementary', { name: 'Topics' }))
+    await fireEvent.click(sidebar.getByRole('button', { name: 'New discussion' }))
+    expect(screen.getByRole('button', { name: 'Show topics' })).toBeInTheDocument()
+    expect(screen.getByRole('complementary', { name: 'Chat' })).toHaveClass('open')
+  })
+
+  it('swaps the chat icon for the close button in the same corner, with the discussion title', async () => {
     renderOffline()
     await pick(pdf('slides.pdf'))
     const toggle = await screen.findByRole('button', { name: 'Show chat' })
@@ -727,8 +737,8 @@ describe('App', () => {
     expect((toggle as HTMLElement & { inert: boolean }).inert).toBe(true)
     const panel = within(screen.getByRole('complementary', { name: 'Chat' }))
     expect(panel.getByRole('button', { name: 'Close chat' })).toHaveClass('icon-button')
-    // The title is the topic's name, not the word Chat.
-    expect(panel.getByRole('heading', { name: 'slides' })).toBeInTheDocument()
+    // The title is the open discussion's, which opens the topic's list of discussions.
+    expect(panel.getByRole('button', { name: 'Discussion: New chat' })).toHaveAttribute('title', 'New chat · slides')
     expect(panel.queryByRole('heading', { name: 'Chat' })).not.toBeInTheDocument()
     expect(panel.getByRole('button', { name: 'New chat' })).toHaveTextContent('New chat')
 

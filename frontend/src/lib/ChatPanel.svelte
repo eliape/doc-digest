@@ -7,8 +7,9 @@
   import { type CitableDocs, renderMarkdown } from './markdown'
   import { MODELS, savedModel, saveModel } from './models'
   import { MODES } from './modes'
+  import ChatSwitcher from './ChatSwitcher.svelte'
   import QuizCard from './QuizCard.svelte'
-  import type { Topic, Workspace } from './workspace.svelte'
+  import { type Chat, chatOf, type Topic, type Workspace } from './workspace.svelte'
 
   type Props = {
     workspace: Workspace
@@ -28,6 +29,8 @@
   let { workspace, open = $bindable(false), onclose, onsend, onreveal }: Props = $props()
 
   let topic = $derived(workspace.activeTopic)
+  /** The topic's open discussion. */
+  let chat = $derived(topic && chatOf(topic))
   let composer = $state<HTMLTextAreaElement>()
   let log = $state<HTMLElement>()
   let panel = $state<HTMLElement>()
@@ -123,17 +126,17 @@
    * starts with what to focus on, which is optional; once the model has asked a Socratic
    * question, the box takes the reader's answer.
    */
-  function placeholder(t: Topic) {
-    if (t.mode === 'quiz') return 'What should the quiz cover? (optional)'
-    if (t.mode === 'socratic' && t.context) return 'What should it focus on? (optional)'
-    if (t.mode === 'socratic' && t.chat.at(-1)?.mode === 'socratic') return 'Answer, or ask for a hint…'
+  function placeholder(t: Topic, c: Chat) {
+    if (c.mode === 'quiz') return 'What should the quiz cover? (optional)'
+    if (c.mode === 'socratic' && t.context) return 'What should it focus on? (optional)'
+    if (c.mode === 'socratic' && c.messages.at(-1)?.mode === 'socratic') return 'Answer, or ask for a hint…'
     return t.context ? `Ask about ${contextLabel(t.context)}…` : 'Ask a question…'
   }
 
   /** Whether a message of the reader's starts a Socratic session (rather than answering in one). */
-  function startsSession(t: Topic, index: number) {
-    const before = t.chat.findLast((m, i) => i < index && m.role === 'user')
-    return t.chat[index].mode === 'socratic' && before?.mode !== 'socratic'
+  function startsSession(c: Chat, index: number) {
+    const before = c.messages.findLast((m, i) => i < index && m.role === 'user')
+    return c.messages[index].mode === 'socratic' && before?.mode !== 'socratic'
   }
 
   function chipTitle(context: PageContext) {
@@ -145,21 +148,21 @@
   // the bottom: scrolling up to read stops the following, and scrolling back down resumes it.
   const NEAR_BOTTOM = 24
   let following = true
-  let followed: { topic?: string; length: number } = { length: 0 }
+  let followed: { chat?: string; length: number } = { length: 0 }
 
   function onLogScroll() {
     if (log) following = log.scrollHeight - log.scrollTop - log.clientHeight <= NEAR_BOTTOM
   }
 
   $effect(() => {
-    if (!topic) return
-    void topic.chat.at(-1)?.text
-    void topic.chat.at(-1)?.steps?.length
-    const length = topic.chat.length
-    // A new question, or another topic's chat, always starts at the bottom.
-    const sent = length > followed.length && topic.chat.at(-1)?.role === 'user'
-    if (sent || followed.topic !== topic.id) following = true
-    followed = { topic: topic.id, length }
+    if (!chat) return
+    void chat.messages.at(-1)?.text
+    void chat.messages.at(-1)?.steps?.length
+    const length = chat.messages.length
+    // A new question, or another discussion, always starts at the bottom.
+    const sent = length > followed.length && chat.messages.at(-1)?.role === 'user'
+    if (sent || followed.chat !== chat.id) following = true
+    followed = { chat: chat.id, length }
     if (following) tick().then(() => log && (log.scrollTop = log.scrollHeight))
   })
 
@@ -177,7 +180,7 @@
 
   /** What an answer's citations can point at; a bare "(p. 12)" means the PDF its question was asked in. */
   function citable(index: number): CitableDocs {
-    const asked = topic?.chat.findLast((m, i) => i < index && m.role === 'user')?.context?.docName
+    const asked = chat?.messages.findLast((m, i) => i < index && m.role === 'user')?.context?.docName
     const current = asked && docNames.includes(asked) ? asked : docNames.length === 1 ? docNames[0] : undefined
     return { names: docNames, aliases, current }
   }
@@ -260,14 +263,14 @@
   ></div>
   <div class="inner">
     <div class="top">
-      <!-- Just the topic's name: the panel is already labelled Chat. -->
-      {#if topic}<h2 title={topic.name}>{topic.name}</h2>{/if}
+      <!-- The open discussion's title, which opens the list of the topic's discussions. -->
+      {#if topic}<ChatSwitcher {workspace} {topic} onpick={focus} />{:else}<span class="spacer"></span>{/if}
       <div class="actions">
         <button
           type="button"
           class="new-chat"
-          title="Clear this topic's chat and start over"
-          disabled={!topic || topic.chat.length === 0}
+          title="Start a new discussion in this topic"
+          disabled={!chat?.messages.length}
           onclick={() => {
             if (!topic) return
             workspace.newChat(topic.id)
@@ -281,11 +284,11 @@
       </div>
     </div>
 
-    {#if topic}
+    {#if topic && chat}
       <!-- Citations are links inside the answers' HTML, so their clicks are handled here. -->
       <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
       <div class="messages" role="log" aria-label={`Chat in ${topic.name}`} bind:this={log} onclick={onCitationClick} onscroll={onLogScroll}>
-        {#each topic.chat as message, index (message.id)}
+        {#each chat.messages as message, index (message.id)}
           <!-- Only the model's side of a Socratic session is marked; the reader's messages look as always. -->
           <div
             class="message {message.role}"
@@ -296,7 +299,7 @@
             <!-- What the reader typed is only what to focus on, or nothing, so the message says what it starts. -->
             {#if message.role === 'user' && message.mode === 'quiz'}
               <span class="session-start">Quiz</span>
-            {:else if message.role === 'user' && startsSession(topic, index)}
+            {:else if message.role === 'user' && startsSession(chat, index)}
               <span class="session-start">Socratic session</span>
             {/if}
             {#if message.context && pointedAt(message.context)}
@@ -345,7 +348,7 @@
         </p>
       {/if}
 
-      <form class="composer" class:socratic={topic.mode === 'socratic'} class:quiz={topic.mode === 'quiz'} onsubmit={send}>
+      <form class="composer" class:socratic={chat.mode === 'socratic'} class:quiz={chat.mode === 'quiz'} onsubmit={send}>
         {#if topic.context}
           {@const context = topic.context}
           <div class="attached" aria-label="Attached to your question">
@@ -368,7 +371,7 @@
             bind:this={composer}
             bind:value={topic.draft}
             aria-label="Ask a question"
-            placeholder={placeholder(topic)}
+            placeholder={placeholder(topic, chat)}
             rows="1"
             onkeydown={onComposerKeydown}
           ></textarea>
@@ -387,10 +390,10 @@
       </form>
       <!-- Below the box, so it never takes room from the question's lines. -->
       <div class="below">
-        <div class="mode" style:--dropdown-color={topic.mode === 'normal' ? undefined : `var(--${topic.mode})`}>
+        <div class="mode" style:--dropdown-color={chat.mode === 'normal' ? undefined : `var(--${chat.mode})`}>
           <Dropdown
             label="Mode"
-            value={topic.mode}
+            value={chat.mode}
             options={MODES}
             onchange={(mode) => {
               workspace.setMode(topic.id, mode)
@@ -507,14 +510,8 @@
     border-bottom: 1px solid var(--border);
   }
 
-  h2 {
+  .spacer {
     flex: 1;
-    min-width: 0;
-    margin: 0;
-    overflow: hidden;
-    font-size: 0.95rem;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
 
   .actions {

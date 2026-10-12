@@ -166,3 +166,17 @@ export async function fetchRecommendation(request: RecommendationRequest, fetchF
   if (!res.ok) throw await backendError(res)
   return ((await res.json()) as { text: string | null }).text
 }
+
+/** The first question of a discussion, for Haiku to name it. */
+export type TitleRequest = { topic: string; about: AskTurn }
+
+/** A few words naming a discussion, or null if none came. */
+export async function fetchChatTitle(request: TitleRequest, fetchFn: typeof fetch = fetch): Promise<string | null> {
+  const res = await fetchFn('/api/chat-title', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request),
+  })
+  if (!res.ok) throw await backendError(res)
+  return ((await res.json()) as { text: string | null }).text
+}

@@ -1,14 +1,16 @@
 <script lang="ts">
   import { tick } from 'svelte'
-  import type { Workspace } from './workspace.svelte'
+  import { chatOf, chatTitle, discussions, type Workspace } from './workspace.svelte'
 
   type Props = {
     workspace: Workspace
     /** Whether the sidebar is expanded. When closed, a narrow strip with the two buttons remains. */
     open?: boolean
+    /** Called when a discussion is picked, to show it in the chat. */
+    onopenchat?: () => void
   }
 
-  let { workspace, open = $bindable(true) }: Props = $props()
+  let { workspace, open = $bindable(true), onopenchat }: Props = $props()
 
   // On collapse the contents stay until the sidebar has narrowed, so they slide away with it.
   const SLIDE_MS = 200
@@ -29,7 +31,7 @@
   })
   const expanded = $derived(open || lingering)
 
-  // The topic whose actions menu (the three dots) is open.
+  // The topic or discussion whose actions menu (the three dots) is open.
   let menuId = $state<string>()
 
   function closeMenu(event: Event) {
@@ -71,9 +73,32 @@
   }
 
   function remove(id: string, name: string) {
-    const count = workspace.topics.find((t) => t.id === id)?.docIds.length ?? 0
-    const what = count === 1 ? 'its PDF' : `its ${count} PDFs`
-    if (count === 0 || confirm(`Delete “${name}” and close ${what}?`)) workspace.deleteTopic(id)
+    const topic = workspace.topics.find((t) => t.id === id)
+    const pdfs = topic?.docIds.length ?? 0
+    const chats = topic ? discussions(topic).length : 0
+    if (!pdfs && !chats) return workspace.deleteTopic(id)
+    const discussed = chats === 1 ? ' and its discussion' : chats ? ` and its ${chats} discussions` : ''
+    const closed = pdfs === 1 ? 'close its PDF' : pdfs ? `close its ${pdfs} PDFs` : ''
+    const question = closed && discussed ? `“${name}”${discussed}, and ${closed}` : `“${name}”${discussed}${closed && ` and ${closed}`}`
+    if (confirm(`Delete ${question}?`)) workspace.deleteTopic(id)
+  }
+
+  function openChat(topicId: string, chatId: string) {
+    workspace.selectTopic(topicId)
+    workspace.selectChat(topicId, chatId)
+    // Picked: get out of the way and show it.
+    open = false
+    onopenchat?.()
+  }
+
+  function newDiscussion(topicId: string) {
+    workspace.newChat(topicId)
+    open = false
+    onopenchat?.()
+  }
+
+  function removeChat(topicId: string, chatId: string, title: string) {
+    if (confirm(`Delete the discussion “${title}”?`)) workspace.deleteChat(topicId, chatId)
   }
 
   async function newTopic() {
@@ -189,6 +214,69 @@
               {/if}
             {/if}
           </li>
+          {#if topic.id === workspace.activeTopicId && renamingId !== topic.id}
+            {@const listed = discussions(topic)}
+            <!-- The open topic's discussions, on a soft line that forks out to each title. -->
+            <li class="discussions">
+              <h3 id={`discussions-${topic.id}`}>Discussions</h3>
+              <ul aria-labelledby={`discussions-${topic.id}`}>
+                <!-- Opens an empty discussion in the chat; shaded while that is the one open. -->
+                <li class="discussion">
+                  <div class="row" class:active={!chatOf(topic).messages.length}>
+                    <button type="button" class="topic new-discussion" onclick={() => newDiscussion(topic.id)}>
+                      <span aria-hidden="true">＋</span>
+                      <span class="name">New discussion</span>
+                    </button>
+                  </div>
+                </li>
+                {#each listed as chat (chat.id)}
+                  {@const title = chatTitle(chat)}
+                  {@const current = chat.id === chatOf(topic).id}
+                  <li class="discussion">
+                    <div class="row" class:active={current}>
+                      <button
+                        type="button"
+                        class="topic"
+                        aria-current={current ? 'true' : undefined}
+                        {title}
+                        onclick={() => openChat(topic.id, chat.id)}
+                      >
+                        <span class="name">{title}</span>
+                      </button>
+                      <button
+                        type="button"
+                        class="dots"
+                        aria-label={`Actions for ${title}`}
+                        aria-haspopup="menu"
+                        aria-expanded={menuId === chat.id}
+                        onclick={() => (menuId = menuId === chat.id ? undefined : chat.id)}
+                      >
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                          <circle cx="12" cy="5" r="1.4" /><circle cx="12" cy="12" r="1.4" /><circle cx="12" cy="19" r="1.4" />
+                        </svg>
+                      </button>
+                      {#if menuId === chat.id}
+                        <div class="topic-menu" role="menu" aria-label={`Actions for ${title}`}>
+                          <button
+                            type="button"
+                            role="menuitem"
+                            class="danger"
+                            onclick={() => {
+                              menuId = undefined
+                              removeChat(topic.id, chat.id, title)
+                            }}
+                          >
+                            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v5M14 11v5" /></svg>
+                            Delete
+                          </button>
+                        </div>
+                      {/if}
+                    </div>
+                  </li>
+                {/each}
+              </ul>
+            </li>
+          {/if}
         {/each}
       </ul>
     </div>
@@ -397,8 +485,8 @@
     background: color-mix(in srgb, var(--muted) 18%, transparent);
     color: inherit;
   }
-  li:hover .dots,
-  li.active .dots,
+  li:hover > .dots,
+  li.active > .dots,
   .dots:focus-visible,
   .dots[aria-expanded='true'] {
     visibility: visible;
@@ -446,6 +534,91 @@
     background: var(--hover);
     outline: none;
   }
+  /* The open topic's discussions: indented, under a small header, on a soft line down the left. */
+  li.discussions {
+    display: block;
+    padding: 0 0 0.375rem 0.875rem;
+    font-weight: normal;
+  }
+  li.discussions:hover {
+    background: none;
+  }
+  h3 {
+    margin: 0.25rem 0 0.125rem 0.25rem;
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+  }
+  li.discussions ul {
+    --branch: color-mix(in srgb, var(--muted) 35%, transparent);
+    margin-left: 0.5rem;
+  }
+  li.discussion {
+    padding-left: 0.75rem;
+  }
+  li.discussion:hover {
+    background: none;
+  }
+  .row {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    border-radius: 0.375rem;
+  }
+  .row:hover,
+  .row.active {
+    background: var(--hover);
+  }
+  .row.active {
+    font-weight: 600;
+  }
+  .row .topic {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.8rem;
+  }
+  .new-discussion {
+    gap: 0.375rem;
+    color: var(--muted);
+  }
+  .row.active .new-discussion {
+    color: inherit;
+  }
+  .row:hover .dots,
+  .row.active .dots {
+    visibility: visible;
+  }
+  /* The line down the left, and a short branch out to each title; the last one turns the corner. */
+  li.discussion::before,
+  li.discussion::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    pointer-events: none;
+  }
+  li.discussion::before {
+    top: 0;
+    bottom: 0;
+    border-left: 1px solid var(--branch);
+  }
+  li.discussion::after {
+    top: 50%;
+    width: 0.625rem;
+    border-top: 1px solid var(--branch);
+  }
+  li.discussion:last-child::before {
+    bottom: 50%;
+    width: 0.625rem;
+    border-bottom: 1px solid var(--branch);
+    border-bottom-left-radius: 0.375rem;
+  }
+  li.discussion:last-child::after {
+    display: none;
+  }
+
   .topic-menu .danger {
     color: var(--danger);
   }

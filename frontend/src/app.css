@@ -17,6 +17,8 @@
   --sidebar-shadow: 6px 0 28px rgb(0 0 0 / 0.22);
   --sidebar-bg: #f6f8fa;
   --hover: #eaeef2;
+  /* The chosen row in a list: clearly stronger than the hover shade. */
+  --selected: #d6dde5;
   --radius: 0.375rem;
   /* The row of tabs, and the chat panel's header beside it, are this tall (not counting their border). */
   --bar-height: 2.25rem;
@@ -37,6 +39,7 @@
     --sidebar-shadow: 6px 0 28px rgb(0 0 0 / 0.55);
     --sidebar-bg: #161b22;
     --hover: #262c36;
+    --selected: #343c4a;
   }
 }
 

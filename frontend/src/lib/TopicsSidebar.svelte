@@ -410,16 +410,18 @@
     padding: 0;
   }
 
+  /* Rounded rows with a 2px gap between them, so neighbouring highlights never touch. */
   li {
     display: flex;
     align-items: center;
+    margin-block: 1px;
     border-radius: 0.375rem;
   }
-  li:hover,
-  li.active {
+  li:hover {
     background: var(--hover);
   }
   li.active {
+    background: var(--selected);
     font-weight: 600;
   }
 
@@ -537,6 +539,7 @@
   /* The open topic's discussions: indented, under a small header, on a soft line down the left. */
   li.discussions {
     display: block;
+    margin-block: 0;
     padding: 0 0 0.375rem 0.875rem;
     font-weight: normal;
   }
@@ -556,6 +559,7 @@
     margin-left: 0.5rem;
   }
   li.discussion {
+    margin-block: 0;
     padding-left: 0.75rem;
   }
   li.discussion:hover {
@@ -567,13 +571,15 @@
     min-width: 0;
     display: flex;
     align-items: center;
+    /* The 2px gap lives on the row, so the branch line beside the rows stays unbroken. */
+    margin-block: 1px;
     border-radius: 0.375rem;
   }
-  .row:hover,
-  .row.active {
+  .row:hover {
     background: var(--hover);
   }
   .row.active {
+    background: var(--selected);
     font-weight: 600;
   }
   .row .topic {

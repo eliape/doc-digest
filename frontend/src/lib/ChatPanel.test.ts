@@ -3,7 +3,7 @@ import { tick } from 'svelte'
 import { describe, expect, it, vi } from 'vitest'
 import ChatPanel from './ChatPanel.svelte'
 import type { PageContext } from './context'
-import { Workspace } from './workspace.svelte'
+import { chatOf, Workspace } from './workspace.svelte'
 
 function setup() {
   const workspace = new Workspace()
@@ -79,7 +79,7 @@ describe('ChatPanel', () => {
 
   it('shows no chip on a question about the open page, only on one about a spot', async () => {
     const { topic, context, panel } = setup()
-    topic.chat.push(
+    chatOf(topic).messages.push(
       { id: 'q1', role: 'user', text: 'About the page', context: { ...context, point: undefined } },
       { id: 'q2', role: 'user', text: 'About the spot', context },
     )
@@ -90,7 +90,7 @@ describe('ChatPanel', () => {
 
   it('shows answers as Markdown with typeset maths, and questions as typed', async () => {
     const { topic, panel } = setup()
-    topic.chat.push(
+    chatOf(topic).messages.push(
       { id: 'q', role: 'user', text: 'What is **this** $x$?' },
       { id: 'a', role: 'assistant', text: 'It is **the variance**:\n\n$$\\sigma^2 = E[(X-\\mu)^2]$$' },
     )
@@ -104,11 +104,11 @@ describe('ChatPanel', () => {
     const { workspace, topic, context, panel } = setup()
     const button = panel.getByRole('button', { name: 'New chat' })
     expect(button).toBeDisabled()
-    topic.chat.push({ id: 'q', role: 'user', text: 'What is this?' })
+    chatOf(topic).messages.push({ id: 'q', role: 'user', text: 'What is this?' })
     workspace.attachContext(topic.id, context)
     workspace.setMode(topic.id, 'socratic')
     await fireEvent.click(await panel.findByRole('button', { name: 'New chat' }))
-    expect(topic.chat).toEqual([])
+    expect(chatOf(topic).messages).toEqual([])
     // The attached spot belongs to the next question, so it stays; the chat starts over in Normal mode.
     expect(topic.context).toEqual(context)
     expect(panel.getByRole('button', { name: 'Mode: Normal' })).toBeInTheDocument()
@@ -221,7 +221,7 @@ describe('ChatPanel', () => {
     reviewed('Read the power rule again.')
     await vi.waitFor(() => expect(quiz.getByText('What to review')).toBeInTheDocument())
     expect(quiz.getByText('Read the power rule again.')).toBeInTheDocument()
-    expect(topic.chat[1].quiz!.picked).toEqual([0, 0])
+    expect(chatOf(topic).messages[1].quiz!.picked).toEqual([0, 0])
 
     // Details shows the questions again with what was picked, and hides them again.
     expect(quiz.queryByText('Derivative of x squared?')).not.toBeInTheDocument()
@@ -253,7 +253,7 @@ describe('ChatPanel', () => {
     expect(items[0]).toHaveAttribute('aria-checked', 'true')
     expect(items[1].querySelector('svg')).not.toBeNull()
     await fireEvent.click(items[1])
-    expect(topic.mode).toBe('socratic')
+    expect(chatOf(topic).mode).toBe('socratic')
     expect(panel.queryByRole('menu')).not.toBeInTheDocument()
     expect(panel.getByLabelText('Ask a question').closest('form')).toHaveClass('socratic')
     expect(panel.getByLabelText('Ask a question')).toHaveFocus()
@@ -269,8 +269,8 @@ describe('ChatPanel', () => {
   it("shows the page an answer cites when its citation is clicked", async () => {
     const { workspace, topic, context, onreveal, panel } = setup()
     const notes = topic.docIds[0]
-    topic.chat.push({ id: 'q', role: 'user', text: 'Where?', context })
-    topic.chat.push({ id: 'a', role: 'assistant', text: 'It is defined in (notes.pdf, p. 7), see also (p. 8).', status: 'done' })
+    chatOf(topic).messages.push({ id: 'q', role: 'user', text: 'Where?', context })
+    chatOf(topic).messages.push({ id: 'a', role: 'assistant', text: 'It is defined in (notes.pdf, p. 7), see also (p. 8).', status: 'done' })
     await fireEvent.click(await panel.findByRole('link', { name: /^notes\.pdf,\sp\.\s7$/ }))
     expect(onreveal).toHaveBeenLastCalledWith({ docId: notes, page: 7 })
     // A page alone points into the PDF the question was asked in.
@@ -281,7 +281,7 @@ describe('ChatPanel', () => {
 
   it('follows a streaming answer only while the reader is at the bottom', async () => {
     const { topic, panel } = setup()
-    topic.chat.push({ id: 'q', role: 'user', text: 'Why?' }, { id: 'a', role: 'assistant', text: 'Because', status: 'streaming' })
+    chatOf(topic).messages.push({ id: 'q', role: 'user', text: 'Why?' }, { id: 'a', role: 'assistant', text: 'Because', status: 'streaming' })
     const log = await panel.findByRole('log')
     // jsdom has no layout, so give the log a height of 1000 viewed through a 200 window.
     Object.defineProperty(log, 'scrollHeight', { configurable: true, value: 1000 })
@@ -291,7 +291,7 @@ describe('ChatPanel', () => {
       await fireEvent.scroll(log)
     }
     const stream = async (text: string) => {
-      topic.chat[1].text = text
+      chatOf(topic).messages[1].text = text
       await tick()
       await tick()
     }
@@ -312,7 +312,7 @@ describe('ChatPanel', () => {
 
     // A new question always goes to the bottom.
     await scrollTo(300)
-    topic.chat.push({ id: 'q2', role: 'user', text: 'And?' })
+    chatOf(topic).messages.push({ id: 'q2', role: 'user', text: 'And?' })
     await tick()
     await tick()
     expect(log.scrollTop).toBe(1000)

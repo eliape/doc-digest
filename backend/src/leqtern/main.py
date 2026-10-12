@@ -15,6 +15,7 @@ from .index import Indexer
 from .library import Library
 from .quiz import QuizRecord, reading_so_far, recommend
 from .saved import SavedWorkspace
+from .title import title_chat
 from .tools import Toolbox, topic_docs
 from .usage import UsageLog
 
@@ -226,5 +227,35 @@ async def quiz_recommendation(
         text = await recommend(client, request.topic, asked, request.quiz, services.usage)
     except Exception as error:
         logger.exception("Recommendation failed")
+        raise HTTPException(status_code=502, detail=error_message(error)) from error
+    return {"text": text}
+
+
+class TitleRequest(BaseModel):
+    topic: str
+    about: Turn
+
+
+@app.post("/api/chat-title")
+async def chat_title(
+    request: TitleRequest,
+    client: Annotated[anthropic.AsyncAnthropic, Depends(get_client)],
+    services: ServicesDep,
+) -> dict[str, str | None]:
+    """A few words naming a discussion, from its first question."""
+    about = request.about
+    asked = describe(about.context) if about.context else ""
+    if about.mode == "quiz":
+        asked += " They asked for a quiz"
+        asked += f" on: {about.text.strip()}" if about.text.strip() else "."
+    elif about.mode == "socratic":
+        asked += " They asked to be guided by questions"
+        asked += f" about: {about.text.strip()}" if about.text.strip() else "."
+    else:
+        asked += f" They ask: {about.text.strip()}"
+    try:
+        text = await title_chat(client, request.topic, asked.strip(), services.usage)
+    except Exception as error:
+        logger.exception("Title failed")
         raise HTTPException(status_code=502, detail=error_message(error)) from error
     return {"text": text}

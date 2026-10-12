@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { AskRequest, IndexStatus, RecommendationRequest, WrittenQuiz } from './api'
 import type { PageContext } from './context'
-import { type QuizApi, Workspace, askRequest, topicNameFor } from './workspace.svelte'
+import { type QuizApi, Workspace, askRequest, chatOf, chatTitle, discussions, topicNameFor } from './workspace.svelte'
 
 const bytes = (...values: number[]) => new Uint8Array(values)
 
@@ -136,17 +136,17 @@ describe('Workspace', () => {
     first.draft = 'What is a p-value?'
     ws.ask(first.id, undefined, async function* () {})
     ws.addDoc('book.pdf', bytes(2))
-    expect(ws.activeTopic?.chat.map((m) => [m.role, m.text])).toEqual([
+    expect(chatOf(ws.activeTopic!).messages.map((m) => [m.role, m.text])).toEqual([
       ['user', 'What is a p-value?'],
       ['assistant', ''],
     ])
     expect(first.draft).toBe('')
 
     const second = ws.createTopic('Second')
-    expect(second.chat).toEqual([])
+    expect(chatOf(second).messages).toEqual([])
     second.draft = '   '
     ws.ask(second.id)
-    expect(ws.activeTopic?.chat).toEqual([])
+    expect(chatOf(ws.activeTopic!).messages).toEqual([])
   })
 })
 
@@ -173,12 +173,12 @@ describe('Workspace.ask', () => {
       yield { type: 'text', text: 'By ' }
       yield { type: 'text', text: 'parts.' }
     })
-    expect(topic.chat.map((m) => [m.role, m.text, m.status])).toEqual([
+    expect(chatOf(topic).messages.map((m) => [m.role, m.text, m.status])).toEqual([
       ['user', 'How is this derived?', undefined],
       ['assistant', 'By parts.', 'done'],
     ])
-    expect(topic.chat[1].steps).toEqual(['Searched for “parts”'])
-    expect(topic.chat[0].context?.page).toBe(3)
+    expect(chatOf(topic).messages[1].steps).toEqual(['Searched for “parts”'])
+    expect(chatOf(topic).messages[0].context?.page).toBe(3)
     expect(topic.context).toBeUndefined()
     expect(topic.draft).toBe('')
     expect(requests[0].topic).toBe('notes')
@@ -201,7 +201,7 @@ describe('Workspace.ask', () => {
       async () => ({ ...context(doc.id, 7), point: undefined }),
       async function* () {},
     )
-    expect(topic.chat[0].context?.page).toBe(7)
+    expect(chatOf(topic).messages[0].context?.page).toBe(7)
   })
 
   it('shows why an answer failed and leaves it out of the next request', async () => {
@@ -212,7 +212,7 @@ describe('Workspace.ask', () => {
     await ws.ask(topic.id, undefined, async function* () {
       throw new Error('No API key')
     })
-    expect(topic.chat[1]).toMatchObject({ role: 'assistant', status: 'error', text: 'No API key' })
+    expect(chatOf(topic).messages[1]).toMatchObject({ role: 'assistant', status: 'error', text: 'No API key' })
     topic.draft = 'second'
     let sent: AskRequest | undefined
     await ws.ask(topic.id, undefined, async function* (request) {
@@ -238,14 +238,14 @@ describe('Workspace.ask', () => {
     expect(ws.isAnswering(topic.id)).toBe(true)
     topic.draft = 'second'
     await ws.ask(topic.id, undefined, async function* () {})
-    expect(topic.chat).toHaveLength(2)
+    expect(chatOf(topic).messages).toHaveLength(2)
     expect(topic.draft).toBe('second')
     finish()
     await pending
     expect(ws.isAnswering(topic.id)).toBe(false)
   })
 
-  it('starts a new chat: clears the messages and stops the answer, keeping the draft and attached spot', async () => {
+  it('starts a new discussion, keeping the old one, its answer, the draft and the attached spot', async () => {
     const ws = new Workspace()
     const doc = ws.addDoc('notes.pdf', bytes(1))
     const topic = ws.activeTopic!
@@ -259,22 +259,31 @@ describe('Workspace.ask', () => {
       yield { type: 'text', text: ' and part two' }
     })
     await new Promise((resolve) => setTimeout(resolve))
-    expect(topic.chat.at(-1)?.text).toBe('Part one')
+    expect(chatOf(topic).messages.at(-1)?.text).toBe('Part one')
 
+    const first = chatOf(topic)
     ws.attachContext(topic.id, context(doc.id, 3))
     topic.draft = 'unsent'
     ws.newChat(topic.id)
-    expect(signal?.aborted).toBe(true)
-    expect(topic.chat).toEqual([])
+    expect(chatOf(topic).messages).toEqual([])
+    expect(chatOf(topic).id).not.toBe(first.id)
     expect(topic.context?.page).toBe(3)
     expect(topic.draft).toBe('unsent')
     expect(ws.isAnswering(topic.id)).toBe(false)
 
-    // The stopped answer does not come back into the new chat.
+    // The answer goes on in its own discussion, not the new one.
+    expect(signal?.aborted).toBe(false)
     more()
     await pending
-    expect(topic.chat).toEqual([])
+    expect(chatOf(topic).messages).toEqual([])
+    expect(topic.chats.find((c) => c.id === first.id)?.messages.at(-1)?.text).toBe('Part one and part two')
     expect(ws.docs[doc.id]).toBeDefined()
+
+    // An empty discussion is reused rather than piling up another.
+    ws.setMode(topic.id, 'socratic')
+    ws.newChat(topic.id)
+    expect(topic.chats).toHaveLength(2)
+    expect(chatOf(topic).mode).toBe('normal')
   })
 
   it('asks the picked model, or leaves the choice to the backend', async () => {
@@ -305,12 +314,12 @@ describe('Workspace.ask', () => {
     // Nothing goes out until the reader sends; a blank box is fine once a spot is attached.
     expect(ws.canSend(topic.id)).toBe(false)
     ws.attachContext(topic.id, context(doc.id, 5), 'socratic')
-    expect(topic.mode).toBe('socratic')
-    expect(topic.chat).toEqual([])
+    expect(chatOf(topic).mode).toBe('socratic')
+    expect(chatOf(topic).messages).toEqual([])
     expect(ws.canSend(topic.id)).toBe(true)
     await ws.ask(topic.id, undefined, stream)
 
-    expect(topic.chat.map((m) => [m.role, m.text, m.mode])).toEqual([
+    expect(chatOf(topic).messages.map((m) => [m.role, m.text, m.mode])).toEqual([
       ['user', '', 'socratic'],
       ['assistant', 'What does dx stand for?', 'socratic'],
     ])
@@ -324,7 +333,7 @@ describe('Workspace.ask', () => {
     topic.draft = 'A small change in x?'
     await ws.ask(topic.id, undefined, stream)
     expect(requests[1].messages.at(-1)).toMatchObject({ role: 'user', text: 'A small change in x?', mode: 'socratic' })
-    expect(topic.chat.at(-1)?.mode).toBe('socratic')
+    expect(chatOf(topic).messages.at(-1)?.mode).toBe('socratic')
 
     ws.setMode(topic.id, 'normal')
     topic.draft = 'Thanks. What is a derivative?'
@@ -344,7 +353,7 @@ describe('Workspace.ask', () => {
     const ws = new Workspace()
     const doc = ws.addDoc('notes.pdf', bytes(1))
     const topic = ws.activeTopic!
-    expect(topic.mode).toBe('normal')
+    expect(chatOf(topic).mode).toBe('normal')
     const modes: (string | undefined)[] = []
     const stream = async function* (request: AskRequest) {
       modes.push(request.messages.at(-1)?.mode)
@@ -356,12 +365,12 @@ describe('Workspace.ask', () => {
 
     // A new chat starts over in Normal mode.
     ws.newChat(topic.id)
-    expect(topic.mode).toBe('normal')
+    expect(chatOf(topic).mode).toBe('normal')
     ws.setMode(topic.id, 'socratic')
 
     // Clicking a spot is for asking about it, so it switches back to normal answers.
     ws.attachContext(topic.id, context(doc.id, 3))
-    expect(topic.mode).toBe('normal')
+    expect(chatOf(topic).mode).toBe('normal')
     topic.draft = 'What is this?'
     await ws.ask(topic.id, undefined, stream)
     expect(modes).toEqual(['socratic', undefined])
@@ -380,7 +389,7 @@ describe('Workspace.ask', () => {
     ws.attachContext(topic.id, context(doc.id, 5), 'quiz')
     expect(ws.canSend(topic.id)).toBe(false)
     await ws.ask(topic.id, undefined, undefined, fakeQuizApi().api)
-    expect(topic.chat).toHaveLength(2)
+    expect(chatOf(topic).messages).toHaveLength(2)
     finish()
     await pending
   })
@@ -414,12 +423,12 @@ describe('Workspace.ask', () => {
     expect(created[0].messages).toEqual([
       { role: 'user', text: 'the chain rule', mode: 'quiz', context: expect.objectContaining({ page: 5, page_image: 'PAGE' }) },
     ])
-    const [asked, quiz] = topic.chat
+    const [asked, quiz] = chatOf(topic).messages
     expect(asked).toMatchObject({ role: 'user', text: 'the chain rule', mode: 'quiz' })
     expect(quiz).toMatchObject({ role: 'assistant', mode: 'quiz', status: 'done', text: '' })
     expect(quiz.quiz).toEqual({ ...written, picked: [null, null] })
     // Sending a quiz goes back to Normal, so the next question is an ordinary one.
-    expect(topic.mode).toBe('normal')
+    expect(chatOf(topic).mode).toBe('normal')
     expect(ws.canSend(topic.id)).toBe(false)
   })
 
@@ -431,12 +440,12 @@ describe('Workspace.ask', () => {
       ws.attachContext(topic.id, context(doc.id, 5), mode)
       ws.clearContext(topic.id)
       expect(topic.context).toBeUndefined()
-      expect(topic.mode).toBe('normal')
+      expect(chatOf(topic).mode).toBe('normal')
     }
     // Picked from the menu with nothing attached, the mode stays.
     ws.setMode(topic.id, 'quiz')
     ws.clearContext(topic.id)
-    expect(topic.mode).toBe('quiz')
+    expect(chatOf(topic).mode).toBe('quiz')
   })
 
   it('takes each quiz answer once, and asks for a note on what to review only after a wrong one', async () => {
@@ -447,7 +456,7 @@ describe('Workspace.ask', () => {
     ws.attachContext(topic.id, context(doc.id, 5), 'quiz')
     topic.draft = 'the power rule'
     await ws.ask(topic.id, undefined, undefined, api)
-    const message = topic.chat[1]
+    const message = chatOf(topic).messages[1]
 
     await ws.answerQuiz(topic.id, message.id, 0, 0, api)
     await ws.answerQuiz(topic.id, message.id, 0, 1, api)
@@ -469,7 +478,7 @@ describe('Workspace.ask', () => {
     // All right: nothing to review, and no call.
     ws.attachContext(topic.id, context(doc.id, 5), 'quiz')
     await ws.ask(topic.id, undefined, undefined, api)
-    const perfect = topic.chat[3]
+    const perfect = chatOf(topic).messages[3]
     await ws.answerQuiz(topic.id, perfect.id, 0, 1, api)
     await ws.answerQuiz(topic.id, perfect.id, 1, 0, api)
     expect(recommended).toHaveLength(1)
@@ -488,7 +497,7 @@ describe('Workspace.ask', () => {
     }
     ws.setMode(topic.id, 'quiz')
     await ws.ask(topic.id, undefined, undefined, api)
-    const message = topic.chat[1]
+    const message = chatOf(topic).messages[1]
     await ws.answerQuiz(topic.id, message.id, 0, 0, api)
     await ws.answerQuiz(topic.id, message.id, 1, 1, api)
     expect(message.quiz!.reviewing).toBe('failed')
@@ -505,7 +514,7 @@ describe('Workspace.ask', () => {
       },
       recommend: async () => null,
     })
-    expect(topic.chat[1]).toMatchObject({ status: 'error', text: 'The model service returned an error (529). Try again.' })
+    expect(chatOf(topic).messages[1]).toMatchObject({ status: 'error', text: 'The model service returned an error (529). Try again.' })
   })
 
   it('sends a quiz and how it went with later questions, so the model can adapt', async () => {
@@ -515,8 +524,8 @@ describe('Workspace.ask', () => {
     const { api } = fakeQuizApi()
     ws.attachContext(topic.id, context(doc.id, 5), 'quiz')
     await ws.ask(topic.id, undefined, undefined, api)
-    await ws.answerQuiz(topic.id, topic.chat[1].id, 0, 0, api)
-    await ws.answerQuiz(topic.id, topic.chat[1].id, 1, 0, api)
+    await ws.answerQuiz(topic.id, chatOf(topic).messages[1].id, 0, 0, api)
+    await ws.answerQuiz(topic.id, chatOf(topic).messages[1].id, 1, 0, api)
     ws.setMode(topic.id, 'normal')
     topic.draft = 'Why 2x?'
     const requests: AskRequest[] = []
@@ -534,7 +543,7 @@ describe('Workspace.ask', () => {
     const ws = new Workspace()
     const doc = ws.addDoc('notes.pdf', bytes(1))
     const topic = ws.activeTopic!
-    topic.chat.push(
+    chatOf(topic).messages.push(
       { id: 'a', role: 'user', text: 'one', context: context(doc.id, 1) },
       { id: 'b', role: 'assistant', text: 'answer', status: 'done' },
       { id: 'c', role: 'user', text: 'two', context: context(doc.id, 2) },
@@ -646,9 +655,9 @@ describe('Workspace saving', () => {
       status: async () => ready('srv1'),
     })
     ws.pages[doc.id] = 12
-    topic.mode = 'socratic'
+    chatOf(topic).mode = 'socratic'
     topic.draft = 'half a question'
-    topic.chat.push(
+    chatOf(topic).messages.push(
       {
         id: 'q',
         role: 'user',
@@ -685,7 +694,8 @@ describe('Workspace saving', () => {
         {
           id: topic.id,
           name: 'book',
-          mode: 'socratic',
+          chatId: chatOf(topic).id,
+          chats: [{ id: chatOf(topic).id, mode: 'socratic' }],
           activeDocId: doc.id,
           docs: [{ id: doc.id, name: 'book.pdf', serverId: 'srv1', page: 12 }],
         },
@@ -720,16 +730,16 @@ describe('Workspace saving', () => {
     expect(docIds).toEqual([doc.id])
     expect(back.activeTopic).toMatchObject({
       name: 'book',
-      mode: 'socratic',
       docIds: [doc.id],
       draft: '',
     })
+    expect(chatOf(back.activeTopic!).mode).toBe('socratic')
     expect(back.activeDoc?.data).toEqual(bytes(1, 2))
     expect(back.pages[doc.id]).toBe(12)
-    expect(back.activeTopic!.chat.map((m) => m.text)).toEqual(['', 'What do you see?', 'Half an ans'])
+    expect(chatOf(back.activeTopic!).messages.map((m) => m.text)).toEqual(['', 'What do you see?', 'Half an ans'])
     // The answer that was arriving when the app closed did not finish.
-    expect(back.activeTopic!.chat[2].status).toBe('error')
-    expect(back.activeTopic!.chat[0].context).toMatchObject({
+    expect(chatOf(back.activeTopic!).messages[2].status).toBe('error')
+    expect(chatOf(back.activeTopic!).messages[0].context).toMatchObject({
       docId: doc.id,
       page: 3,
       thumbnail: 'data:small',
@@ -772,7 +782,7 @@ describe('Workspace saving', () => {
 
   it('saves quizzes with their answers, and a note still being written comes back as failed', async () => {
     const { ws, topic } = await saved()
-    topic.chat.push({
+    chatOf(topic).messages.push({
       id: 'quiz',
       role: 'assistant',
       text: '',
@@ -782,12 +792,161 @@ describe('Workspace saving', () => {
     })
     const back = new Workspace()
     await back.restore(JSON.parse(JSON.stringify(ws.snapshot())), async () => bytes(1))
-    expect(back.activeTopic!.chat.at(-1)!.quiz).toEqual({ ...written, picked: [0, 1], reviewing: 'failed' })
+    expect(chatOf(back.activeTopic!).messages.at(-1)!.quiz).toEqual({ ...written, picked: [0, 1], reviewing: 'failed' })
+  })
+
+  it('brings back a topic saved with one chat as its one discussion, and has it titled', async () => {
+    const back = new Workspace()
+    const titled: string[] = []
+    back.titleApi = async (request) => {
+      titled.push(request.about.text)
+      return 'Limits'
+    }
+    await back.restore(
+      {
+        version: 1,
+        topics: [
+          {
+            id: 't',
+            name: 'Old',
+            docs: [],
+            mode: 'quiz',
+            chat: [
+              { id: 'q', role: 'user', text: 'What is a limit?' },
+              { id: 'a', role: 'assistant', text: 'It is…', status: 'done' },
+            ],
+          },
+        ],
+      },
+      async () => bytes(),
+    )
+    const topic = back.activeTopic!
+    expect(topic.chats).toHaveLength(1)
+    expect(chatOf(topic)).toMatchObject({ mode: 'quiz', messages: [{ id: 'q' }, { id: 'a' }] })
+    await new Promise((resolve) => setTimeout(resolve))
+    expect(titled).toEqual(['What is a limit?'])
+    expect(chatOf(topic).title).toBe('Limits')
+  })
+
+  it('saves every discussion with something in it, and which one is open', async () => {
+    const { ws, topic } = await saved()
+    const first = chatOf(topic).id
+    ws.newChat(topic.id)
+    expect(ws.snapshot().topics[0].chats?.map((c) => c.id)).toEqual([first, chatOf(topic).id])
+    ws.selectChat(topic.id, first)
+    // The empty one was left, so it is gone.
+    expect(ws.snapshot().topics[0]).toMatchObject({ chatId: first, chats: [{ id: first }] })
   })
 
   it('ignores something that is not a saved workspace', async () => {
     const back = new Workspace()
     expect(await back.restore({}, async () => bytes())).toEqual([])
     expect(back.topics).toEqual([])
+  })
+})
+
+describe('Workspace discussions', () => {
+  const context = (docId: string, page: number): PageContext => ({ docId, docName: 'notes.pdf', page, pageTexts: [] })
+
+  async function asked(ws: Workspace, topicId: string, text: string) {
+    ws.topics.find((t) => t.id === topicId)!.draft = text
+    await ws.ask(topicId, undefined, async function* () {
+      yield { type: 'text', text: `About ${text}` }
+    })
+  }
+
+  it('titles a discussion with Haiku after its first question only', async () => {
+    const ws = new Workspace()
+    const requests: unknown[] = []
+    ws.titleApi = async (request) => {
+      requests.push(request)
+      return 'Power rule'
+    }
+    ws.addDoc('notes.pdf', bytes(1))
+    const topic = ws.activeTopic!
+    await asked(ws, topic.id, 'Why is the derivative of x² 2x?')
+    await asked(ws, topic.id, 'And x³?')
+    expect(requests).toEqual([{ topic: 'notes', about: { role: 'user', text: 'Why is the derivative of x² 2x?' } }])
+    expect(chatTitle(chatOf(topic))).toBe('Power rule')
+  })
+
+  it('goes by the start of the first question until it has a title', () => {
+    expect(chatTitle({ id: 'c', messages: [], mode: 'normal', updatedAt: 0 })).toBe('New chat')
+    const long = 'word '.repeat(20)
+    const chat = { id: 'c', messages: [{ id: 'q', role: 'user' as const, text: long }], mode: 'normal' as const, updatedAt: 0 }
+    expect(chatTitle(chat)).toHaveLength(48)
+    expect(chatTitle(chat).endsWith('…')).toBe(true)
+    expect(chatTitle({ ...chat, messages: [{ id: 'q', role: 'user', text: '', mode: 'quiz' }] })).toBe('Quiz')
+  })
+
+  it('lists discussions by last use, and switching keeps the draft and spot', async () => {
+    const ws = new Workspace()
+    ws.titleApi = async () => null
+    const doc = ws.addDoc('notes.pdf', bytes(1))
+    const topic = ws.activeTopic!
+    await asked(ws, topic.id, 'one')
+    const one = chatOf(topic).id
+    await new Promise((resolve) => setTimeout(resolve, 2))
+    ws.newChat(topic.id)
+    await asked(ws, topic.id, 'two')
+    const two = chatOf(topic).id
+    expect(discussions(topic).map((c) => c.id)).toEqual([two, one])
+
+    ws.attachContext(topic.id, context(doc.id, 4))
+    topic.draft = 'draft'
+    ws.selectChat(topic.id, one)
+    expect(chatOf(topic).id).toBe(one)
+    expect(topic.draft).toBe('draft')
+    expect(topic.context?.page).toBe(4)
+    await new Promise((resolve) => setTimeout(resolve, 2))
+    await asked(ws, topic.id, 'three')
+    expect(discussions(topic).map((c) => c.id)).toEqual([one, two])
+  })
+
+  it('deletes a discussion, opening the most recent one left or else an empty one', async () => {
+    const ws = new Workspace()
+    ws.titleApi = async () => null
+    ws.addDoc('notes.pdf', bytes(1))
+    const topic = ws.activeTopic!
+    await asked(ws, topic.id, 'one')
+    const one = chatOf(topic).id
+    await new Promise((resolve) => setTimeout(resolve, 2))
+    ws.newChat(topic.id)
+    await asked(ws, topic.id, 'two')
+    const two = chatOf(topic).id
+    ws.selectChat(topic.id, one)
+
+    // Deleting another one leaves the open one open.
+    ws.deleteChat(topic.id, two)
+    expect(topic.chats.map((c) => c.id)).toEqual([one])
+    expect(chatOf(topic).id).toBe(one)
+
+    ws.deleteChat(topic.id, one)
+    expect(topic.chats).toHaveLength(1)
+    expect(chatOf(topic).messages).toEqual([])
+  })
+
+  it('stops an answer still arriving in a deleted discussion or topic', async () => {
+    const ws = new Workspace()
+    ws.titleApi = async () => null
+    ws.addDoc('notes.pdf', bytes(1))
+    const topic = ws.activeTopic!
+    const signals: AbortSignal[] = []
+    const ask = () => {
+      topic.draft = 'q'
+      void ws.ask(topic.id, undefined, async function* (_request, signal) {
+        signals.push(signal!)
+        await new Promise(() => {})
+        yield { type: 'text', text: '' }
+      })
+    }
+    ask()
+    await new Promise((resolve) => setTimeout(resolve))
+    ws.deleteChat(topic.id, topic.chats[0].id)
+    expect(signals[0].aborted).toBe(true)
+    ask()
+    await new Promise((resolve) => setTimeout(resolve))
+    ws.deleteTopic(topic.id)
+    expect(signals[1].aborted).toBe(true)
   })
 })

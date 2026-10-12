@@ -3,11 +3,13 @@ import {
   type AskRequest,
   createQuiz,
   fetchAnswer,
+  fetchChatTitle,
   fetchIndexStatus,
   fetchRecommendation,
   type IndexStatus,
   type QuizRecord,
   type RecommendationRequest,
+  type TitleRequest,
   uploadDoc,
   type WrittenQuiz,
 } from './api'
@@ -77,20 +79,33 @@ const realQuizApi: QuizApi = { create: (r, signal) => createQuiz(r, signal), rec
 export type Mode = 'normal' | 'socratic' | 'quiz'
 
 /**
+ * One discussion in a topic: its messages and how it answers (`mode`, picked in the chat or
+ * by a right-click). `title` is a few words Haiku writes after the first question;
+ * `updatedAt` is when a question was last sent, which orders the topic's discussions.
+ */
+export type Chat = {
+  id: string
+  title?: string
+  messages: ChatMessage[]
+  mode: Mode
+  updatedAt: number
+}
+
+/**
  * A named group of PDFs that are read and asked about together. Each topic has
- * one chat, shared by all its tabs, and `draft` is the unsent question in it.
- * `context` is the spot the reader last clicked, attached to the next question.
- * `mode` is how the chat answers, picked in the chat or by a right-click.
+ * its discussions, shared by all its tabs, one of them open (`chatId`). `draft` is
+ * the unsent question and `context` the spot the reader last clicked, attached to the
+ * next question; both stay with the topic when another discussion is opened.
  */
 export type Topic = {
   id: string
   name: string
   docIds: string[]
   activeDocId?: string
-  chat: ChatMessage[]
+  chats: Chat[]
+  chatId: string
   draft: string
   context?: PageContext
-  mode: Mode
 }
 
 /** One saved tab: the backend keeps its PDF, so only its id and where the reader was are saved. */
@@ -101,9 +116,16 @@ export type SavedDoc = {
   page?: number
 }
 
-/** One saved topic. Its chat is saved without the page images, which only the newest question needs. */
-export type SavedTopic = Omit<Topic, 'docIds' | 'draft' | 'context'> & {
+/**
+ * One saved topic. Its chats are saved without the page images, which only the newest question
+ * needs. Workspaces saved before a topic had several discussions have one `chat` and `mode`.
+ */
+export type SavedTopic = Omit<Topic, 'docIds' | 'draft' | 'context' | 'chats' | 'chatId'> & {
   docs: SavedDoc[]
+  chats?: Chat[]
+  chatId?: string
+  chat?: ChatMessage[]
+  mode?: Mode
 }
 
 /** What is saved on disk (through the backend) so the workspace is back after a reload. */
@@ -119,6 +141,33 @@ const newId = () => `${Date.now().toString(36)}-${nextId++}`
 /** Topic name for a PDF opened without a topic: its file name without `.pdf`. */
 export function topicNameFor(fileName: string): string {
   return fileName.replace(/\.pdf$/i, '') || fileName
+}
+
+/** A discussion with nothing in it yet. */
+function emptyChat(): Chat {
+  return { id: newId(), messages: [], mode: 'normal', updatedAt: Date.now() }
+}
+
+/** The discussion open in a topic. There always is one. */
+export function chatOf(topic: Topic): Chat {
+  return topic.chats.find((c) => c.id === topic.chatId) ?? topic.chats[0]
+}
+
+/** A topic's discussions that have something in them, the most recently used first. */
+export function discussions(topic: Topic): Chat[] {
+  return topic.chats.filter((c) => c.messages.length).sort((a, b) => b.updatedAt - a.updatedAt)
+}
+
+/** What a discussion is called: Haiku's title, or until it comes, the start of its first question. */
+export function chatTitle(chat: Chat): string {
+  if (chat.title) return chat.title
+  const first = chat.messages.find((m) => m.role === 'user')
+  if (!first) return 'New chat'
+  const text = first.text.trim().replace(/\s+/g, ' ')
+  if (text) return text.length > 48 ? `${text.slice(0, 47).trimEnd()}…` : text
+  if (first.mode === 'quiz') return 'Quiz'
+  if (first.mode === 'socratic') return 'Socratic session'
+  return 'New chat'
 }
 
 /** The topics in the sidebar, their tabs, and which ones are selected. */
@@ -139,6 +188,8 @@ export class Workspace {
   private answering = new Map<string, AbortController>()
   /** Where quizzes and notes on what to review come from. Tests swap in a fake. */
   quizApi: QuizApi = realQuizApi
+  /** Where discussions' titles come from. Tests swap in a fake. */
+  titleApi: (request: TitleRequest) => Promise<string | null> = (r) => fetchChatTitle(r)
 
   activeTopic = $derived(this.topics.find((t) => t.id === this.activeTopicId))
   activeDoc = $derived(this.activeTopic?.activeDocId ? this.docs[this.activeTopic.activeDocId] : undefined)
@@ -148,7 +199,8 @@ export class Workspace {
   }
 
   createTopic(name = 'New topic'): Topic {
-    this.topics.push({ id: newId(), name, docIds: [], chat: [], draft: '', mode: 'normal' })
+    const chat = emptyChat()
+    this.topics.push({ id: newId(), name, docIds: [], chats: [chat], chatId: chat.id, draft: '' })
     const topic = this.topics[this.topics.length - 1]
     this.activeTopicId = topic.id
     return topic
@@ -167,7 +219,7 @@ export class Workspace {
     const index = this.topics.findIndex((t) => t.id === id)
     if (index === -1) return
     const [topic] = this.topics.splice(index, 1)
-    this.answering.get(id)?.abort()
+    for (const chat of topic.chats) this.answering.get(chat.id)?.abort()
     this.docs = omit(this.docs, topic.docIds)
     for (const docId of topic.docIds) {
       delete this.indexing[docId]
@@ -240,7 +292,7 @@ export class Workspace {
     const topic = this.topics.find((t) => t.id === topicId)
     if (!topic) return
     topic.context = context
-    topic.mode = mode
+    chatOf(topic).mode = mode
   }
 
   /** Replace the attached spot with the same spot and its images, once they are rendered. */
@@ -257,25 +309,66 @@ export class Workspace {
     const topic = this.topics.find((t) => t.id === topicId)
     if (!topic?.context) return
     topic.context = undefined
-    topic.mode = 'normal'
+    chatOf(topic).mode = 'normal'
   }
 
   /**
-   * Start the topic's chat over: forget its questions and answers, stop an answer that is
-   * still arriving and go back to Normal mode. What belongs to the next question (the draft
-   * and the attached spot) stays, and so do the tabs.
+   * Open a new, empty discussion in the topic, in Normal mode. The one that was open stays in
+   * the list, and an answer still arriving in it goes on. When the open discussion is still
+   * empty it is reused, so empty ones never pile up. What belongs to the next question (the
+   * draft and the attached spot) stays, and so do the tabs.
    */
   newChat(topicId: string) {
     const topic = this.topics.find((t) => t.id === topicId)
     if (!topic) return
-    this.answering.get(topicId)?.abort()
-    topic.chat = []
-    topic.mode = 'normal'
+    const open = chatOf(topic)
+    if (!open.messages.length) {
+      open.mode = 'normal'
+      return
+    }
+    const chat = emptyChat()
+    topic.chats.push(chat)
+    topic.chatId = chat.id
   }
 
-  /** Whether a topic's latest answer is still arriving. */
+  /** Open another of the topic's discussions. The one left goes away if nothing was asked in it. */
+  selectChat(topicId: string, chatId: string) {
+    const topic = this.topics.find((t) => t.id === topicId)
+    if (!topic || topic.chatId === chatId || !topic.chats.some((c) => c.id === chatId)) return
+    const left = chatOf(topic)
+    if (!left.messages.length) topic.chats = topic.chats.filter((c) => c.id !== left.id)
+    topic.chatId = chatId
+  }
+
+  /**
+   * Delete one of the topic's discussions, stopping an answer still arriving in it. If it was
+   * the open one, the most recently used one left opens, or else a new, empty one.
+   */
+  deleteChat(topicId: string, chatId: string) {
+    const topic = this.topics.find((t) => t.id === topicId)
+    if (!topic?.chats.some((c) => c.id === chatId)) return
+    this.answering.get(chatId)?.abort()
+    topic.chats = topic.chats.filter((c) => c.id !== chatId)
+    if (topic.chatId !== chatId) return
+    const next = [...topic.chats].sort((a, b) => b.updatedAt - a.updatedAt)[0]
+    if (next) {
+      topic.chatId = next.id
+    } else {
+      const chat = emptyChat()
+      topic.chats.push(chat)
+      topic.chatId = chat.id
+    }
+  }
+
+  /** Whether a discussion's latest answer is still arriving. */
+  isChatAnswering(chat: Chat): boolean {
+    return chat.messages.at(-1)?.status === 'streaming'
+  }
+
+  /** Whether the latest answer in a topic's open discussion is still arriving. */
   isAnswering(topicId: string): boolean {
-    return this.topics.find((t) => t.id === topicId)?.chat.at(-1)?.status === 'streaming'
+    const topic = this.topics.find((t) => t.id === topicId)
+    return !!topic && this.isChatAnswering(chatOf(topic))
   }
 
   /**
@@ -286,7 +379,8 @@ export class Workspace {
   canSend(topicId: string): boolean {
     const topic = this.topics.find((t) => t.id === topicId)
     if (!topic || this.isAnswering(topicId)) return false
-    return !!topic.draft.trim() || topic.mode === 'quiz' || (topic.mode === 'socratic' && !!topic.context)
+    const { mode } = chatOf(topic)
+    return !!topic.draft.trim() || mode === 'quiz' || (mode === 'socratic' && !!topic.context)
   }
 
   /**
@@ -305,19 +399,20 @@ export class Workspace {
     const topic = this.topics.find((t) => t.id === topicId)
     if (!topic || !this.canSend(topicId)) return
     const { context } = topic
-    const mode = topic.mode !== 'normal' && { mode: topic.mode }
+    const chat = chatOf(topic)
+    const mode = chat.mode !== 'normal' && { mode: chat.mode }
     const question = { text: topic.draft.trim(), context, ...mode }
     topic.draft = ''
     topic.context = undefined
     const fill = context ? undefined : fallback
-    if (topic.mode === 'quiz') {
-      topic.mode = 'normal'
-      await this.converse(topic, question, fill, async (answer, request, signal) => {
+    if (chat.mode === 'quiz') {
+      chat.mode = 'normal'
+      await this.converse(topic, chat, question, fill, async (answer, request, signal) => {
         const written = await quizApi.create(request, signal)
         answer.quiz = { ...written, picked: written.questions.map(() => null) }
       })
     } else {
-      await this.converse(topic, question, fill, async (answer, request, signal) => {
+      await this.converse(topic, chat, question, fill, async (answer, request, signal) => {
         for await (const event of stream(request, signal)) {
           if (signal.aborted) break
           if (event.type === 'text') answer.text += event.text
@@ -339,13 +434,14 @@ export class Workspace {
     api: QuizApi = this.quizApi,
   ): Promise<void> {
     const topic = this.topics.find((t) => t.id === topicId)
-    const index = topic?.chat.findIndex((m) => m.id === messageId) ?? -1
-    const quiz = topic?.chat[index]?.quiz
-    if (!topic || !quiz || quiz.picked[question] !== null || !quiz.questions[question]?.choices[choice]) return
+    const chat = topic?.chats.find((c) => c.messages.some((m) => m.id === messageId))
+    const index = chat?.messages.findIndex((m) => m.id === messageId) ?? -1
+    const quiz = chat?.messages[index]?.quiz
+    if (!topic || !chat || !quiz || quiz.picked[question] !== null || !quiz.questions[question]?.choices[choice]) return
     quiz.picked[question] = choice
     const right = quiz.questions.filter((q, i) => quiz.picked[i] === q.answer).length
     if (quiz.picked.some((p) => p === null) || right === quiz.questions.length) return
-    const asked = topic.chat[index - 1]
+    const asked = chat.messages[index - 1]
     quiz.reviewing = 'writing'
     try {
       const recommendation = await api.recommend({
@@ -364,45 +460,70 @@ export class Workspace {
     }
   }
 
-  /** Switch how the topic's chat answers, from the next question on. */
+  /** Switch how the topic's open discussion answers, from the next question on. */
   setMode(topicId: string, mode: Mode) {
     const topic = this.topics.find((t) => t.id === topicId)
-    if (topic) topic.mode = mode
+    if (topic) chatOf(topic).mode = mode
   }
 
   /**
-   * Add a question to the chat and an answer under it, which `respond` fills in from the
+   * Add a question to a discussion and an answer under it, which `respond` fills in from the
    * backend (streaming text, or a quiz). `fill` gives the question's context (the open
-   * page, or the spot with its images) before it is sent.
+   * page, or the spot with its images) before it is sent. The first question also has
+   * Haiku name the discussion.
    */
   private async converse(
     topic: Topic,
+    chat: Chat,
     asked: Pick<ChatMessage, 'text' | 'context' | 'mode'>,
     fill: (() => Promise<PageContext | undefined>) | undefined,
     respond: (answer: ChatMessage, request: AskRequest, signal: AbortSignal) => Promise<void>,
   ): Promise<void> {
     const mode = asked.mode && { mode: asked.mode }
-    topic.chat.push({ id: newId(), role: 'user', ...asked })
-    topic.chat.push({ id: newId(), role: 'assistant', text: '', status: 'streaming', ...mode })
-    // Read back through the topic, so changes go through Svelte's state.
-    const question = topic.chat[topic.chat.length - 2]
-    const answer = topic.chat[topic.chat.length - 1]
-    const topicId = topic.id
+    const first = !chat.messages.length
+    chat.messages.push({ id: newId(), role: 'user', ...asked })
+    chat.messages.push({ id: newId(), role: 'assistant', text: '', status: 'streaming', ...mode })
+    chat.updatedAt = Date.now()
+    // Read back through the chat, so changes go through Svelte's state.
+    const question = chat.messages[chat.messages.length - 2]
+    const answer = chat.messages[chat.messages.length - 1]
+    const chatId = chat.id
     const controller = new AbortController()
-    this.answering.set(topicId, controller)
+    this.answering.set(chatId, controller)
     try {
       const filled = await fill?.().catch(() => undefined)
       if (filled) question.context = filled
+      if (first) void this.nameChat(topic, chat)
       const uploading = topic.docIds.filter((id) => id in this.uploads).map((id) => this.uploads[id])
       if (uploading.length) await Promise.all(uploading)
       const serverId = (id: string) => this.indexing[id]?.serverId
-      await respond(answer, askRequest(topic, serverId, this.answerModel), controller.signal)
+      await respond(answer, askRequest(topic, serverId, this.answerModel, chat), controller.signal)
       answer.status = 'done'
     } catch (error) {
       answer.status = 'error'
       answer.text = error instanceof Error ? error.message : String(error)
     } finally {
-      if (this.answering.get(topicId) === controller) this.answering.delete(topicId)
+      if (this.answering.get(chatId) === controller) this.answering.delete(chatId)
+    }
+  }
+
+  /**
+   * Have Haiku title a discussion from its first question. Until it answers (or if it
+   * can't), the discussion goes by the start of the question.
+   */
+  private async nameChat(topic: Topic, chat: Chat): Promise<void> {
+    const asked = chat.messages.find((m) => m.role === 'user')
+    if (!asked) return
+    const context = asked.context && contextForRequest(asked.context, false, this.indexing[asked.context.docId]?.serverId)
+    try {
+      const title = await this.titleApi({
+        topic: topic.name,
+        about: { role: 'user', text: asked.text, ...(asked.mode && { mode: asked.mode }), ...(context && { context }) },
+      })
+      // A discussion deleted meanwhile is no longer in its topic; the title just goes nowhere.
+      if (title) chat.title = title
+    } catch {
+      // Without a title, the start of the question stands in.
     }
   }
 
@@ -446,8 +567,10 @@ export class Workspace {
           name: topic.name,
           docs,
           activeDocId: docs.some((d) => d.id === topic.activeDocId) ? topic.activeDocId : docs[0]?.id,
-          mode: topic.mode,
-          chat: topic.chat.map(savedMessage),
+          chatId: topic.chatId,
+          chats: topic.chats
+            .filter((c) => c.messages.length || c.id === topic.chatId)
+            .map((c) => ({ ...c, messages: c.messages.map(savedMessage) })),
         }
       }),
     }
@@ -484,17 +607,43 @@ export class Workspace {
         name: t.name,
         docIds,
         activeDocId: t.activeDocId && docIds.includes(t.activeDocId) ? t.activeDocId : docIds[0],
-        chat: t.chat.map(restoredMessage),
+        ...restoredChats(t),
         draft: '',
-        mode: t.mode === 'socratic' || t.mode === 'quiz' ? t.mode : 'normal',
       }
     })
     this.topics = [...restored, ...this.topics]
+    // Discussions saved before they had titles get one now, once.
+    for (const topic of this.topics.slice(0, restored.length)) {
+      for (const chat of topic.chats) if (!chat.title && chat.messages.length) void this.nameChat(topic, chat)
+    }
     if (!this.activeTopicId) {
       this.activeTopicId = restored.some((t) => t.id === saved.activeTopicId) ? saved.activeTopicId : restored[0]?.id
     }
     return Object.keys(docs)
   }
+}
+
+/**
+ * A saved topic's discussions, with one open. A topic saved when it had only one chat
+ * brings it back as its one discussion.
+ */
+function restoredChats(saved: SavedTopic): Pick<Topic, 'chats' | 'chatId'> {
+  const chats: Chat[] = Array.isArray(saved.chats)
+    ? saved.chats.map((c) => ({
+        id: c.id,
+        ...(c.title && { title: c.title }),
+        messages: c.messages.map(restoredMessage),
+        mode: validMode(c.mode),
+        updatedAt: c.updatedAt || 0,
+      }))
+    : [{ id: newId(), messages: (saved.chat ?? []).map(restoredMessage), mode: validMode(saved.mode), updatedAt: 0 }]
+  if (!chats.length) chats.push(emptyChat())
+  const chatId = chats.some((c) => c.id === saved.chatId) ? saved.chatId! : chats[0].id
+  return { chats, chatId }
+}
+
+function validMode(mode: unknown): Mode {
+  return mode === 'socratic' || mode === 'quiz' ? mode : 'normal'
 }
 
 function isSavedWorkspace(value: unknown): value is SavedWorkspace {
@@ -524,7 +673,7 @@ function quizRecord({ title, questions, picked, recommendation }: Quiz): QuizRec
 }
 
 /**
- * What the backend needs to answer a topic's newest question: the conversation
+ * What the backend needs to answer the newest question in a topic's discussion: the conversation
  * so far, and the backend's ids of the topic's PDFs so it can look things up in
  * them. Only the newest question carries images, which keeps requests small.
  */
@@ -532,8 +681,9 @@ export function askRequest(
   topic: Topic,
   serverId: (docId: string) => string | undefined = () => undefined,
   model?: string,
+  chat: Chat = chatOf(topic),
 ): AskRequest {
-  const turns = topic.chat.filter((m) => m.status !== 'streaming')
+  const turns = chat.messages.filter((m) => m.status !== 'streaming')
   return {
     topic: topic.name,
     ...(model && { model }),

@@ -394,7 +394,7 @@
     if (!target.closest('#topics-sidebar, #doc-outline, .outline-toggle')) outlineOpen = false
   }}
 >
-  <TopicsSidebar {workspace} bind:open={sidebarOpen} />
+  <TopicsSidebar {workspace} bind:open={sidebarOpen} onopenchat={() => (chatOpen = true)} />
 
   <div class="main">
     <input

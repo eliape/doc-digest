@@ -74,7 +74,8 @@ describe('ChatPanel', () => {
     expect(within(log).getByRole('button', { name: 'p. 10' })).toBeInTheDocument()
     expect(panel.getByRole('button', { name: 'Send' })).toBeDisabled()
     finish()
-    expect(await within(log).findByText('Partial answer.')).toBeInTheDocument()
+    // The newest words fade in, each piece in its own span, so match the paragraph's whole text.
+    expect(await within(log).findByText((_, el) => el?.tagName === 'P' && el.textContent === 'Partial answer.')).toBeInTheDocument()
   })
 
   it('shows no chip on a question about the open page, only on one about a spot', async () => {

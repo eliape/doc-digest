@@ -9,6 +9,7 @@
   import { MODES } from './modes'
   import ChatSwitcher from './ChatSwitcher.svelte'
   import QuizCard from './QuizCard.svelte'
+  import { streamFade } from './streamFade'
   import { type Chat, chatOf, type Topic, type Workspace } from './workspace.svelte'
 
   type Props = {
@@ -344,7 +345,11 @@
               />
             {:else if message.role === 'assistant'}
               <!-- Answers are Markdown with LaTeX maths; renderMarkdown sanitizes the HTML. -->
-              <div class="text markdown">{@html renderMarkdown(message.text, citable(index))}</div>
+              <!-- New words fade in as they stream. -->
+              <div
+                class="text markdown"
+                use:streamFade={{ html: renderMarkdown(message.text, citable(index)), live: message.status === 'streaming' }}
+              ></div>
             {:else if message.text}
               <span class="text">{message.text}</span>
             {/if}
@@ -723,6 +728,14 @@
     -webkit-text-fill-color: transparent;
     animation: shimmer 1.6s linear infinite;
   }
+  .markdown :global(.fresh) {
+    animation: fade-in 400ms ease-out both;
+  }
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+  }
   @keyframes shimmer {
     from {
       background-position: 100% 0;
@@ -732,6 +745,9 @@
     }
   }
   @media (prefers-reduced-motion: reduce) {
+    .markdown :global(.fresh) {
+      animation: none;
+    }
     .thinking {
       animation: none;
       -webkit-text-fill-color: currentColor;

@@ -12,9 +12,11 @@
     onopenchat?: () => void
     /** Whether the chat is showing. Only then is its discussion marked as the open one. */
     chatOpen?: boolean
+    /** Called by the Settings button at the bottom. */
+    onopensettings?: () => void
   }
 
-  let { workspace, open = $bindable(true), onopenchat, chatOpen = false }: Props = $props()
+  let { workspace, open = $bindable(true), onopenchat, chatOpen = false, onopensettings }: Props = $props()
 
   // A topic's discussions slide open and shut, quickly, unless motion is reduced.
   const listSlide = () => ({
@@ -286,6 +288,19 @@
       </ul>
     </div>
   {/if}
+
+  <!-- At the bottom, in the same fixed cell as the plus, so it stays put in the collapsed strip too. -->
+  <button type="button" class="new settings" aria-label="Settings" title="Settings" onclick={() => onopensettings?.()}>
+    <span class="plus" aria-hidden="true">
+      <svg viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="3" />
+        <path
+          d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"
+        />
+      </svg>
+    </span>
+    {#if expanded}<span class="fade">Settings</span>{/if}
+  </button>
 </aside>
 
 <style>
@@ -390,6 +405,25 @@
     flex-shrink: 0;
     width: 2.125rem;
     text-align: center;
+  }
+  /* Pushed to the bottom; with a long list it comes after it. */
+  .settings {
+    flex-shrink: 0;
+    margin-top: auto;
+    font-size: 0.9rem;
+  }
+  .settings .plus {
+    display: grid;
+    place-items: center;
+  }
+  .settings svg {
+    width: 1.05rem;
+    height: 1.05rem;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
   }
   .toggle:hover,
   .new:hover {

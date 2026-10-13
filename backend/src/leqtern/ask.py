@@ -165,6 +165,7 @@ class AskRequest(BaseModel):
     docs: list[str] = Field(default=[], description="Backend ids of the topic's PDFs, tab order")
     messages: list[Turn]
     model: AnswerModel | None = Field(default=None, description="Defaults to ANSWER_MODEL")
+    instructions: str = Field(default="", description="The reader's instructions, from Settings")
 
 
 def page_name(page: int, label: str | None) -> str:
@@ -297,16 +298,29 @@ def build_messages(request: AskRequest, aliases: dict[str, str] | None = None) -
     return messages
 
 
-def system_blocks(topic: str) -> list[dict[str, Any]]:
-    """Fixed instructions and the topic's name, both cached."""
+def system_blocks(topic: str, instructions: str = "") -> list[dict[str, Any]]:
+    """
+    Fixed instructions, the reader's own (set once in Settings, so they rarely change and
+    stay cached with the rest), and the topic's name, all cached.
+    """
+    own = instructions.strip()
     return [
         {"type": "text", "text": SYSTEM_PROMPT},
+        *([{"type": "text", "text": READER_INSTRUCTIONS.format(own)}] if own else []),
         {
             "type": "text",
             "text": f'The topic is called "{topic}".',
             "cache_control": {"type": "ephemeral"},
         },
     ]
+
+
+READER_INSTRUCTIONS = """\
+The reader's own instructions for every answer. Follow them; where they differ from the guidance \
+above on style, length or language, theirs win:
+<reader_instructions>
+{}
+</reader_instructions>"""
 
 
 def map_block(docs: list[TopicDoc], current: str | None) -> dict[str, Any] | None:
@@ -343,7 +357,7 @@ async def write_quiz(
     response: Any = await client.messages.parse(
         model=model,
         max_tokens=16000,
-        system=system_blocks(request.topic),  # type: ignore[arg-type]
+        system=system_blocks(request.topic, request.instructions),  # type: ignore[arg-type]
         messages=messages,  # type: ignore[arg-type]
         output_format=Quiz,
         output_config={"effort": EFFORT},
@@ -370,7 +384,7 @@ async def stream_answer(
     aliases = {d.info.id: d.alias for d in toolbox.docs.values()}
     newest = request.messages[-1].context if request.messages else None
     current = aliases.get(newest.doc_id or "") if newest else None
-    system = system_blocks(request.topic)
+    system = system_blocks(request.topic, request.instructions)
     messages: list[Any] = build_messages(request, aliases)
     topic_map = map_block(list(toolbox.docs.values()), current)
     if topic_map and messages and messages[-1]["role"] == "user":

@@ -953,4 +953,51 @@ describe('Workspace discussions', () => {
     ws.deleteTopic(topic.id)
     expect(signals[1].aborted).toBe(true)
   })
+
+  it('sends a reply with the quoted part of the answer, and drops the quote on switching discussions', async () => {
+    const ws = new Workspace()
+    ws.addDoc('notes.pdf', bytes(1))
+    const topic = ws.activeTopic!
+    await asked(ws, topic.id, 'What is a ring?')
+    ws.quoteReply(topic.id, '  a set with two operations\nsatisfying axioms ')
+    topic.draft = 'Which axioms?'
+    const requests: AskRequest[] = []
+    await ws.ask(topic.id, undefined, async function* (request) {
+      requests.push(request)
+      yield { type: 'text', text: 'These.' }
+    })
+    expect(topic.quote).toBeUndefined()
+    expect(chatOf(topic).messages[2]).toMatchObject({ text: 'Which axioms?', quote: 'a set with two operations\nsatisfying axioms' })
+    expect(requests[0].messages[2].text).toBe(
+      'Replying to this part of your answer:\n> a set with two operations\n> satisfying axioms\n\nWhich axioms?',
+    )
+
+    ws.quoteReply(topic.id, 'These')
+    ws.newChat(topic.id)
+    expect(topic.quote).toBeUndefined()
+  })
+
+  it('continues a discussion from one of its answers in a new one, leaving the original as it was', async () => {
+    const ws = new Workspace()
+    ws.addDoc('notes.pdf', bytes(1))
+    const topic = ws.activeTopic!
+    await asked(ws, topic.id, 'first')
+    await asked(ws, topic.id, 'second')
+    const original = chatOf(topic)
+    original.title = 'Rings'
+    ws.setMode(topic.id, 'socratic')
+
+    ws.splitChat(topic.id, original.messages[1].id)
+    const split = chatOf(topic)
+    expect(split.id).not.toBe(original.id)
+    expect(split.title).toBe('Rings (continued)')
+    expect(split.mode).toBe('socratic')
+    expect(split.messages.map((m) => m.text)).toEqual(['first', 'About first'])
+    expect(split.messages[0].id).not.toBe(original.messages[0].id)
+    expect(original.messages).toHaveLength(4)
+
+    split.messages[1].text = 'changed'
+    expect(original.messages[1].text).toBe('About first')
+    expect(discussions(topic).map((c) => c.id)).toEqual([split.id, original.id])
+  })
 })

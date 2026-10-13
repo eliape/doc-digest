@@ -72,6 +72,29 @@ export function renderMarkdown(source: string, docs?: CitableDocs): string {
   return root.innerHTML
 }
 
+/**
+ * The text of a selection in a rendered answer, to quote it back: maths goes back to its LaTeX
+ * (from KaTeX's annotation, as $...$ or $$...$$) and blocks keep their line breaks.
+ */
+export function selectedMarkdown(range: Range): string {
+  const root = document.createElement('div')
+  // A selection inside one formula holds only part of KaTeX's output, so it takes the whole formula.
+  const formula = (range.commonAncestorContainer instanceof Element
+    ? range.commonAncestorContainer
+    : range.commonAncestorContainer.parentElement
+  )?.closest('.katex')
+  root.append(formula ? formula.cloneNode(true) : range.cloneContents())
+  for (const katex of root.querySelectorAll('.katex')) {
+    const source = katex.querySelector('annotation[encoding="application/x-tex"]')?.textContent?.trim()
+    const display = !!katex.closest('.katex-display') || (!!formula && !!formula.closest('.katex-display'))
+    katex.replaceWith(source ? (display ? `$$${source}$$` : `$${source}$`) : '')
+  }
+  for (const block of root.querySelectorAll('p, li, h1, h2, h3, h4, h5, h6, pre, blockquote, tr, .math-display')) {
+    block.append('\n')
+  }
+  return (root.textContent ?? '').replace(/[^\S\n]*\n\s*/g, '\n').trim()
+}
+
 const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
 // "p. 41", "pp. 41–43", also spelled out or in Swedish ("page 41", "s. 41", "sid. 41").

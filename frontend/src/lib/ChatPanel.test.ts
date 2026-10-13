@@ -317,4 +317,51 @@ describe('ChatPanel', () => {
     await tick()
     expect(log.scrollTop).toBe(1000)
   })
+
+  it('quotes selected text of an answer in the question box with Reply, and shows it on the question', async () => {
+    const { topic, panel } = setup()
+    chatOf(topic).messages.push(
+      { id: 'q', role: 'user', text: 'What is a ring?' },
+      { id: 'a', role: 'assistant', text: 'A set with **two operations**.', status: 'done' },
+    )
+    const log = await panel.findByRole('log')
+    const range = document.createRange()
+    range.selectNodeContents(log.querySelector('.assistant strong')!)
+    range.getBoundingClientRect = () => ({ left: 10, top: 20, width: 50, height: 10, bottom: 30, right: 60 }) as DOMRect
+    log.getBoundingClientRect = () => ({ left: 0, top: 0, width: 300, height: 500, bottom: 500, right: 300 }) as DOMRect
+    document.getSelection()!.removeAllRanges()
+    document.getSelection()!.addRange(range)
+    await fireEvent(document, new Event('selectionchange'))
+
+    await fireEvent.click(await panel.findByRole('button', { name: 'Reply' }))
+    expect(topic.quote).toBe('two operations')
+    const quote = panel.getByLabelText('Replying to')
+    expect(quote).toHaveTextContent('two operations')
+
+    await fireEvent.click(panel.getByRole('button', { name: 'Remove the quote' }))
+    expect(topic.quote).toBeUndefined()
+
+    chatOf(topic).messages.push({ id: 'q2', role: 'user', text: 'Which ones?', quote: 'two operations' })
+    await tick()
+    expect(log.querySelectorAll('.user')[1].querySelector('.quoted')).toHaveTextContent('two operations')
+  })
+
+  it('continues the conversation from an answer in a new discussion', async () => {
+    const { topic, panel } = setup()
+    chatOf(topic).messages.push(
+      { id: 'q', role: 'user', text: 'First?' },
+      { id: 'a', role: 'assistant', text: 'One.', status: 'done' },
+      { id: 'q2', role: 'user', text: 'Second?' },
+      { id: 'a2', role: 'assistant', text: 'Two.', status: 'done' },
+    )
+    const original = chatOf(topic).id
+    const buttons = await panel.findAllByRole('button', { name: 'Continue in a new chat' })
+    expect(buttons).toHaveLength(2)
+    await fireEvent.click(buttons[0])
+    expect(chatOf(topic).id).not.toBe(original)
+    const log = panel.getByRole('log')
+    expect(log.querySelectorAll('.message')).toHaveLength(2)
+    expect(log).toHaveTextContent('One.')
+    expect(log).not.toHaveTextContent('Two.')
+  })
 })

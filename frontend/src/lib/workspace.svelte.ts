@@ -35,6 +35,8 @@ export type ChatMessage = {
   role: 'user' | 'assistant'
   text: string
   context?: PageContext
+  /** On the reader's side: the part of an earlier answer they replied to. */
+  quote?: string
   mode?: 'socratic' | 'quiz'
   status?: 'streaming' | 'done' | 'error'
   /** The lookups the model made while answering, e.g. "Read book.pdf, pp. 4–5". */
@@ -95,7 +97,8 @@ export type Chat = {
  * A named group of PDFs that are read and asked about together. Each topic has
  * its discussions, shared by all its tabs, one of them open (`chatId`). `draft` is
  * the unsent question and `context` the spot the reader last clicked, attached to the
- * next question; both stay with the topic when another discussion is opened.
+ * next question; both stay with the topic when another discussion is opened. `quote` is a part
+ * of an answer the reader is replying to, which belongs to the open discussion.
  */
 export type Topic = {
   id: string
@@ -106,6 +109,7 @@ export type Topic = {
   chatId: string
   draft: string
   context?: PageContext
+  quote?: string
 }
 
 /** One saved tab: the backend keeps its PDF, so only its id and where the reader was are saved. */
@@ -120,7 +124,7 @@ export type SavedDoc = {
  * One saved topic. Its chats are saved without the page images, which only the newest question
  * needs. Workspaces saved before a topic had several discussions have one `chat` and `mode`.
  */
-export type SavedTopic = Omit<Topic, 'docIds' | 'draft' | 'context' | 'chats' | 'chatId'> & {
+export type SavedTopic = Omit<Topic, 'docIds' | 'draft' | 'context' | 'quote' | 'chats' | 'chatId'> & {
   docs: SavedDoc[]
   chats?: Chat[]
   chatId?: string
@@ -133,6 +137,8 @@ export type SavedWorkspace = {
   version: 1
   activeTopicId?: string
   topics: SavedTopic[]
+  /** The reader's own instructions for every answer, set in Settings. */
+  instructions?: string
 }
 
 let nextId = 0
@@ -178,6 +184,8 @@ export class Workspace {
   activeTopicId = $state<string>()
   /** The model that answers new questions, picked in the chat. */
   answerModel = $state<string>()
+  /** The reader's own instructions, sent with every question (set in Settings). */
+  instructions = $state('')
   /** Indexing progress per PDF (by tab id). */
   indexing = $state<Record<string, IndexState>>({})
   /** The page each tab was last on, so it opens there next time. */
@@ -329,6 +337,7 @@ export class Workspace {
     const chat = emptyChat()
     topic.chats.push(chat)
     topic.chatId = chat.id
+    topic.quote = undefined
   }
 
   /** Open another of the topic's discussions. The one left goes away if nothing was asked in it. */
@@ -338,6 +347,38 @@ export class Workspace {
     const left = chatOf(topic)
     if (!left.messages.length) topic.chats = topic.chats.filter((c) => c.id !== left.id)
     topic.chatId = chatId
+    topic.quote = undefined
+  }
+
+  /**
+   * Continue a discussion from one of its answers in a new discussion, which gets a copy of the
+   * messages up to and including that answer, the same mode, and opens. The original stays as it was.
+   */
+  splitChat(topicId: string, messageId: string) {
+    const topic = this.topics.find((t) => t.id === topicId)
+    const from = topic?.chats.find((c) => c.messages.some((m) => m.id === messageId))
+    if (!topic || !from) return
+    const end = from.messages.findIndex((m) => m.id === messageId) + 1
+    const messages = $state.snapshot(from.messages.slice(0, end)).map((m) => ({ ...m, id: newId() }) as ChatMessage)
+    const chat: Chat = { id: newId(), title: `${chatTitle(from)} (continued)`, messages, mode: from.mode, updatedAt: Date.now() }
+    const left = chatOf(topic)
+    if (!left.messages.length) topic.chats = topic.chats.filter((c) => c.id !== left.id)
+    topic.chats.push(chat)
+    topic.chatId = chat.id
+    topic.quote = undefined
+  }
+
+  /** Reply to part of an answer: the next question quotes it. */
+  quoteReply(topicId: string, text: string) {
+    const topic = this.topics.find((t) => t.id === topicId)
+    const quote = text.trim()
+    if (topic && quote) topic.quote = quote
+  }
+
+  /** Take the quoted part of an answer off the next question. */
+  clearQuote(topicId: string) {
+    const topic = this.topics.find((t) => t.id === topicId)
+    if (topic) topic.quote = undefined
   }
 
   /**
@@ -353,6 +394,7 @@ export class Workspace {
     const chat = emptyChat()
     topic.chats.push(chat)
     topic.chatId = chat.id
+    topic.quote = undefined
   }
 
   /** Whether a discussion's latest answer is still arriving. */
@@ -393,12 +435,13 @@ export class Workspace {
   ): Promise<void> {
     const topic = this.topics.find((t) => t.id === topicId)
     if (!topic || !this.canSend(topicId)) return
-    const { context } = topic
+    const { context, quote } = topic
     const chat = chatOf(topic)
     const mode = chat.mode !== 'normal' && { mode: chat.mode }
-    const question = { text: topic.draft.trim(), context, ...mode }
+    const question = { text: topic.draft.trim(), context, ...(quote && { quote }), ...mode }
     topic.draft = ''
     topic.context = undefined
+    topic.quote = undefined
     const fill = context ? undefined : fallback
     if (chat.mode === 'quiz') {
       chat.mode = 'normal'
@@ -470,7 +513,7 @@ export class Workspace {
   private async converse(
     topic: Topic,
     chat: Chat,
-    asked: Pick<ChatMessage, 'text' | 'context' | 'mode'>,
+    asked: Pick<ChatMessage, 'text' | 'context' | 'quote' | 'mode'>,
     fill: (() => Promise<PageContext | undefined>) | undefined,
     respond: (answer: ChatMessage, request: AskRequest, signal: AbortSignal) => Promise<void>,
   ): Promise<void> {
@@ -492,7 +535,9 @@ export class Workspace {
       const uploading = topic.docIds.filter((id) => id in this.uploads).map((id) => this.uploads[id])
       if (uploading.length) await Promise.all(uploading)
       const serverId = (id: string) => this.indexing[id]?.serverId
-      await respond(answer, askRequest(topic, serverId, this.answerModel, chat), controller.signal)
+      const instructions = this.instructions.trim()
+      const request = { ...askRequest(topic, serverId, this.answerModel, chat), ...(instructions && { instructions }) }
+      await respond(answer, request, controller.signal)
       answer.status = 'done'
     } catch (error) {
       answer.status = 'error'
@@ -551,6 +596,7 @@ export class Workspace {
     return {
       version: 1,
       activeTopicId: this.activeTopicId,
+      ...(this.instructions.trim() && { instructions: this.instructions }),
       topics: this.topics.map((topic) => {
         const docs = topic.docIds.flatMap((id): SavedDoc[] => {
           const serverId = this.indexing[id]?.serverId
@@ -607,6 +653,8 @@ export class Workspace {
       }
     })
     this.topics = [...restored, ...this.topics]
+    // Unless they were already changed while it loaded.
+    if (!this.instructions && typeof saved.instructions === 'string') this.instructions = saved.instructions
     // Discussions saved before they had titles get one now, once.
     for (const topic of this.topics.slice(0, restored.length)) {
       for (const chat of topic.chats) if (!chat.title && chat.messages.length) void this.nameChat(topic, chat)
@@ -685,12 +733,18 @@ export function askRequest(
     docs: topic.docIds.map(serverId).filter((id): id is string => !!id),
     messages: turns.map((m, i) => ({
       role: m.role,
-      text: m.status === 'error' ? '' : m.text,
+      text: m.status === 'error' ? '' : m.quote ? withQuote(m.quote, m.text) : m.text,
       context: m.context && contextForRequest(m.context, i === turns.length - 1, serverId(m.context.docId)),
       ...(m.role === 'user' && m.mode && { mode: m.mode }),
       ...(m.quiz && { quiz: quizRecord(m.quiz) }),
     })),
   }
+}
+
+/** A reply to part of an answer, as the model reads it: the quoted part, then the reader's words. */
+export function withQuote(quote: string, text: string): string {
+  const quoted = quote.split('\n').map((line) => `> ${line}`).join('\n')
+  return `Replying to this part of your answer:\n${quoted}\n\n${text}`
 }
 
 function contextForRequest(context: PageContext, withImages: boolean, docId: string | undefined) {

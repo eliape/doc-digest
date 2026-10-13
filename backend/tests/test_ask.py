@@ -17,6 +17,7 @@ from leqtern.ask import (
     Turn,
     build_messages,
     describe,
+    system_blocks,
     write_quiz,
 )
 from leqtern.config import Settings, get_settings
@@ -444,3 +445,13 @@ def test_the_page_is_shown_when_the_model_cannot_look_it_up() -> None:
     request = AskRequest(topic="Calculus", messages=[Turn(role="user", text="why?", context=page)])
     content = build_messages(request)[0]["content"]
     assert any(b["type"] == "image" for b in content)
+
+
+def test_the_readers_instructions_come_between_the_fixed_prompt_and_the_topic() -> None:
+    assert len(system_blocks("T")) == 2
+    assert len(system_blocks("T", "  ")) == 2
+    fixed, own, topic = system_blocks("T", " Answer in Swedish. ")
+    assert fixed["text"] == SYSTEM_PROMPT
+    assert "<reader_instructions>\nAnswer in Swedish.\n</reader_instructions>" in own["text"]
+    # One breakpoint at the end caches all three.
+    assert "cache_control" not in own and topic["cache_control"] == {"type": "ephemeral"}

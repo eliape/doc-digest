@@ -113,7 +113,11 @@ def report(calls: list[Call], names: dict[str, tuple[str, int]] | None = None) -
                 + ", ".join(f"{name} {100 * v / total:.0f}%" for name, v in parts.items())
             )
 
-    for kind, title in (("quiz", "Quizzes"), ("quiz_recommendation", "Quiz review notes")):
+    for kind, title in (
+        ("quiz", "Quizzes"),
+        ("quiz_recommendation", "Quiz review notes"),
+        ("register", "Register notes (per discussion left)"),
+    ):
         mine = [c for c in calls if c.kind == kind]
         if mine:
             out("")
@@ -134,7 +138,7 @@ def report(calls: list[Call], names: dict[str, tuple[str, int]] | None = None) -
             size = f", {pages} pages" if pages else ""
             out(f"  {name}{size}: {cents(sum(c.cost for c in mine))}")
 
-    known = {"answer", "quiz", "quiz_recommendation"}
+    known = {"answer", "quiz", "quiz_recommendation", "register"}
     others = [c for c in calls if c.kind not in known and not c.kind.startswith("index")]
     if others:
         out("")

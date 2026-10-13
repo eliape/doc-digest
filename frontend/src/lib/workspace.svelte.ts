@@ -1,12 +1,16 @@
 import {
   type AnswerStream,
   type AskRequest,
+  type AskTurn,
   createQuiz,
+  type DiscussionRequest,
   fetchAnswer,
   fetchChatTitle,
   fetchIndexStatus,
   fetchRecommendation,
+  forgetRegister,
   type IndexStatus,
+  noteDiscussion,
   type QuizRecord,
   type RecommendationRequest,
   type TitleRequest,
@@ -72,6 +76,17 @@ export type QuizApi = {
 }
 
 const realQuizApi: QuizApi = { create: (r, signal) => createQuiz(r, signal), recommend: (r) => fetchRecommendation(r) }
+
+/**
+ * The backend calls the topics' registers use: `note` has Haiku note what is new in a discussion
+ * the reader left, and `forget` deletes a deleted topic's notes. Tests pass fakes.
+ */
+export type RegisterApi = {
+  note: (topicId: string, request: DiscussionRequest) => Promise<void>
+  forget: (topicId: string) => Promise<void>
+}
+
+const realRegisterApi: RegisterApi = { note: (id, r) => noteDiscussion(id, r), forget: (id) => forgetRegister(id) }
 
 /**
  * How a topic's chat answers: `normal` answers questions; `socratic` has the model
@@ -203,6 +218,8 @@ export class Workspace {
   quizApi: QuizApi = realQuizApi
   /** Where discussions' titles come from. Tests swap in a fake. */
   titleApi: (request: TitleRequest) => Promise<string | null> = (r) => fetchChatTitle(r)
+  /** Where the topics' registers are kept. Tests swap in a fake. */
+  registerApi: RegisterApi = realRegisterApi
 
   activeTopic = $derived(this.topics.find((t) => t.id === this.activeTopicId))
   activeDoc = $derived(this.activeTopic?.activeDocId ? this.docs[this.activeTopic.activeDocId] : undefined)
@@ -212,15 +229,20 @@ export class Workspace {
   }
 
   createTopic(name = 'New topic'): Topic {
+    const left = this.openDiscussion()
     const chat = emptyChat()
     this.topics.push({ id: newId(), name, docIds: [], chats: [chat], chatId: chat.id, draft: '' })
     const topic = this.topics[this.topics.length - 1]
     this.activeTopicId = topic.id
+    this.noteIfLeft(left)
     return topic
   }
 
   selectTopic(id: string) {
-    if (this.topics.some((t) => t.id === id)) this.activeTopicId = id
+    if (!this.topics.some((t) => t.id === id)) return
+    const left = this.openDiscussion()
+    this.activeTopicId = id
+    this.noteIfLeft(left)
   }
 
   renameTopic(id: string, name: string) {
@@ -233,6 +255,7 @@ export class Workspace {
     if (index === -1) return
     const [topic] = this.topics.splice(index, 1)
     for (const chat of topic.chats) this.answering.get(chat.id)?.abort()
+    void this.registerApi.forget(topic.id).catch(() => {})
     this.docs = omit(this.docs, topic.docIds)
     for (const docId of topic.docIds) {
       delete this.indexing[docId]
@@ -343,6 +366,7 @@ export class Workspace {
     topic.chats.push(chat)
     topic.chatId = chat.id
     topic.quote = undefined
+    this.noteDiscussion(topic, open)
   }
 
   /** Open another of the topic's discussions. The one left goes away if nothing was asked in it. */
@@ -353,6 +377,7 @@ export class Workspace {
     if (!left.messages.length) topic.chats = topic.chats.filter((c) => c.id !== left.id)
     topic.chatId = chatId
     topic.quote = undefined
+    this.noteDiscussion(topic, left)
   }
 
   /**
@@ -378,6 +403,7 @@ export class Workspace {
     topic.chats.push(chat)
     topic.chatId = chat.id
     topic.quote = undefined
+    this.noteDiscussion(topic, left)
   }
 
   /** Reply to part of an answer: the next question quotes it. */
@@ -551,6 +577,8 @@ export class Workspace {
       const request = { ...askRequest(topic, serverId, this.answerModel, chat), ...(instructions && { instructions }) }
       await respond(answer, request, controller.signal)
       answer.status = 'done'
+      // An answer that finished after the reader left its discussion was not there to be noted.
+      if (!this.isOpen(topic.id, chatId)) this.noteDiscussion(topic, chat)
     } catch (error) {
       answer.status = 'error'
       answer.text = error instanceof Error ? error.message : String(error)
@@ -579,11 +607,43 @@ export class Workspace {
     }
   }
 
+  /**
+   * Have Haiku note what is new in a discussion in its topic's register, so the topic's later
+   * discussions can build on it. Called when the reader leaves a discussion: only what was
+   * answered since the last time is read, and a discussion with no answer is skipped.
+   */
+  private noteDiscussion(topic: Topic, chat: Chat) {
+    if (!chat.messages.some((m) => m.role === 'assistant' && m.status === 'done')) return
+    const request = discussionRequest(topic, chat, (id) => this.indexing[id]?.serverId)
+    void this.registerApi.note(topic.id, request).catch(() => {})
+  }
+
+  /** The discussion open now, with its topic. */
+  private openDiscussion(): { topic: Topic; chat: Chat } | undefined {
+    const topic = this.activeTopic
+    return topic && { topic, chat: chatOf(topic) }
+  }
+
+  private isOpen(topicId: string, chatId: string): boolean {
+    const topic = this.activeTopic
+    return topic?.id === topicId && topic.chatId === chatId
+  }
+
+  /** Note the discussion that was open before a switch, if the switch left it (and it still exists). */
+  private noteIfLeft(left: { topic: Topic; chat: Chat } | undefined) {
+    if (!left || this.isOpen(left.topic.id, left.chat.id)) return
+    const topic = this.topics.find((t) => t.id === left.topic.id)
+    const chat = topic?.chats.find((c) => c.id === left.chat.id)
+    if (topic && chat) this.noteDiscussion(topic, chat)
+  }
+
   selectDoc(id: string) {
     const topic = this.topicOf(id)
     if (!topic) return
+    const left = this.openDiscussion()
     topic.activeDocId = id
     this.activeTopicId = topic.id
+    this.noteIfLeft(left)
   }
 
   /** Close a tab. The tab to its right (or else its left) becomes active. */
@@ -742,15 +802,51 @@ export function askRequest(
   const turns = chat.messages.filter((m) => m.status !== 'streaming')
   return {
     topic: topic.name,
+    topic_id: topic.id,
+    chat_id: chat.id,
     ...(model && { model }),
     docs: topic.docIds.map(serverId).filter((id): id is string => !!id),
-    messages: turns.map((m, i) => ({
-      role: m.role,
-      text: m.status === 'error' ? '' : m.quote ? withQuote(m.quote, m.text) : m.text,
-      context: m.context && contextForRequest(m.context, i === turns.length - 1, serverId(m.context.docId)),
-      ...(m.role === 'user' && m.mode && { mode: m.mode }),
-      ...(m.quiz && { quiz: quizRecord(m.quiz) }),
-    })),
+    messages: turns.map((m, i) => requestTurn(m, i === turns.length - 1, serverId)),
+  }
+}
+
+/**
+ * A discussion for Haiku to note in its topic's register: its turns without images, each with
+ * a key that changes when the turn does, so a quiz answered since it was last read is read again.
+ * A branch leaves out the messages it copied, which were noted in the discussion it left.
+ */
+export function discussionRequest(
+  topic: Topic,
+  chat: Chat,
+  serverId: (docId: string) => string | undefined = () => undefined,
+): DiscussionRequest {
+  return {
+    topic: topic.name,
+    chat_id: chat.id,
+    ...(chat.title && { title: chat.title }),
+    docs: topic.docIds.map(serverId).filter((id): id is string => !!id),
+    messages: chat.messages
+      .slice(chat.branch?.at ?? 0)
+      .filter((m) => m.status !== 'streaming')
+      .map((m) => ({ key: turnKey(m), ...requestTurn(m, false, serverId) })),
+  }
+}
+
+function turnKey(message: ChatMessage): string {
+  const { quiz } = message
+  if (!quiz) return message.id
+  const answered = quiz.picked.filter((p) => p !== null).length
+  return `${message.id}/${answered}${quiz.recommendation ? '+' : ''}`
+}
+
+/** One message as the backend reads it. */
+function requestTurn(m: ChatMessage, withImages: boolean, serverId: (docId: string) => string | undefined): AskTurn {
+  return {
+    role: m.role,
+    text: m.status === 'error' ? '' : m.quote ? withQuote(m.quote, m.text) : m.text,
+    context: m.context && contextForRequest(m.context, withImages, serverId(m.context.docId)),
+    ...(m.role === 'user' && m.mode && { mode: m.mode }),
+    ...(m.quiz && { quiz: quizRecord(m.quiz) }),
   }
 }
 

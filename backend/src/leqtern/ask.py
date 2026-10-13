@@ -94,7 +94,14 @@ or "As in the worked example (book.pdf, p. 40)", in the citation form above.
 - Write it from what you are shown; there is no looking things up for a quiz.
 - After earlier quizzes, come back to what they got wrong.
 In your other answers, use quiz results to adapt: build on what they know, and go over what \
-they got wrong when it comes up."""
+they got wrong when it comes up.
+
+Their earlier work: some questions come with notes on their earlier discussions in this topic: \
+problems they worked on or solved, what they struggled with and what they understood. Build on \
+them. Don't go over pitfalls they already got past unless they slip again. When a step is like \
+one they took before, say so briefly, e.g. "As in Q6 a), take moments about the hinge." When \
+they run into something they struggled with before, point it out. Bring a note up only when it \
+helps. Notes are not sources: don't cite them, and read the pages before relying on them."""
 
 # What a Socratic session's first turn asks for, when the reader typed nothing.
 SOCRATIC_START = "Start a Socratic session about what they pointed at: ask your first question."
@@ -164,6 +171,8 @@ AnswerModel = Literal["claude-opus-5-5", "claude-sonnet-5-5"]
 
 class AskRequest(BaseModel):
     topic: str
+    topic_id: str | None = Field(default=None, description="The topic's id, for its register")
+    chat_id: str | None = Field(default=None, description="The discussion's id")
     docs: list[str] = Field(default=[], description="Backend ids of the topic's PDFs, tab order")
     messages: list[Turn]
     model: AnswerModel | None = Field(default=None, description="Defaults to ANSWER_MODEL")
@@ -358,16 +367,20 @@ async def write_quiz(
     usage: UsageLog | None = None,
     model: str = MODEL,
     reading: list[dict[str, Any]] | None = None,
+    notes: dict[str, Any] | None = None,
 ) -> Quiz:
     """
     A multiple-choice quiz for the newest turn (a [Quiz] request), from what the reader is
     shown and the conversation so far, including how earlier quizzes went. `reading` is
-    the section the quiz covers when they gave nothing to focus on.
+    the section the quiz covers when they gave nothing to focus on, and `notes` the
+    register's notes for it.
     """
     messages = build_messages(request)
     if reading:
         # Before the request itself, which stays last.
         messages[-1]["content"][-1:-1] = reading
+    if notes:
+        messages[-1]["content"].insert(0, notes)
     began = time.monotonic()
     response: Any = await client.messages.parse(
         model=model,
@@ -391,10 +404,12 @@ async def stream_answer(
     toolbox: Toolbox,
     usage: UsageLog | None = None,
     model: str = MODEL,
+    notes: dict[str, Any] | None = None,
 ) -> AsyncIterator[Event]:
     """
     Yield the answer as events: {"type": "text"} pieces as they arrive, and a
-    {"type": "step"} for each lookup the model makes.
+    {"type": "step"} for each lookup the model makes. `notes` are the register's notes for
+    the question, sent with it like the map, so they never break the history's cache.
     """
     aliases = {d.info.id: d.alias for d in toolbox.docs.values()}
     newest = request.messages[-1].context if request.messages else None
@@ -402,8 +417,10 @@ async def stream_answer(
     system = system_blocks(request.topic, request.instructions)
     messages: list[Any] = build_messages(request, aliases)
     topic_map = map_block(list(toolbox.docs.values()), current)
-    if topic_map and messages and messages[-1]["role"] == "user":
-        messages[-1]["content"].insert(0, topic_map)
+    if messages and messages[-1]["role"] == "user":
+        for block in (notes, topic_map):
+            if block:
+                messages[-1]["content"].insert(0, block)
     tools = TOOLS if toolbox.docs else []
     began = time.monotonic()
     first_text: float | None = None

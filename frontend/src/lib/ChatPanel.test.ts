@@ -74,7 +74,8 @@ describe('ChatPanel', () => {
     expect(within(log).getByRole('button', { name: 'p. 10' })).toBeInTheDocument()
     expect(panel.getByRole('button', { name: 'Send' })).toBeDisabled()
     finish()
-    expect(await within(log).findByText('Partial answer.')).toBeInTheDocument()
+    // The newest words fade in, each piece in its own span, so match the paragraph's whole text.
+    expect(await within(log).findByText((_, el) => el?.tagName === 'P' && el.textContent === 'Partial answer.')).toBeInTheDocument()
   })
 
   it('shows no chip on a question about the open page, only on one about a spot', async () => {
@@ -310,11 +311,86 @@ describe('ChatPanel', () => {
     await stream('Because of this and that')
     expect(log.scrollTop).toBe(1000)
 
-    // A new question always goes to the bottom.
+    // Even a small move upwards, still inside the bottom margin, stops it.
+    await scrollTo(1000)
+    await scrollTo(990)
+    await stream('Because of this and that, so')
+    expect(log.scrollTop).toBe(990)
+
+    // A wheel turn upwards stops it before anything has scrolled.
+    await scrollTo(1000)
+    await fireEvent.wheel(log, { deltaY: -40 })
+    log.scrollTop = 995
+    await stream('Because of this and that, so there')
+    expect(log.scrollTop).toBe(995)
+
+    // A new question, which arrives with its answer's placeholder, always goes to the bottom.
     await scrollTo(300)
-    chatOf(topic).messages.push({ id: 'q2', role: 'user', text: 'And?' })
+    chatOf(topic).messages.push({ id: 'q2', role: 'user', text: 'And?' }, { id: 'a2', role: 'assistant', text: '', status: 'streaming' })
     await tick()
     await tick()
     expect(log.scrollTop).toBe(1000)
+  })
+
+  it('quotes selected text of an answer in the question box with Reply, and shows it on the question', async () => {
+    const { topic, panel } = setup()
+    chatOf(topic).messages.push(
+      { id: 'q', role: 'user', text: 'What is a ring?' },
+      { id: 'a', role: 'assistant', text: 'A set with **two operations**.', status: 'done' },
+    )
+    const log = await panel.findByRole('log')
+    const range = document.createRange()
+    range.selectNodeContents(log.querySelector('.assistant strong')!)
+    range.getBoundingClientRect = () => ({ left: 10, top: 20, width: 50, height: 10, bottom: 30, right: 60 }) as DOMRect
+    log.getBoundingClientRect = () => ({ left: 0, top: 0, width: 300, height: 500, bottom: 500, right: 300 }) as DOMRect
+    document.getSelection()!.removeAllRanges()
+    document.getSelection()!.addRange(range)
+    await fireEvent(document, new Event('selectionchange'))
+
+    await fireEvent.click(await panel.findByRole('button', { name: 'Reply' }))
+    expect(topic.quote).toBe('two operations')
+    const quote = panel.getByLabelText('Replying to')
+    expect(quote).toHaveTextContent('two operations')
+
+    await fireEvent.click(panel.getByRole('button', { name: 'Remove the quote' }))
+    expect(topic.quote).toBeUndefined()
+
+    chatOf(topic).messages.push({ id: 'q2', role: 'user', text: 'Which ones?', quote: 'two operations' })
+    await tick()
+    expect(log.querySelectorAll('.user')[1].querySelector('.quoted')).toHaveTextContent('two operations')
+  })
+
+  it('continues the conversation from an answer in a new discussion', async () => {
+    const { workspace, topic, panel } = setup()
+    chatOf(topic).messages.push(
+      { id: 'q', role: 'user', text: 'First?' },
+      { id: 'a', role: 'assistant', text: 'One.', status: 'done' },
+      { id: 'q2', role: 'user', text: 'Second?' },
+      { id: 'a2', role: 'assistant', text: 'Two.', status: 'done' },
+    )
+    const original = chatOf(topic).id
+    chatOf(topic).title = 'Counting'
+    const buttons = await panel.findAllByRole('button', { name: 'Branch from this answer' })
+    expect(buttons).toHaveLength(2)
+    await fireEvent.click(buttons[0])
+    expect(chatOf(topic).id).not.toBe(original)
+    expect(chatOf(topic).title).toBe('Branch · Counting')
+    const log = panel.getByRole('log')
+    expect(log.querySelectorAll('.message')).toHaveLength(2)
+    expect(log).toHaveTextContent('One.')
+    expect(log).not.toHaveTextContent('Two.')
+
+    // A divider under the copied messages links back to the original, until it is deleted.
+    const divider = within(log).getByRole('separator')
+    expect(divider).toHaveTextContent('From Counting')
+    const branch = chatOf(topic).id
+    await fireEvent.click(within(divider).getByRole('button', { name: 'Counting' }))
+    expect(chatOf(topic).id).toBe(original)
+    workspace.selectChat(topic.id, branch)
+    workspace.deleteChat(topic.id, original)
+    await tick()
+    expect(within(log).getByRole('separator')).toHaveTextContent('From deleted chat')
+    expect(within(within(log).getByRole('separator')).queryByRole('button')).toBeNull()
+    expect(chatOf(topic).id).toBe(branch)
   })
 })

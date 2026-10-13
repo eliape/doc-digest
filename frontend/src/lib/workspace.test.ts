@@ -311,6 +311,26 @@ describe('Workspace.ask', () => {
     expect(models).toEqual([undefined, 'claude-sonnet-5-5'])
   })
 
+  it("sends the reader's own instructions with every question, and saves them", async () => {
+    const ws = new Workspace()
+    ws.addDoc('notes.pdf', bytes(1))
+    const topic = ws.activeTopic!
+    const sent: (string | undefined)[] = []
+    const stream = async function* (request: AskRequest) {
+      sent.push(request.instructions)
+    }
+    topic.draft = 'one'
+    await ws.ask(topic.id, undefined, stream)
+    expect(ws.snapshot().instructions).toBeUndefined()
+    ws.instructions = ' Answer in Swedish. '
+    topic.draft = 'two'
+    await ws.ask(topic.id, undefined, stream)
+    expect(sent).toEqual([undefined, 'Answer in Swedish.'])
+    const back = new Workspace()
+    await back.restore(JSON.parse(JSON.stringify(ws.snapshot())), async () => bytes(1))
+    expect(back.instructions).toBe(' Answer in Swedish. ')
+  })
+
   it('starts a Socratic session about a spot attached for it, with what to focus on optional', async () => {
     const ws = new Workspace()
     const doc = ws.addDoc('notes.pdf', bytes(1))
@@ -962,6 +982,56 @@ describe('Workspace discussions', () => {
     ws.deleteTopic(topic.id)
     expect(signals[1].aborted).toBe(true)
   })
+
+  it('sends a reply with the quoted part of the answer, and drops the quote on switching discussions', async () => {
+    const ws = new Workspace()
+    ws.addDoc('notes.pdf', bytes(1))
+    const topic = ws.activeTopic!
+    await asked(ws, topic.id, 'What is a ring?')
+    ws.quoteReply(topic.id, '  a set with two operations\nsatisfying axioms ')
+    topic.draft = 'Which axioms?'
+    const requests: AskRequest[] = []
+    await ws.ask(topic.id, undefined, async function* (request) {
+      requests.push(request)
+      yield { type: 'text', text: 'These.' }
+    })
+    expect(topic.quote).toBeUndefined()
+    expect(chatOf(topic).messages[2]).toMatchObject({ text: 'Which axioms?', quote: 'a set with two operations\nsatisfying axioms' })
+    expect(requests[0].messages[2].text).toBe(
+      'Replying to this part of your answer:\n> a set with two operations\n> satisfying axioms\n\nWhich axioms?',
+    )
+
+    ws.quoteReply(topic.id, 'These')
+    ws.newChat(topic.id)
+    expect(topic.quote).toBeUndefined()
+  })
+
+  it('continues a discussion from one of its answers in a new one, leaving the original as it was', async () => {
+    const ws = new Workspace()
+    ws.addDoc('notes.pdf', bytes(1))
+    const topic = ws.activeTopic!
+    await asked(ws, topic.id, 'first')
+    await asked(ws, topic.id, 'second')
+    const original = chatOf(topic)
+    original.title = 'Rings'
+    ws.setMode(topic.id, 'socratic')
+    // So the branch is used later than the original, not in the same millisecond.
+    await new Promise((resolve) => setTimeout(resolve, 2))
+
+    ws.splitChat(topic.id, original.messages[1].id)
+    const split = chatOf(topic)
+    expect(split.id).not.toBe(original.id)
+    expect(split.title).toBe('Branch · Rings')
+    expect(split.branch).toEqual({ from: original.id, at: 2 })
+    expect(split.mode).toBe('socratic')
+    expect(split.messages.map((m) => m.text)).toEqual(['first', 'About first'])
+    expect(split.messages[0].id).not.toBe(original.messages[0].id)
+    expect(original.messages).toHaveLength(4)
+
+    split.messages[1].text = 'changed'
+    expect(original.messages[1].text).toBe('About first')
+    expect(discussions(topic).map((c) => c.id)).toEqual([split.id, original.id])
+  })
 })
 
 describe('Workspace register', () => {
@@ -1046,6 +1116,19 @@ describe('Workspace register', () => {
     finish()
     await answering
     expect(noted.map(([, r]) => r.chat_id)).toEqual([slow])
+  })
+
+  it('notes the discussion a branch leaves, and a branch only for what is new in it', async () => {
+    const { ws, noted } = workspace()
+    ws.addDoc('notes.pdf', bytes(1))
+    const topic = ws.activeTopic!
+    await asked(ws, topic.id, 'first')
+    const original = chatOf(topic)
+    ws.splitChat(topic.id, original.messages[1].id)
+    expect(noted.map(([, r]) => r.chat_id)).toEqual([original.id])
+    expect(discussionRequest(topic, chatOf(topic)).messages).toEqual([])
+    await asked(ws, topic.id, 'second')
+    expect(discussionRequest(topic, chatOf(topic)).messages.map((m) => m.text)).toEqual(['second', 'About second'])
   })
 
   it('reads a quiz again once it has been answered, and forgets a deleted topic', async () => {

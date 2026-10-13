@@ -11,6 +11,7 @@
   import OutlinePanel from './lib/OutlinePanel.svelte'
   import { isPdfFile } from './lib/pages'
   import { savedTool, saveTool, type Tool } from './lib/tools'
+  import SettingsDialog from './lib/SettingsDialog.svelte'
   import TopicsSidebar from './lib/TopicsSidebar.svelte'
   import { type Mode, Workspace } from './lib/workspace.svelte'
 
@@ -57,6 +58,7 @@
 
   // Every load starts with the topics open and the chat closed.
   let sidebarOpen = $state(true)
+  let settingsOpen = $state(false)
   // Whether each topic's chat is showing, so a topic opens the way it was left. Not saved:
   // the chat starts hidden on every load.
   let chatOpenBy = $state<Record<string, boolean>>({})
@@ -418,12 +420,19 @@
     // Pressing anywhere but the sidebar (the PDF, the tabs, the chat) folds the topics away.
     // A pointer shortcut: the menu button does the same by keyboard.
     const target = e.target as Element
-    if (!target.closest('#topics-sidebar')) sidebarOpen = false
+    if (!target.closest('#topics-sidebar, .settings-dialog')) sidebarOpen = false
     // The outline closes too, unless the press is in it or on its button.
     if (!target.closest('#topics-sidebar, #doc-outline, .outline-toggle')) outlineOpen = false
   }}
 >
-  <TopicsSidebar {workspace} bind:open={sidebarOpen} {chatOpen} onopenchat={openChatFromSidebar} />
+  <TopicsSidebar
+    {workspace}
+    bind:open={sidebarOpen}
+    {chatOpen}
+    onopenchat={openChatFromSidebar}
+    onopensettings={() => (settingsOpen = true)}
+  />
+  {#if settingsOpen}<SettingsDialog {workspace} onclose={() => (settingsOpen = false)} />{/if}
 
   <div class="main">
     <input

@@ -28,6 +28,8 @@ export type AskRequest = {
   messages: AskTurn[]
   /** Which model answers. The backend's default (ANSWER_MODEL) when left out. */
   model?: string
+  /** The reader's own instructions for every answer, from Settings. */
+  instructions?: string
 }
 
 /** A piece of an answer's text, or a lookup the model made while answering. */

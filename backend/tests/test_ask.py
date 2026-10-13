@@ -17,6 +17,7 @@ from leqtern.ask import (
     Turn,
     build_messages,
     describe,
+    system_blocks,
     write_quiz,
 )
 from leqtern.config import Settings, get_settings
@@ -426,3 +427,13 @@ def test_quiz_recommendation_comes_from_haiku_only_when_something_was_wrong(
     )
     assert response.json() == {"text": None}
     assert len(fake.requests) == 2
+
+
+def test_the_readers_instructions_come_between_the_fixed_prompt_and_the_topic() -> None:
+    assert len(system_blocks("T")) == 2
+    assert len(system_blocks("T", "  ")) == 2
+    fixed, own, topic = system_blocks("T", " Answer in Swedish. ")
+    assert fixed["text"] == SYSTEM_PROMPT
+    assert "<reader_instructions>\nAnswer in Swedish.\n</reader_instructions>" in own["text"]
+    # One breakpoint at the end caches all three.
+    assert "cache_control" not in own and topic["cache_control"] == {"type": "ephemeral"}

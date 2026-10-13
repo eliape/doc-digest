@@ -65,8 +65,6 @@
 <style>
   /* Hovers over the PDF below the toggle: gray on the left, fading out to the right. */
   .outline {
-    --outline-fade: #d6dbe1;
-    --outline-text: #3d444d;
     position: absolute;
     top: 0;
     left: 0;
@@ -84,12 +82,6 @@
     color: var(--outline-text);
     font-size: 0.9rem;
     scrollbar-width: thin;
-  }
-  @media (prefers-color-scheme: dark) {
-    .outline {
-      --outline-fade: #2d333b;
-      --outline-text: #c9d1d9;
-    }
   }
 
   ol {

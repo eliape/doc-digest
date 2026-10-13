@@ -410,8 +410,8 @@
                 onclick={() => split(message.id)}
               >
                 <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <circle cx="6" cy="5" r="2" /><circle cx="6" cy="19" r="2" /><circle cx="18" cy="7" r="2" />
-                  <path d="M6 7v10M18 9c0 5-6 4-11.5 8.5" />
+                  <circle cx="5" cy="12" r="2" /><circle cx="19" cy="6" r="2" /><circle cx="19" cy="18" r="2" />
+                <path d="M7 12h3c3 0 3-6 7-6M10 12c3 0 3 6 7 6" />
                 </svg>
               </button>
             </div>
@@ -421,8 +421,8 @@
             <!-- Where a branch leaves its original: what is above came from there. -->
             <div class="branch-divider" role="separator">
               <svg viewBox="0 0 24 24" aria-hidden="true">
-                <circle cx="6" cy="5" r="2" /><circle cx="6" cy="19" r="2" /><circle cx="18" cy="7" r="2" />
-                <path d="M6 7v10M18 9c0 5-6 4-11.5 8.5" />
+                <circle cx="5" cy="12" r="2" /><circle cx="19" cy="6" r="2" /><circle cx="19" cy="18" r="2" />
+                <path d="M7 12h3c3 0 3-6 7-6M10 12c3 0 3 6 7 6" />
               </svg>
               <span>
                 From

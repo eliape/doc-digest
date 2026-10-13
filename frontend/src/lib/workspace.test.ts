@@ -1005,6 +1005,8 @@ describe('Workspace discussions', () => {
     await asked(ws, topic.id, 'second')
     const original = chatOf(topic)
     original.title = 'Rings'
+    // Used a moment ago, so the branch (used now) sorts first even within the same millisecond.
+    original.updatedAt -= 1000
     ws.setMode(topic.id, 'socratic')
 
     ws.splitChat(topic.id, original.messages[1].id)

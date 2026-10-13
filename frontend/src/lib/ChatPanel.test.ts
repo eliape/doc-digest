@@ -74,7 +74,8 @@ describe('ChatPanel', () => {
     expect(within(log).getByRole('button', { name: 'p. 10' })).toBeInTheDocument()
     expect(panel.getByRole('button', { name: 'Send' })).toBeDisabled()
     finish()
-    expect(await within(log).findByText('Partial answer.')).toBeInTheDocument()
+    // The newest words fade in, each piece in its own span, so match the paragraph's whole text.
+    expect(await within(log).findByText((_, el) => el?.tagName === 'P' && el.textContent === 'Partial answer.')).toBeInTheDocument()
   })
 
   it('shows no chip on a question about the open page, only on one about a spot', async () => {
@@ -310,9 +311,22 @@ describe('ChatPanel', () => {
     await stream('Because of this and that')
     expect(log.scrollTop).toBe(1000)
 
-    // A new question always goes to the bottom.
+    // Even a small move upwards, still inside the bottom margin, stops it.
+    await scrollTo(1000)
+    await scrollTo(990)
+    await stream('Because of this and that, so')
+    expect(log.scrollTop).toBe(990)
+
+    // A wheel turn upwards stops it before anything has scrolled.
+    await scrollTo(1000)
+    await fireEvent.wheel(log, { deltaY: -40 })
+    log.scrollTop = 995
+    await stream('Because of this and that, so there')
+    expect(log.scrollTop).toBe(995)
+
+    // A new question, which arrives with its answer's placeholder, always goes to the bottom.
     await scrollTo(300)
-    chatOf(topic).messages.push({ id: 'q2', role: 'user', text: 'And?' })
+    chatOf(topic).messages.push({ id: 'q2', role: 'user', text: 'And?' }, { id: 'a2', role: 'assistant', text: '', status: 'streaming' })
     await tick()
     await tick()
     expect(log.scrollTop).toBe(1000)

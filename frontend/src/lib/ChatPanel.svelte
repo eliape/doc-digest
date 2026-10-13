@@ -9,6 +9,7 @@
   import { MODES } from './modes'
   import ChatSwitcher from './ChatSwitcher.svelte'
   import QuizCard from './QuizCard.svelte'
+  import { streamFade } from './streamFade'
   import { type Chat, chatOf, type Topic, type Workspace } from './workspace.svelte'
 
   type Props = {
@@ -146,12 +147,26 @@
 
   // Follow the newest message, also while an answer streams in, but only while the reader is at
   // the bottom: scrolling up to read stops the following, and scrolling back down resumes it.
+  // Any move upwards counts, even inside the bottom margin, because the follow's own jumps to the
+  // bottom would otherwise cut a smooth wheel or trackpad scroll short before it got anywhere.
   const NEAR_BOTTOM = 24
   let following = true
   let followed: { chat?: string; length: number } = { length: 0 }
+  let last = { top: 0, height: 0 }
 
   function onLogScroll() {
-    if (log) following = log.scrollHeight - log.scrollTop - log.clientHeight <= NEAR_BOTTOM
+    if (!log) return
+    const { scrollTop: top, scrollHeight: height, clientHeight } = log
+    // Shrinking content pulls scrollTop up too, which is not the reader scrolling.
+    const up = top < last.top && height >= last.height
+    last = { top, height }
+    if (up) following = false
+    else if (height - top - clientHeight <= NEAR_BOTTOM) following = true
+  }
+
+  // A wheel turn upwards stops following at once, before its smooth scroll has moved anything.
+  function onLogWheel(event: WheelEvent) {
+    if (event.deltaY < 0) following = false
   }
 
   $effect(() => {
@@ -159,8 +174,9 @@
     void chat.messages.at(-1)?.text
     void chat.messages.at(-1)?.steps?.length
     const length = chat.messages.length
-    // A new question, or another discussion, always starts at the bottom.
-    const sent = length > followed.length && chat.messages.at(-1)?.role === 'user'
+    // A new question, or another discussion, always starts at the bottom. A question arrives with
+    // its answer's placeholder after it, so look at everything added since the last run.
+    const sent = chat.messages.slice(followed.length).some((m) => m.role === 'user')
     if (sent || followed.chat !== chat.id) following = true
     followed = { chat: chat.id, length }
     if (following) tick().then(() => log && (log.scrollTop = log.scrollHeight))
@@ -287,7 +303,7 @@
     {#if topic && chat}
       <!-- Citations are links inside the answers' HTML, so their clicks are handled here. -->
       <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
-      <div class="messages" role="log" aria-label={`Chat in ${topic.name}`} bind:this={log} onclick={onCitationClick} onscroll={onLogScroll}>
+      <div class="messages" role="log" aria-label={`Chat in ${topic.name}`} bind:this={log} onclick={onCitationClick} onscroll={onLogScroll} onwheel={onLogWheel}>
         {#each chat.messages as message, index (message.id)}
           <!-- Only the model's side of a Socratic session is marked; the reader's messages look as always. -->
           <div
@@ -295,6 +311,7 @@
             class:socratic={message.role === 'assistant' && message.mode === 'socratic'}
             class:quiz={message.role === 'assistant' && message.mode === 'quiz'}
             class:error={message.status === 'error'}
+            class:waiting={message.status === 'streaming' && !message.text}
           >
             <!-- What the reader typed is only what to focus on, or nothing, so the message says what it starts. -->
             {#if message.role === 'user' && message.mode === 'quiz'}
@@ -328,7 +345,11 @@
               />
             {:else if message.role === 'assistant'}
               <!-- Answers are Markdown with LaTeX maths; renderMarkdown sanitizes the HTML. -->
-              <div class="text markdown">{@html renderMarkdown(message.text, citable(index))}</div>
+              <!-- New words fade in as they stream. -->
+              <div
+                class="text markdown"
+                use:streamFade={{ html: renderMarkdown(message.text, citable(index)), live: message.status === 'streaming' }}
+              ></div>
             {:else if message.text}
               <span class="text">{message.text}</span>
             {/if}
@@ -693,8 +714,44 @@
     font-size: 0.8rem;
   }
 
+  /* Until the first words arrive the answer has no box, only its thinking line, which shimmers. */
+  .message.waiting {
+    background: none;
+    border-color: transparent;
+    box-shadow: none;
+  }
   .thinking {
     color: var(--muted);
+    background: linear-gradient(90deg, var(--muted) 35%, CanvasText 50%, var(--muted) 65%) 0 0 / 300% 100%;
+    background-clip: text;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: shimmer 1.6s linear infinite;
+  }
+  .markdown :global(.fresh) {
+    animation: fade-in 400ms ease-out both;
+  }
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+  }
+  @keyframes shimmer {
+    from {
+      background-position: 100% 0;
+    }
+    to {
+      background-position: 0 0;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .markdown :global(.fresh) {
+      animation: none;
+    }
+    .thinking {
+      animation: none;
+      -webkit-text-fill-color: currentColor;
+    }
   }
 
   .chip {

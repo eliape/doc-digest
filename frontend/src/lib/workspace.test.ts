@@ -1,7 +1,16 @@
 import { describe, expect, it } from 'vitest'
-import type { AskRequest, IndexStatus, RecommendationRequest, WrittenQuiz } from './api'
+import type { AskRequest, DiscussionRequest, IndexStatus, RecommendationRequest, WrittenQuiz } from './api'
 import type { PageContext } from './context'
-import { type QuizApi, Workspace, askRequest, chatOf, chatTitle, discussions, topicNameFor } from './workspace.svelte'
+import {
+  type QuizApi,
+  Workspace,
+  askRequest,
+  chatOf,
+  chatTitle,
+  discussionRequest,
+  discussions,
+  topicNameFor,
+} from './workspace.svelte'
 
 const bytes = (...values: number[]) => new Uint8Array(values)
 
@@ -952,5 +961,109 @@ describe('Workspace discussions', () => {
     await new Promise((resolve) => setTimeout(resolve))
     ws.deleteTopic(topic.id)
     expect(signals[1].aborted).toBe(true)
+  })
+})
+
+describe('Workspace register', () => {
+  function workspace() {
+    const ws = new Workspace()
+    ws.titleApi = async () => null
+    const noted: [string, DiscussionRequest][] = []
+    const forgotten: string[] = []
+    ws.registerApi = {
+      note: async (topicId, request) => void noted.push([topicId, request]),
+      forget: async (topicId) => void forgotten.push(topicId),
+    }
+    return { ws, noted, forgotten }
+  }
+
+  async function asked(ws: Workspace, topicId: string, text: string) {
+    ws.topics.find((t) => t.id === topicId)!.draft = text
+    await ws.ask(topicId, undefined, async function* () {
+      yield { type: 'text', text: `About ${text}` }
+    })
+  }
+
+  it('names the topic and discussion in each question, for their notes', async () => {
+    const { ws } = workspace()
+    ws.addDoc('notes.pdf', bytes(1))
+    const topic = ws.activeTopic!
+    const request = askRequest(topic)
+    expect(request.topic_id).toBe(topic.id)
+    expect(request.chat_id).toBe(chatOf(topic).id)
+  })
+
+  it('notes a discussion when the reader leaves it for another one, a new one or another topic', async () => {
+    const { ws, noted } = workspace()
+    ws.addDoc('notes.pdf', bytes(1))
+    const topic = ws.activeTopic!
+    await asked(ws, topic.id, 'one')
+    const one = chatOf(topic).id
+    expect(noted).toEqual([])
+
+    ws.newChat(topic.id)
+    expect(noted.map(([t, r]) => [t, r.chat_id])).toEqual([[topic.id, one]])
+    expect(noted[0][1].messages.map((m) => [m.role, m.text])).toEqual([
+      ['user', 'one'],
+      ['assistant', 'About one'],
+    ])
+
+    // Leaving an empty chat notes nothing.
+    ws.selectChat(topic.id, one)
+    expect(noted).toHaveLength(1)
+
+    await asked(ws, topic.id, 'two')
+    ws.createTopic('Other')
+    const otherDoc = ws.addDoc('other.pdf', bytes(2))
+    expect(noted.map(([, r]) => r.chat_id)).toEqual([one, one])
+    // Its turns since the last time are for the backend to pick out: all of them are sent.
+    expect(noted[1][1].messages).toHaveLength(4)
+    ws.selectTopic(topic.id)
+    expect(noted).toHaveLength(2) // the other topic's chat is empty
+
+    // Switching tabs within the topic leaves nothing; a tab in another topic leaves it.
+    ws.addDoc('b.pdf', bytes(3))
+    ws.selectDoc(topic.docIds[0])
+    expect(noted).toHaveLength(2)
+    ws.selectDoc(otherDoc.id)
+    expect(noted.map(([, r]) => r.chat_id)).toEqual([one, one, one])
+  })
+
+  it('notes an answer that finished after its discussion was left', async () => {
+    const { ws, noted } = workspace()
+    ws.addDoc('notes.pdf', bytes(1))
+    const topic = ws.activeTopic!
+    let finish = () => {}
+    topic.draft = 'slow'
+    const answering = ws.ask(topic.id, undefined, async function* () {
+      await new Promise<void>((resolve) => (finish = resolve))
+      yield { type: 'text', text: 'Done.' }
+    })
+    await new Promise((resolve) => setTimeout(resolve))
+    const slow = chatOf(topic).id
+    ws.newChat(topic.id)
+    expect(noted).toEqual([]) // nothing answered yet when it was left
+    finish()
+    await answering
+    expect(noted.map(([, r]) => r.chat_id)).toEqual([slow])
+  })
+
+  it('reads a quiz again once it has been answered, and forgets a deleted topic', async () => {
+    const { ws, forgotten } = workspace()
+    ws.addDoc('notes.pdf', bytes(1))
+    const topic = ws.activeTopic!
+    ws.quizApi = { create: async () => written, recommend: async () => 'Review the power rule.' }
+    ws.setMode(topic.id, 'quiz')
+    await ws.ask(topic.id)
+    const quiz = chatOf(topic).messages[1]
+    const key = () => discussionRequest(topic, chatOf(topic)).messages[1].key
+    expect(key()).toBe(`${quiz.id}/0`)
+    await ws.answerQuiz(topic.id, quiz.id, 0, 0)
+    await ws.answerQuiz(topic.id, quiz.id, 1, 0)
+    expect(key()).toBe(`${quiz.id}/2+`)
+    expect(discussionRequest(topic, chatOf(topic)).messages[0]).not.toHaveProperty('context.page_image')
+
+    ws.deleteTopic(topic.id)
+    expect(forgotten).toEqual([topic.id])
   })
 })

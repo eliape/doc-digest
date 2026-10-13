@@ -14,6 +14,15 @@ from .config import Settings, get_settings
 from .index import Indexer
 from .library import Library
 from .quiz import QuizRecord, reading_so_far, recommend
+from .register import (
+    DiscussionRequest,
+    Registers,
+    notes_block,
+    pick,
+    valid_topic_id,
+    wants_notes,
+    write_notes,
+)
 from .saved import SavedWorkspace
 from .title import title_chat
 from .tools import Toolbox, topic_docs
@@ -52,13 +61,17 @@ def get_client(settings: Annotated[Settings, Depends(get_settings)]) -> anthropi
 
 
 class Services:
-    """The PDF library, its indexer, the usage log and the saved workspace, shared by requests."""
+    """
+    The PDF library, its indexer, the usage log, the saved workspace and the topics' registers,
+    shared by requests.
+    """
 
     def __init__(self, settings: Settings) -> None:
         self.library = Library(settings.data_dir)
         self.answer_model = settings.answer_model
         self.usage = UsageLog(settings.data_dir / "usage.jsonl")
         self.saved = SavedWorkspace(settings.data_dir / "workspace.json")
+        self.registers = Registers(settings.data_dir / "registers")
         self.indexer = Indexer(self.library, self.usage, lambda: make_client(get_settings()))
 
 
@@ -147,6 +160,21 @@ def error_message(error: Exception) -> str:
     return "Something went wrong while answering."
 
 
+async def register_notes(request: AskRequest, services: Services) -> dict[str, Any] | None:
+    """
+    The topic's notes on earlier discussions for the newest question, when it gets any (see
+    wants_notes), after waiting for notes still being written about a discussion just left.
+    """
+    if not request.topic_id or not valid_topic_id(request.topic_id) or not wants_notes(request):
+        return None
+    try:
+        register = await services.registers.settled(request.topic_id)
+        return notes_block(pick(register, request.messages[-1], request.chat_id))
+    except Exception:
+        logger.exception("Could not read the register")
+        return None
+
+
 async def events(
     client: anthropic.AsyncAnthropic, request: AskRequest, services: Services
 ) -> AsyncIterator[str]:
@@ -155,8 +183,14 @@ async def events(
         services.library, topic_docs(services.library, services.indexer, request.docs)
     )
     try:
+        notes = await register_notes(request, services)
         async for event in stream_answer(
-            client, request, toolbox, services.usage, request.model or services.answer_model
+            client,
+            request,
+            toolbox,
+            services.usage,
+            request.model or services.answer_model,
+            notes=notes,
         ):
             yield json.dumps(event) + "\n"
     except Exception as error:
@@ -195,8 +229,14 @@ async def quiz(
             ids = request.docs if doc_id in request.docs else [*request.docs, doc_id]
             toolbox = Toolbox(services.library, topic_docs(services.library, services.indexer, ids))
             reading = await reading_so_far(toolbox, doc_id, last.context.page)
+        notes = await register_notes(request, services)
         written = await write_quiz(
-            client, request, services.usage, request.model or services.answer_model, reading
+            client,
+            request,
+            services.usage,
+            request.model or services.answer_model,
+            reading,
+            notes=notes,
         )
     except Exception as error:
         logger.exception("Quiz failed")
@@ -259,3 +299,52 @@ async def chat_title(
         logger.exception("Title failed")
         raise HTTPException(status_code=502, detail=error_message(error)) from error
     return {"text": text}
+
+
+def topic_register_id(topic_id: str) -> str:
+    if not valid_topic_id(topic_id):
+        raise HTTPException(status_code=422, detail="Not a topic id.")
+    return topic_id
+
+
+@app.post("/api/topics/{topic_id}/register")
+async def note_discussion(
+    topic_id: str,
+    request: DiscussionRequest,
+    client: Annotated[anthropic.AsyncAnthropic, Depends(get_client)],
+    services: ServicesDep,
+) -> dict[str, int]:
+    """
+    Note what is new in a discussion the reader left in the topic's register. Questions asked
+    meanwhile in the topic wait for it, so a new discussion starts with these notes.
+    """
+    topic_register_id(topic_id)
+    registers = services.registers
+    async with registers.lock(topic_id):
+        register = registers.load(topic_id)
+        names = {}
+        for doc_id in request.docs:
+            info = services.library.get(doc_id)
+            if info:
+                names[info.name] = doc_id
+        try:
+            changed = await write_notes(client, register, request, names, services.usage)
+        except Exception as error:
+            logger.exception("Noting the discussion failed")
+            raise HTTPException(status_code=502, detail=error_message(error)) from error
+        registers.save(topic_id, register)
+    return {"changed": changed, "notes": len(register.notes)}
+
+
+@app.get("/api/topics/{topic_id}/register")
+def topic_register(topic_id: str, services: ServicesDep) -> dict[str, Any]:
+    """The topic's notes, oldest first."""
+    register = services.registers.load(topic_register_id(topic_id))
+    return {"notes": [n.model_dump() for n in register.notes]}
+
+
+@app.delete("/api/topics/{topic_id}/register")
+def forget_topic(topic_id: str, services: ServicesDep) -> dict[str, str]:
+    """Delete a topic's register, when the topic is deleted."""
+    services.registers.delete(topic_register_id(topic_id))
+    return {"status": "deleted"}

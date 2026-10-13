@@ -170,7 +170,7 @@ def test_ask_without_an_api_key_says_how_to_add_one(client: TestClient) -> None:
 
 
 def test_ask_streams_events_as_json_lines(client: TestClient, monkeypatch) -> None:
-    async def fake_stream(_client, request, toolbox, _usage, _model):
+    async def fake_stream(_client, request, toolbox, _usage, _model, **_):
         assert request.messages[-1].text == "hi"
         assert toolbox.docs == {}
         yield {"type": "step", "text": "Searched for “x”"}
@@ -193,7 +193,7 @@ def test_ask_streams_events_as_json_lines(client: TestClient, monkeypatch) -> No
 
 
 def test_ask_reports_a_failure_in_the_stream(client: TestClient, monkeypatch) -> None:
-    async def failing_stream(_client, _request, _toolbox, _usage, _model):
+    async def failing_stream(_client, _request, _toolbox, _usage, _model, **_):
         yield {"type": "text", "text": "Par"}
         raise RuntimeError("boom")
 
@@ -211,7 +211,7 @@ def test_ask_reports_a_failure_in_the_stream(client: TestClient, monkeypatch) ->
 def test_ask_uses_the_chosen_model_or_the_default(client: TestClient, monkeypatch) -> None:
     used: list[str] = []
 
-    async def fake_stream(_client, _request, _toolbox, _usage, model):
+    async def fake_stream(_client, _request, _toolbox, _usage, model, **_):
         used.append(model)
         yield {"type": "done"}
 
@@ -230,7 +230,7 @@ def test_ask_uses_the_chosen_model_or_the_default(client: TestClient, monkeypatc
 def test_ask_accepts_socratic_and_quiz_turns_only(client: TestClient, monkeypatch) -> None:
     modes: list[str | None] = []
 
-    async def fake_stream(_client, request, _toolbox, _usage, _model):
+    async def fake_stream(_client, request, _toolbox, _usage, _model, **_):
         modes.append(request.messages[-1].mode)
         yield {"type": "done"}
 
@@ -376,7 +376,7 @@ async def test_write_quiz_fails_when_no_questions_come_back() -> None:
 
 
 def test_quiz_endpoint_only_writes_quizzes(client: TestClient, monkeypatch) -> None:
-    async def fake_write(_client, request, _usage, model, reading):
+    async def fake_write(_client, request, _usage, model, reading, **_):
         assert request.messages[-1].mode == "quiz"
         assert reading == []
         return Quiz(title=f"By {model}", questions=quiz().questions)

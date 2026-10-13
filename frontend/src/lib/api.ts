@@ -20,6 +20,9 @@ export type AskTurn = {
 
 export type AskRequest = {
   topic: string
+  /** The topic's and the discussion's ids, so the answer gets the topic's notes on other discussions. */
+  topic_id?: string
+  chat_id?: string
   /** The backend's ids of the topic's PDFs, in tab order. */
   docs?: string[]
   messages: AskTurn[]
@@ -179,4 +182,33 @@ export async function fetchChatTitle(request: TitleRequest, fetchFn: typeof fetc
   })
   if (!res.ok) throw await backendError(res)
   return ((await res.json()) as { text: string | null }).text
+}
+
+/** A turn of a discussion for the register. `key` names it, and changes when the turn does (a quiz being answered). */
+export type RegisterTurn = AskTurn & { key: string }
+
+/** A discussion the reader left, for Haiku to note what is new in it in the topic's register. */
+export type DiscussionRequest = {
+  topic: string
+  chat_id: string
+  title?: string
+  /** The backend's ids of the topic's PDFs. */
+  docs: string[]
+  messages: RegisterTurn[]
+}
+
+/** Have Haiku note what is new in a discussion in its topic's register. Questions asked meanwhile wait for it. */
+export async function noteDiscussion(topicId: string, request: DiscussionRequest, fetchFn: typeof fetch = fetch): Promise<void> {
+  const res = await fetchFn(`/api/topics/${encodeURIComponent(topicId)}/register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request),
+  })
+  if (!res.ok) throw await backendError(res)
+}
+
+/** Delete a topic's register, when the topic is deleted. */
+export async function forgetRegister(topicId: string, fetchFn: typeof fetch = fetch): Promise<void> {
+  const res = await fetchFn(`/api/topics/${encodeURIComponent(topicId)}/register`, { method: 'DELETE' })
+  if (!res.ok) throw await backendError(res)
 }

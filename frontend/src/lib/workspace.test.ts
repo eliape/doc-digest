@@ -302,6 +302,26 @@ describe('Workspace.ask', () => {
     expect(models).toEqual([undefined, 'claude-sonnet-5-5'])
   })
 
+  it("sends the reader's own instructions with every question, and saves them", async () => {
+    const ws = new Workspace()
+    ws.addDoc('notes.pdf', bytes(1))
+    const topic = ws.activeTopic!
+    const sent: (string | undefined)[] = []
+    const stream = async function* (request: AskRequest) {
+      sent.push(request.instructions)
+    }
+    topic.draft = 'one'
+    await ws.ask(topic.id, undefined, stream)
+    expect(ws.snapshot().instructions).toBeUndefined()
+    ws.instructions = ' Answer in Swedish. '
+    topic.draft = 'two'
+    await ws.ask(topic.id, undefined, stream)
+    expect(sent).toEqual([undefined, 'Answer in Swedish.'])
+    const back = new Workspace()
+    await back.restore(JSON.parse(JSON.stringify(ws.snapshot())), async () => bytes(1))
+    expect(back.instructions).toBe(' Answer in Swedish. ')
+  })
+
   it('starts a Socratic session about a spot attached for it, with what to focus on optional', async () => {
     const ws = new Workspace()
     const doc = ws.addDoc('notes.pdf', bytes(1))

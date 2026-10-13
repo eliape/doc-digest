@@ -133,6 +133,8 @@ export type SavedWorkspace = {
   version: 1
   activeTopicId?: string
   topics: SavedTopic[]
+  /** The reader's own instructions for every answer, set in Settings. */
+  instructions?: string
 }
 
 let nextId = 0
@@ -178,6 +180,8 @@ export class Workspace {
   activeTopicId = $state<string>()
   /** The model that answers new questions, picked in the chat. */
   answerModel = $state<string>()
+  /** The reader's own instructions, sent with every question (set in Settings). */
+  instructions = $state('')
   /** Indexing progress per PDF (by tab id). */
   indexing = $state<Record<string, IndexState>>({})
   /** The page each tab was last on, so it opens there next time. */
@@ -492,7 +496,9 @@ export class Workspace {
       const uploading = topic.docIds.filter((id) => id in this.uploads).map((id) => this.uploads[id])
       if (uploading.length) await Promise.all(uploading)
       const serverId = (id: string) => this.indexing[id]?.serverId
-      await respond(answer, askRequest(topic, serverId, this.answerModel, chat), controller.signal)
+      const instructions = this.instructions.trim()
+      const request = { ...askRequest(topic, serverId, this.answerModel, chat), ...(instructions && { instructions }) }
+      await respond(answer, request, controller.signal)
       answer.status = 'done'
     } catch (error) {
       answer.status = 'error'
@@ -551,6 +557,7 @@ export class Workspace {
     return {
       version: 1,
       activeTopicId: this.activeTopicId,
+      ...(this.instructions.trim() && { instructions: this.instructions }),
       topics: this.topics.map((topic) => {
         const docs = topic.docIds.flatMap((id): SavedDoc[] => {
           const serverId = this.indexing[id]?.serverId
@@ -607,6 +614,8 @@ export class Workspace {
       }
     })
     this.topics = [...restored, ...this.topics]
+    // Unless they were already changed while it loaded.
+    if (!this.instructions && typeof saved.instructions === 'string') this.instructions = saved.instructions
     // Discussions saved before they had titles get one now, once.
     for (const topic of this.topics.slice(0, restored.length)) {
       for (const chat of topic.chats) if (!chat.title && chat.messages.length) void this.nameChat(topic, chat)

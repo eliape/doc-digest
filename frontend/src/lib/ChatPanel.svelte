@@ -427,7 +427,7 @@
               <span>
                 From
                 {#if original}
-                  <button type="button" class="link" title="Open the original chat" onclick={() => openChat(original.id)}
+                  <button type="button" class="link" title={`Open ${chatTitle(original)}`} onclick={() => openChat(original.id)}
                     >{chatTitle(original)}</button
                   >
                 {:else}
@@ -881,14 +881,15 @@
   .branch-divider::before,
   .branch-divider::after {
     content: '';
-    flex: 1;
+    flex: 1 0 1rem;
     border-top: 1px solid var(--border);
   }
+  /* A long title is cut short with an ellipsis; "From" stays. */
   .branch-divider span {
+    display: flex;
+    gap: 0.25em;
     min-width: 0;
-    max-width: 70%;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    max-width: 75%;
     white-space: nowrap;
   }
   .branch-divider svg {
@@ -908,6 +909,10 @@
     color: var(--accent);
     font: inherit;
     cursor: pointer;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .branch-divider .link:hover {
     text-decoration: underline;

@@ -834,13 +834,13 @@
     align-items: center;
   }
 
-  /* A slim row under the box: the mode on the left, the model on the right. Negative margin
-     pulls it close, so it reads as part of the box. */
+  /* A slim row under the box: the mode on the left, the model on the right, with as much room
+     above it (the panel's gap) as below it (the panel's padding, less the negative margin). */
   .below {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-top: -0.25rem;
+    margin-bottom: -0.25rem;
   }
 
   .send {

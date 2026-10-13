@@ -1,6 +1,7 @@
 <script lang="ts">
   import { tick } from 'svelte'
   import { slide } from 'svelte/transition'
+  import { marquee } from './marquee'
   import { chatOf, chatTitle, discussions, type Workspace } from './workspace.svelte'
 
   type Props = {
@@ -174,7 +175,7 @@
                 onclick={() => workspace.selectTopic(topic.id)}
                 ondblclick={() => startRename(topic.id, topic.name)}
               >
-                <span class="name">{topic.name}</span>
+                <span class="name" use:marquee><span>{topic.name}</span></span>
                 <span class="count">{topic.docIds.length}</span>
               </button>
               <button
@@ -245,7 +246,7 @@
                         {title}
                         onclick={() => openChat(topic.id, chat.id)}
                       >
-                        <span class="name">{title}</span>
+                        <span class="name" use:marquee><span>{title}</span></span>
                       </button>
                       <button
                         type="button"
@@ -460,6 +461,14 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  /* A long name scrolls on hover (see marquee.ts): its text moves as a block, without the ellipsis. */
+  .name:global(.scrolling) {
+    text-overflow: clip;
+  }
+  .name:global(.scrolling) > span {
+    display: inline-block;
   }
 
   .count {

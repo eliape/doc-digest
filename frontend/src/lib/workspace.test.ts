@@ -903,7 +903,7 @@ describe('Workspace discussions', () => {
     expect(discussions(topic).map((c) => c.id)).toEqual([one, two])
   })
 
-  it('deletes a discussion, opening the most recent one left or else an empty one', async () => {
+  it('deletes a discussion; deleting the open one opens a new, empty chat', async () => {
     const ws = new Workspace()
     ws.titleApi = async () => null
     ws.addDoc('notes.pdf', bytes(1))
@@ -921,9 +921,13 @@ describe('Workspace discussions', () => {
     expect(topic.chats.map((c) => c.id)).toEqual([one])
     expect(chatOf(topic).id).toBe(one)
 
-    ws.deleteChat(topic.id, one)
-    expect(topic.chats).toHaveLength(1)
+    ws.newChat(topic.id)
+    await asked(ws, topic.id, 'three')
+    const three = chatOf(topic).id
+    ws.deleteChat(topic.id, three)
+    expect(topic.chats.map((c) => c.id)).toContain(one)
     expect(chatOf(topic).messages).toEqual([])
+    expect(discussions(topic).map((c) => c.id)).toEqual([one])
   })
 
   it('stops an answer still arriving in a deleted discussion or topic', async () => {

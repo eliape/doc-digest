@@ -65,6 +65,12 @@
     if (topicId) chatOpenBy[topicId] = open
   }
 
+  /** A discussion picked (or started) in the sidebar: show it, ready to type. */
+  function openChatFromSidebar() {
+    setChatOpen(true)
+    tick().then(() => chatPanel?.focus())
+  }
+
   // What a left click on the PDF does. Each topic keeps its own, the same in all its tabs,
   // remembered in this browser; `picked` holds the picks made since the page loaded.
   let picked = $state<Record<string, Tool>>({})
@@ -417,7 +423,7 @@
     if (!target.closest('#topics-sidebar, #doc-outline, .outline-toggle')) outlineOpen = false
   }}
 >
-  <TopicsSidebar {workspace} bind:open={sidebarOpen} {chatOpen} onopenchat={() => setChatOpen(true)} />
+  <TopicsSidebar {workspace} bind:open={sidebarOpen} {chatOpen} onopenchat={openChatFromSidebar} />
 
   <div class="main">
     <input

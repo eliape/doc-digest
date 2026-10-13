@@ -28,11 +28,13 @@ slides. They read in a viewer next to this chat and ask about what they are read
 they study together form a topic; a map of the topic's documents comes with their newest question.
 
 With a question you may get:
-- an image of what they are looking at. When they clicked or selected something, it is a band \
-80% of a page tall centred on that spot, which is marked in red; near the top or bottom of a page \
-it runs into the previous or next page, with a grey dashed line at the page break. Otherwise it \
-is the whole page;
+- when they clicked or selected something, an image of a band 80% of a page tall centred on \
+that spot, which is marked in red; near the top or bottom of a page it runs into the previous or \
+next page, with a grey dashed line at the page break;
 - text extracted from the PDF for what the image shows, and around the spot.
+When they attached nothing, you only get the page they are on. Such questions usually follow \
+up on the conversation; when one refers to something on the page instead ("this", "the \
+equation", "the figure"), read the page with read_pages before answering.
 
 Trust the images over the extracted text: the text is often missing (scanned pages) or garbled \
 (equations, tables, figures). When they clicked something, answer about the marked thing.
@@ -204,6 +206,13 @@ def text_block(text: str) -> dict[str, Any]:
 MAX_PAGE_TEXT = 3000
 
 
+# What the model gets instead of the open page, when they attached nothing.
+PAGE_NOT_SHOWN = (
+    "(The page is not shown. If the question is about something on it, read it with "
+    'read_pages, doc "{alias}", before answering, with images for equations or figures.)'
+)
+
+
 def context_blocks(context: Context) -> list[dict[str, Any]]:
     """The images and text for the question being asked now."""
     blocks: list[dict[str, Any]] = []
@@ -278,7 +287,13 @@ def build_messages(request: AskRequest, aliases: dict[str, str] | None = None) -
             alias = aliases.get(turn.context.doc_id or "")
             content.append(text_block(describe(turn.context, alias)))
             if i == last:
-                content.extend(context_blocks(turn.context))
+                pointed = turn.context.point or turn.context.selection
+                if pointed or not alias:
+                    content.extend(context_blocks(turn.context))
+                else:
+                    # Nothing attached: most such questions follow up on the chat, so the
+                    # page would only distract. The model reads it when the question needs it.
+                    content.append(text_block(PAGE_NOT_SHOWN.format(alias=alias)))
         ends_session = in_session and turn.mode is None
         content.append(
             text_block(

@@ -429,6 +429,24 @@ def test_quiz_recommendation_comes_from_haiku_only_when_something_was_wrong(
     assert len(fake.requests) == 2
 
 
+def test_without_an_attachment_the_page_is_named_not_shown() -> None:
+    page = context(doc_id="abc", page_image="PAGE", page_texts=[{"page": 12, "text": "Words"}])
+    request = AskRequest(topic="Calculus", messages=[Turn(role="user", text="why?", context=page)])
+    content = build_messages(request, {"abc": "D1"})[0]["content"]
+    assert [b["type"] for b in content] == ["text", "text", "text"]
+    assert content[0]["text"] == "They are reading p. 12 of notes.pdf (D1)."
+    assert 'read_pages, doc "D1"' in content[1]["text"]
+    assert "Words" not in str(content)
+
+
+def test_the_page_is_shown_when_the_model_cannot_look_it_up() -> None:
+    # Not in the topic's documents (or a quiz, which has no tools): the page goes along.
+    page = context(doc_id="abc", page_image="PAGE")
+    request = AskRequest(topic="Calculus", messages=[Turn(role="user", text="why?", context=page)])
+    content = build_messages(request)[0]["content"]
+    assert any(b["type"] == "image" for b in content)
+
+
 def test_the_readers_instructions_come_between_the_fixed_prompt_and_the_topic() -> None:
     assert len(system_blocks("T")) == 2
     assert len(system_blocks("T", "  ")) == 2

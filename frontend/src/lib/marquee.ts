@@ -2,8 +2,10 @@
 export const MARQUEE_DELAY_MS = 600
 /** Scrolling speed, in pixels per second: slow enough to read along. */
 const SPEED = 40
-/** The pause at the end of the name, and at its start before it scrolls again. */
+/** The pause at the end of the name. */
 const PAUSE_MS = 500
+/** The pause back at its start before it scrolls again: twice as long. */
+const START_PAUSE_MS = 2 * PAUSE_MS
 
 /**
  * A name cut off with an ellipsis scrolls left to show the rest while its row is hovered: after a
@@ -25,7 +27,7 @@ export function marquee(node: HTMLElement, row: () => HTMLElement | null = () =>
     node.classList.add('scrolling')
     const move = (distance / SPEED) * 1000
     // It goes back as slowly as it came.
-    const total = move + PAUSE_MS + move + PAUSE_MS
+    const total = move + PAUSE_MS + move + START_PAUSE_MS
     animation = inner.animate(
       [
         { transform: 'translateX(0)', offset: 0 },

@@ -4,8 +4,6 @@ export const MARQUEE_DELAY_MS = 600
 const SPEED = 40
 /** The pause at the end of the name, and at its start before it scrolls again. */
 const PAUSE_MS = 500
-/** How long the name takes to slide back to its start. */
-const BACK_MS = 300
 
 /**
  * A name cut off with an ellipsis scrolls left to show the rest while its row is hovered: after a
@@ -26,13 +24,14 @@ export function marquee(node: HTMLElement, row: () => HTMLElement | null = () =>
     // While it scrolls the text moves as a block, without the ellipsis.
     node.classList.add('scrolling')
     const move = (distance / SPEED) * 1000
-    const total = move + PAUSE_MS + BACK_MS + PAUSE_MS
+    // It goes back as slowly as it came.
+    const total = move + PAUSE_MS + move + PAUSE_MS
     animation = inner.animate(
       [
         { transform: 'translateX(0)', offset: 0 },
         { transform: `translateX(${-distance}px)`, offset: move / total },
         { transform: `translateX(${-distance}px)`, offset: (move + PAUSE_MS) / total },
-        { transform: 'translateX(0)', offset: (move + PAUSE_MS + BACK_MS) / total },
+        { transform: 'translateX(0)', offset: (move + PAUSE_MS + move) / total },
         { transform: 'translateX(0)', offset: 1 },
       ],
       { duration: total, iterations: Infinity, easing: 'linear' },

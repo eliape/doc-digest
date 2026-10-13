@@ -361,7 +361,7 @@ describe('ChatPanel', () => {
   })
 
   it('continues the conversation from an answer in a new discussion', async () => {
-    const { topic, panel } = setup()
+    const { workspace, topic, panel } = setup()
     chatOf(topic).messages.push(
       { id: 'q', role: 'user', text: 'First?' },
       { id: 'a', role: 'assistant', text: 'One.', status: 'done' },
@@ -369,13 +369,28 @@ describe('ChatPanel', () => {
       { id: 'a2', role: 'assistant', text: 'Two.', status: 'done' },
     )
     const original = chatOf(topic).id
-    const buttons = await panel.findAllByRole('button', { name: 'Continue in a new chat' })
+    chatOf(topic).title = 'Counting'
+    const buttons = await panel.findAllByRole('button', { name: 'Branch from this answer' })
     expect(buttons).toHaveLength(2)
     await fireEvent.click(buttons[0])
     expect(chatOf(topic).id).not.toBe(original)
+    expect(chatOf(topic).title).toBe('Branch · Counting')
     const log = panel.getByRole('log')
     expect(log.querySelectorAll('.message')).toHaveLength(2)
     expect(log).toHaveTextContent('One.')
     expect(log).not.toHaveTextContent('Two.')
+
+    // A divider under the copied messages links back to the original, until it is deleted.
+    const divider = within(log).getByRole('separator')
+    expect(divider).toHaveTextContent('From Counting')
+    const branch = chatOf(topic).id
+    await fireEvent.click(within(divider).getByRole('button', { name: 'Counting' }))
+    expect(chatOf(topic).id).toBe(original)
+    workspace.selectChat(topic.id, branch)
+    workspace.deleteChat(topic.id, original)
+    await tick()
+    expect(within(log).getByRole('separator')).toHaveTextContent('From deleted chat')
+    expect(within(within(log).getByRole('separator')).queryByRole('button')).toBeNull()
+    expect(chatOf(topic).id).toBe(branch)
   })
 })

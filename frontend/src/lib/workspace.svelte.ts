@@ -91,7 +91,12 @@ export type Chat = {
   messages: ChatMessage[]
   mode: Mode
   updatedAt: number
+  /** A discussion branched off another: which one, and how many of its messages it starts with. */
+  branch?: Branch
 }
+
+/** Where a branched discussion came from: the original's id and the number of messages copied from it. */
+export type Branch = { from: string; at: number }
 
 /**
  * A named group of PDFs that are read and asked about together. Each topic has
@@ -360,7 +365,14 @@ export class Workspace {
     if (!topic || !from) return
     const end = from.messages.findIndex((m) => m.id === messageId) + 1
     const messages = $state.snapshot(from.messages.slice(0, end)).map((m) => ({ ...m, id: newId() }) as ChatMessage)
-    const chat: Chat = { id: newId(), title: `${chatTitle(from)} (continued)`, messages, mode: from.mode, updatedAt: Date.now() }
+    const chat: Chat = {
+      id: newId(),
+      title: `Branch · ${chatTitle(from).replace(/^(Branch · )+/, '')}`,
+      messages,
+      mode: from.mode,
+      updatedAt: Date.now(),
+      branch: { from: from.id, at: end },
+    }
     const left = chatOf(topic)
     if (!left.messages.length) topic.chats = topic.chats.filter((c) => c.id !== left.id)
     topic.chats.push(chat)
@@ -675,6 +687,7 @@ function restoredChats(saved: SavedTopic): Pick<Topic, 'chats' | 'chatId'> {
     ? saved.chats.map((c) => ({
         id: c.id,
         ...(c.title && { title: c.title }),
+        ...(c.branch && { branch: c.branch }),
         messages: c.messages.map(restoredMessage),
         mode: validMode(c.mode),
         updatedAt: c.updatedAt || 0,

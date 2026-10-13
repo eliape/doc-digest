@@ -10,7 +10,7 @@
   import ChatSwitcher from './ChatSwitcher.svelte'
   import QuizCard from './QuizCard.svelte'
   import { streamFade } from './streamFade'
-  import { type Chat, chatOf, type Topic, type Workspace } from './workspace.svelte'
+  import { type Chat, chatOf, chatTitle, type Topic, type Workspace } from './workspace.svelte'
 
   type Props = {
     workspace: Workspace
@@ -196,6 +196,12 @@
     workspace.quoteReply(topic.id, reply.text)
     document.getSelection()?.removeAllRanges()
     reply = undefined
+    focus()
+  }
+
+  function openChat(chatId: string) {
+    if (!topic) return
+    workspace.selectChat(topic.id, chatId)
     focus()
   }
 
@@ -399,15 +405,35 @@
               <button
                 type="button"
                 class="icon-button small"
-                aria-label="Continue in a new chat"
-                title="Continue in a new chat from this answer"
+                aria-label="Branch from this answer"
+                title="Branch: continue in a new chat from this answer"
                 onclick={() => split(message.id)}
               >
                 <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <circle cx="6" cy="5" r="2" /><circle cx="6" cy="19" r="2" /><circle cx="18" cy="7" r="2" />
-                  <path d="M6 7v10M18 9c0 5-6 4-11.5 8.5" />
+                  <circle cx="5" cy="12" r="2" /><circle cx="19" cy="6" r="2" /><circle cx="19" cy="18" r="2" />
+                <path d="M7 12h3c3 0 3-6 7-6M10 12c3 0 3 6 7 6" />
                 </svg>
               </button>
+            </div>
+          {/if}
+          {#if chat.branch && index === chat.branch.at - 1}
+            {@const original = topic.chats.find((c) => c.id === chat.branch?.from && c.messages.length)}
+            <!-- Where a branch leaves its original: what is above came from there. -->
+            <div class="branch-divider" role="separator">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="5" cy="12" r="2" /><circle cx="19" cy="6" r="2" /><circle cx="19" cy="18" r="2" />
+                <path d="M7 12h3c3 0 3-6 7-6M10 12c3 0 3 6 7 6" />
+              </svg>
+              <span>
+                From
+                {#if original}
+                  <button type="button" class="link" title="Open the original chat" onclick={() => openChat(original.id)}
+                    >{chatTitle(original)}</button
+                  >
+                {:else}
+                  deleted chat
+                {/if}
+              </span>
             </div>
           {/if}
         {:else}
@@ -841,6 +867,50 @@
   .icon-button.small svg {
     width: 1rem;
     height: 1rem;
+  }
+
+  /* ──── ⑂ From <original> ──── between what a branch copied and what was asked in it. */
+  .branch-divider {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin: 0.25rem 0;
+    color: var(--muted);
+    font-size: 0.8rem;
+  }
+  .branch-divider::before,
+  .branch-divider::after {
+    content: '';
+    flex: 1;
+    border-top: 1px solid var(--border);
+  }
+  .branch-divider span {
+    min-width: 0;
+    max-width: 70%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .branch-divider svg {
+    flex-shrink: 0;
+    width: 0.9rem;
+    height: 0.9rem;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .branch-divider .link {
+    padding: 0;
+    border: none;
+    background: none;
+    color: var(--accent);
+    font: inherit;
+    cursor: pointer;
+  }
+  .branch-divider .link:hover {
+    text-decoration: underline;
   }
 
   /* Floats just above the selected text. */

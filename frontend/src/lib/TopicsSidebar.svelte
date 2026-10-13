@@ -305,6 +305,8 @@
 
 <style>
   .topics-sidebar {
+    /* The room inside the collapsed strip (its width less padding and border): both icons are centred in a cell this wide. */
+    --icon-cell: calc(var(--sidebar-strip) - 0.75rem - 1px);
     display: flex;
     flex-direction: column;
     gap: 0.25rem;
@@ -386,7 +388,7 @@
   }
   .toggle {
     flex-shrink: 0;
-    width: 2.125rem;
+    width: var(--icon-cell);
     height: 2.125rem;
     margin-left: auto;
     padding: 0;
@@ -403,7 +405,7 @@
   }
   .plus {
     flex-shrink: 0;
-    width: 2.125rem;
+    width: var(--icon-cell);
     text-align: center;
   }
   /* Pushed to the bottom; with a long list it comes after it. */

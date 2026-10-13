@@ -4,7 +4,7 @@
   import { clampWidth, DEFAULT_WIDTH, MIN_WIDTH, readWidth, WIDTH_KEY } from './chatWidth'
   import { contextLabel, type PageContext, type Pick } from './context'
   import Dropdown from './Dropdown.svelte'
-  import { type CitableDocs, renderMarkdown } from './markdown'
+  import { type CitableDocs, renderMarkdown, selectedMarkdown } from './markdown'
   import { MODELS, savedModel, saveModel } from './models'
   import { MODES } from './modes'
   import ChatSwitcher from './ChatSwitcher.svelte'
@@ -156,6 +156,7 @@
 
   function onLogScroll() {
     if (!log) return
+    placeReply()
     const { scrollTop: top, scrollHeight: height, clientHeight } = log
     // Shrinking content pulls scrollTop up too, which is not the reader scrolling.
     const up = top < last.top && height >= last.height
@@ -167,6 +168,41 @@
   // A wheel turn upwards stops following at once, before its smooth scroll has moved anything.
   function onLogWheel(event: WheelEvent) {
     if (event.deltaY < 0) following = false
+  }
+
+  // Selecting text in an answer shows a Reply button over the selection, which quotes it in the question box.
+  let reply = $state<{ text: string; x: number; y: number }>()
+
+  function placeReply() {
+    const selection = document.getSelection()
+    const range = selection && !selection.isCollapsed && selection.rangeCount ? selection.getRangeAt(0) : undefined
+    const answer = (node: Node | null | undefined) =>
+      (node instanceof Element ? node : node?.parentElement)?.closest('.message.assistant .markdown')
+    const inside = range && answer(range.startContainer)
+    if (!range || !inside || inside !== answer(range.endContainer) || !log?.contains(inside)) {
+      reply = undefined
+      return
+    }
+    const text = selectedMarkdown(range)
+    const box = range.getBoundingClientRect?.()
+    const bounds = log.getBoundingClientRect()
+    // Hidden once the selection is scrolled out of the chat.
+    if (!text || !box || box.bottom < bounds.top || box.top > bounds.bottom) reply = undefined
+    else reply = { text, x: Math.min(Math.max(box.left + box.width / 2, bounds.left + 40), bounds.right - 40), y: Math.max(box.top, bounds.top) }
+  }
+
+  function replyToSelection() {
+    if (!topic || !reply) return
+    workspace.quoteReply(topic.id, reply.text)
+    document.getSelection()?.removeAllRanges()
+    reply = undefined
+    focus()
+  }
+
+  function split(messageId: string) {
+    if (!topic) return
+    workspace.splitChat(topic.id, messageId)
+    focus()
   }
 
   $effect(() => {
@@ -239,6 +275,8 @@
   }
 </script>
 
+<svelte:document onselectionchange={placeReply} />
+
 <svelte:window
   onresize={() => (width = clampWidth(width))}
   onkeydown={(e) => {
@@ -246,6 +284,7 @@
     // (unless a menu in it took the Escape to close itself).
     if (e.key === 'Escape' && !e.defaultPrevented && open && panel?.contains(document.activeElement)) {
       if (topic?.context) workspace.clearContext(topic.id)
+      else if (topic?.quote) workspace.clearQuote(topic.id)
       else close()
     }
   }}
@@ -319,6 +358,7 @@
             {:else if message.role === 'user' && startsSession(chat, index)}
               <span class="session-start">Socratic session</span>
             {/if}
+            {#if message.quote}<blockquote class="quoted" title={message.quote}>{message.quote}</blockquote>{/if}
             {#if message.context && pointedAt(message.context)}
               <button
                 type="button"
@@ -354,6 +394,22 @@
               <span class="text">{message.text}</span>
             {/if}
           </div>
+          {#if message.role === 'assistant' && message.status === 'done'}
+            <div class="message-actions" class:last={index === chat.messages.length - 1}>
+              <button
+                type="button"
+                class="icon-button small"
+                aria-label="Continue in a new chat"
+                title="Continue in a new chat from this answer"
+                onclick={() => split(message.id)}
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <circle cx="6" cy="5" r="2" /><circle cx="6" cy="19" r="2" /><circle cx="18" cy="7" r="2" />
+                  <path d="M6 7v10M18 9c0 5-6 4-11.5 8.5" />
+                </svg>
+              </button>
+            </div>
+          {/if}
         {:else}
           <p class="hint">
             Ask about anything in {topic.name}. Every PDF in this topic is part of the context, and the chat stays here
@@ -361,6 +417,23 @@
           </p>
         {/each}
       </div>
+
+      {#if reply}
+        <!-- Keeps the selection when pressed, so the click quotes what is selected. -->
+        <button
+          type="button"
+          class="reply"
+          style:left={`${reply.x}px`}
+          style:top={`${reply.y}px`}
+          title="Ask about the selected part of the answer"
+          onpointerdown={(e) => e.preventDefault()}
+          onmousedown={(e) => e.preventDefault()}
+          onclick={replyToSelection}
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 10l-5 5 5 5" /><path d="M20 4v7a4 4 0 0 1-4 4H4" /></svg>
+          Reply
+        </button>
+      {/if}
 
       {#if indexingCount}
         <p class="indexing" role="status">
@@ -384,6 +457,18 @@
               aria-label="Remove from your question"
               title="Remove (Esc)"
               onclick={() => workspace.clearContext(topic.id)}>×</button
+            >
+          </div>
+        {/if}
+        {#if topic.quote}
+          <div class="attached" aria-label="Replying to">
+            <blockquote class="quoted" title={topic.quote}>{topic.quote}</blockquote>
+            <button
+              type="button"
+              class="remove"
+              aria-label="Remove the quote"
+              title="Remove (Esc)"
+              onclick={() => workspace.clearQuote(topic.id)}>×</button
             >
           </div>
         {/if}
@@ -706,6 +791,87 @@
   }
   .steps li::before {
     content: '↳ ';
+  }
+
+  /* The part of an answer a question replies to, cut to three lines. */
+  .quoted {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
+    overflow: hidden;
+    margin: 0 0 0.375rem;
+    padding-left: 0.5rem;
+    border-left: 3px solid var(--border);
+    color: var(--muted);
+    font-size: 0.85rem;
+    white-space: pre-wrap;
+  }
+  .attached .quoted {
+    flex: 1;
+    margin: 0 0 0 0.25rem;
+  }
+
+  /* Under an answer, shown while it is hovered (always under the newest one). */
+  .message-actions {
+    display: flex;
+    margin-top: -0.375rem;
+    opacity: 0;
+    transition: opacity 0.15s;
+  }
+  .message-actions.last,
+  .message:hover + .message-actions,
+  .message-actions:hover,
+  .message-actions:focus-within {
+    opacity: 1;
+  }
+  @media (hover: none) {
+    .message-actions {
+      opacity: 1;
+    }
+  }
+  .icon-button.small {
+    width: 1.75rem;
+    height: 1.75rem;
+    color: var(--muted);
+  }
+  .icon-button.small:hover {
+    color: inherit;
+  }
+  .icon-button.small svg {
+    width: 1rem;
+    height: 1rem;
+  }
+
+  /* Floats just above the selected text. */
+  .reply {
+    position: fixed;
+    z-index: 20;
+    transform: translate(-50%, calc(-100% - 6px));
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.25rem 0.6rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+    color: inherit;
+    font: inherit;
+    font-size: 0.85rem;
+    box-shadow: 0 2px 8px rgb(0 0 0 / 0.15);
+    cursor: pointer;
+  }
+  .reply:hover {
+    background: var(--hover);
+  }
+  .reply svg {
+    width: 0.9rem;
+    height: 0.9rem;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2.2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
   }
 
   .indexing {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { type CitableDocs, renderMarkdown } from './markdown'
+import { type CitableDocs, renderMarkdown, selectedMarkdown } from './markdown'
 
 const html = (source: string, docs?: CitableDocs) => {
   const div = document.createElement('div')
@@ -87,5 +87,21 @@ describe('renderMarkdown', () => {
 
   it('leaves citations as text when no PDFs are given', () => {
     expect(html('See (book.pdf, p. 41).').querySelector('a')).toBeNull()
+  })
+})
+
+describe('selectedMarkdown', () => {
+  it('quotes a selection with its maths as LaTeX and its paragraphs on their own lines', () => {
+    const div = html('So $x^2$ grows.\n\n$$a+b$$\n\nThe end.')
+    const range = document.createRange()
+    range.selectNodeContents(div)
+    expect(selectedMarkdown(range)).toBe('So $x^2$ grows.\n$$a+b$$\nThe end.')
+  })
+
+  it('takes the whole formula when the selection is inside one', () => {
+    const div = html('So $x^2$ grows.')
+    const range = document.createRange()
+    range.selectNodeContents(div.querySelector('.katex-html')!)
+    expect(selectedMarkdown(range)).toBe('$x^2$')
   })
 })

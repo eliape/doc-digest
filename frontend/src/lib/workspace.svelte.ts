@@ -342,7 +342,7 @@ export class Workspace {
 
   /**
    * Delete one of the topic's discussions, stopping an answer still arriving in it. If it was
-   * the open one, the most recently used one left opens, or else a new, empty one.
+   * the open one, a new, empty chat opens in its place.
    */
   deleteChat(topicId: string, chatId: string) {
     const topic = this.topics.find((t) => t.id === topicId)
@@ -350,14 +350,9 @@ export class Workspace {
     this.answering.get(chatId)?.abort()
     topic.chats = topic.chats.filter((c) => c.id !== chatId)
     if (topic.chatId !== chatId) return
-    const next = [...topic.chats].sort((a, b) => b.updatedAt - a.updatedAt)[0]
-    if (next) {
-      topic.chatId = next.id
-    } else {
-      const chat = emptyChat()
-      topic.chats.push(chat)
-      topic.chatId = chat.id
-    }
+    const chat = emptyChat()
+    topic.chats.push(chat)
+    topic.chatId = chat.id
   }
 
   /** Whether a discussion's latest answer is still arriving. */

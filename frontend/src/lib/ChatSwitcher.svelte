@@ -41,6 +41,26 @@
     onpick?.()
   }
 
+  /**
+   * Delete a discussion after asking. Deleting the open one opens a new, empty chat. The menu
+   * stays open on the next discussion, unless none are left.
+   */
+  async function remove(chatId: string) {
+    const chat = listed.find((c) => c.id === chatId)
+    if (!chat || !confirm(`Delete the discussion “${chatTitle(chat)}”?`)) return
+    const at = listed.indexOf(chat)
+    const wasOpen = chatId === current.id
+    workspace.deleteChat(topic.id, chatId)
+    await tick()
+    if (!listed.length) {
+      open = false
+      onpick?.()
+      return
+    }
+    items()[Math.min(at, listed.length - 1)]?.focus()
+    if (wasOpen) onpick?.()
+  }
+
   $effect(() => {
     if (!open) return
     const outside = (event: PointerEvent) => {
@@ -59,6 +79,7 @@
     else if (event.key === 'End') els.at(-1)?.focus()
     else if (event.key === 'Escape') hide()
     else if (event.key === 'Tab') hide(false)
+    else if (event.key === 'Delete' && i >= 0) remove(listed[i].id)
     else return
     // Escape only closes this menu, not the chat around it.
     if (event.key !== 'Tab') event.preventDefault()
@@ -98,16 +119,30 @@
     <!-- svelte-ignore a11y_interactive_supports_focus -->
     <div class="popup-menu" role="menu" aria-label={`Discussions in ${topic.name}`} onkeydown={onMenuKeydown}>
       {#each listed as chat (chat.id)}
-        <button
-          type="button"
-          role="menuitemradio"
-          aria-checked={chat.id === current.id}
-          title={chatTitle(chat)}
-          onclick={() => pick(chat.id)}
-        >
-          <span class="title">{chatTitle(chat)}</span>
-          {#if workspace.isChatAnswering(chat)}<span class="busy" aria-label="answering"></span>{/if}
-        </button>
+        <div class="item">
+          <button
+            type="button"
+            role="menuitemradio"
+            class="pick"
+            aria-checked={chat.id === current.id}
+            title={chatTitle(chat)}
+            onclick={() => pick(chat.id)}
+          >
+            <span class="title">{chatTitle(chat)}</span>
+            {#if workspace.isChatAnswering(chat)}<span class="busy" aria-label="answering"></span>{/if}
+          </button>
+          <!-- Out of the arrow-key order; Delete on a focused discussion does the same. -->
+          <button
+            type="button"
+            class="delete"
+            tabindex="-1"
+            aria-label={`Delete ${chatTitle(chat)}`}
+            title="Delete (Del)"
+            onclick={() => remove(chat.id)}
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v5M14 11v5" /></svg>
+          </button>
+        </div>
       {/each}
     </div>
   {/if}
@@ -195,11 +230,53 @@
     max-height: min(60vh, 24rem);
     overflow-y: auto;
   }
-  .popup-menu > button {
-    justify-content: space-between;
+  /* Each row: the discussion's title, then its trash can, lined up on the right. */
+  .item {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    border-radius: var(--radius);
   }
-  .popup-menu [aria-checked='true'] {
+  .item:hover,
+  .item:focus-within {
+    background: var(--hover);
+  }
+  .item button {
+    border: none;
+    background: none;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+    outline: none;
+  }
+  .pick {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.3rem 0.5rem;
+    text-align: left;
+    white-space: nowrap;
+  }
+  .pick[aria-checked='true'] {
     font-weight: 600;
+  }
+  .item .delete {
+    flex-shrink: 0;
+    display: grid;
+    place-items: center;
+    width: 1.5rem;
+    height: 1.5rem;
+    margin-right: 0.125rem;
+    padding: 0;
+    border-radius: var(--radius);
+    color: var(--muted);
+  }
+  .item .delete:hover {
+    color: var(--danger);
+    background: color-mix(in srgb, var(--danger) 12%, transparent);
   }
   .busy {
     flex-shrink: 0;

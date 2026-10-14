@@ -27,6 +27,10 @@
   /* The document outline over the PDF. */
   --outline-fade: #d6dbe1;
   --outline-text: #3d444d;
+  /* The chat: a warm off-white behind the answers, a light blue for the reader's questions. */
+  --chat-bg: #faf9f5;
+  --chat-input: #ffffff;
+  --prompt-bg: color-mix(in srgb, var(--accent) 11%, var(--chat-bg));
 }
 
 /* Dark colours: under Dark in Settings, or under System when the system is dark. */
@@ -48,6 +52,9 @@
   --selected: color-mix(in srgb, var(--accent) 22%, var(--sidebar-bg));
   --outline-fade: #2d333b;
   --outline-text: #c9d1d9;
+  --chat-bg: #1f1e1c;
+  --chat-input: #2a2927;
+  --prompt-bg: color-mix(in srgb, var(--accent) 20%, var(--chat-bg));
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) {
@@ -68,6 +75,9 @@
     --selected: color-mix(in srgb, var(--accent) 22%, var(--sidebar-bg));
     --outline-fade: #2d333b;
     --outline-text: #c9d1d9;
+  --chat-bg: #1f1e1c;
+  --chat-input: #2a2927;
+  --prompt-bg: color-mix(in srgb, var(--accent) 20%, var(--chat-bg));
   }
 }
 :root[data-theme='light'] {

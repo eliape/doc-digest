@@ -50,6 +50,8 @@ class Call:
     text_pages: int = 0
     image_pages: int = 0
     request_id: str | None = None
+    # An answer the reader stopped while it was arriving; its output count is too low.
+    stopped: bool = False
 
 
 def call_from_response(kind: str, model: str, response: Any, seconds: float, **extra: Any) -> Call:

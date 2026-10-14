@@ -297,6 +297,72 @@ describe('Workspace.ask', () => {
     expect(ws.isAnswering(topic.id)).toBe(false)
   })
 
+  // Like fetch, the stream fails once it is aborted.
+  const aborted = (signal: AbortSignal) =>
+    new Promise<never>((_, reject) => signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError'))))
+
+  it('takes a stopped question back into the box and leaves it and its half answer out of the chat', async () => {
+    const ws = new Workspace()
+    const notes: DiscussionRequest[] = []
+    ws.registerApi = { ...ws.registerApi, note: async (_topicId, request) => void notes.push(request) }
+    let titled!: (title: string) => void
+    ws.titleApi = () => new Promise((resolve) => (titled = resolve))
+    const doc = ws.addDoc('notes.pdf', bytes(1))
+    const topic = ws.activeTopic!
+    ws.attachContext(topic.id, context(doc.id, 3))
+    topic.draft = 'How is this derived?'
+    let signal: AbortSignal | undefined
+    const pending = ws.ask(topic.id, undefined, async function* (_request, s) {
+      signal = s
+      yield { type: 'text', text: 'By ' }
+      await aborted(s!)
+    })
+    await new Promise((resolve) => setTimeout(resolve))
+    expect(chatOf(topic).messages.at(-1)?.text).toBe('By ')
+    topic.draft = 'and why?'
+
+    ws.stop(topic.id)
+    await pending
+    expect(signal?.aborted).toBe(true)
+    expect(chatOf(topic).messages).toEqual([])
+    expect(ws.isAnswering(topic.id)).toBe(false)
+    expect(topic.draft).toBe('How is this derived?\n\nand why?')
+    expect(topic.context?.page).toBe(3)
+    // The title asked for before the stop doesn't name the now empty discussion.
+    titled('Deriving it')
+    await new Promise((resolve) => setTimeout(resolve))
+    expect(chatOf(topic).title).toBeUndefined()
+
+    // The model never sees the stopped turn, and the register never notes it.
+    topic.draft = 'Ask again'
+    let sent: AskRequest | undefined
+    await ws.ask(topic.id, undefined, async function* (request) {
+      sent = request
+      yield { type: 'text', text: 'Done.' }
+    })
+    expect(sent?.messages.map((m) => [m.role, m.text])).toEqual([['user', 'Ask again']])
+    ws.newChat(topic.id)
+    expect(notes).toHaveLength(1)
+    expect(notes[0].messages.map((m) => m.text)).toEqual(['Ask again', 'Done.'])
+  })
+
+  it('goes back to Quiz mode when a quiz being written is stopped', async () => {
+    const ws = new Workspace()
+    ws.addDoc('notes.pdf', bytes(1))
+    const topic = ws.activeTopic!
+    ws.setMode(topic.id, 'quiz')
+    topic.draft = 'derivatives'
+    const quizApi: QuizApi = { create: (_request, signal) => aborted(signal!), recommend: async () => null }
+    const pending = ws.ask(topic.id, undefined, undefined, quizApi)
+    await new Promise((resolve) => setTimeout(resolve))
+    expect(chatOf(topic).mode).toBe('normal')
+    ws.stop(topic.id)
+    await pending
+    expect(chatOf(topic).messages).toEqual([])
+    expect(chatOf(topic).mode).toBe('quiz')
+    expect(topic.draft).toBe('derivatives')
+  })
+
   it('starts a new discussion, keeping the old one, its answer, the draft and the attached spot', async () => {
     const ws = new Workspace()
     const doc = ws.addDoc('notes.pdf', bytes(1))

@@ -201,6 +201,9 @@ export function chatTitle(chat: Chat): string {
   return 'New chat'
 }
 
+/** Why an answer was aborted when the reader pressed Stop (rather than deleting its discussion). */
+const STOPPED = 'stopped'
+
 /** The topics in the sidebar, their tabs, and which ones are selected. */
 export class Workspace {
   topics = $state<Topic[]>([])
@@ -444,6 +447,16 @@ export class Workspace {
     topic.quote = undefined
   }
 
+  /**
+   * Stop the answer arriving in the topic's open discussion, as if the question had not been
+   * asked: the question and what came of the answer leave the discussion (so the model never
+   * sees them), and the question goes back in the box to be edited and sent again.
+   */
+  stop(topicId: string) {
+    const topic = this.topics.find((t) => t.id === topicId)
+    if (topic) this.answering.get(topic.chatId)?.abort(STOPPED)
+  }
+
   /** Whether a discussion's latest answer is still arriving. */
   isChatAnswering(chat: Chat): boolean {
     return chat.messages.at(-1)?.status === 'streaming'
@@ -585,15 +598,37 @@ export class Workspace {
       const instructions = this.instructions.trim()
       const request = { ...askRequest(topic, serverId, this.answerModel, chat, (id) => this.docs[id]?.name), ...(instructions && { instructions }) }
       await respond(answer, request, controller.signal)
+      if (controller.signal.reason === STOPPED) return this.takeBack(topic, chat, asked, question, answer)
       answer.status = 'done'
       // An answer that finished after the reader left its discussion was not there to be noted.
       if (!this.isOpen(topic.id, chatId)) this.noteDiscussion(topic, chat)
     } catch (error) {
+      if (controller.signal.reason === STOPPED) return this.takeBack(topic, chat, asked, question, answer)
       answer.status = 'error'
       answer.text = error instanceof Error ? error.message : String(error)
     } finally {
       if (this.answering.get(chatId) === controller) this.answering.delete(chatId)
     }
+  }
+
+  /**
+   * Undo a question whose answer the reader stopped: take it and the answer out of the
+   * discussion, and put it back in the box with its spot and quote, ahead of anything typed since.
+   */
+  private takeBack(
+    topic: Topic,
+    chat: Chat,
+    asked: Pick<ChatMessage, 'text' | 'context' | 'quote' | 'mode'>,
+    question: ChatMessage,
+    answer: ChatMessage,
+  ) {
+    chat.messages = chat.messages.filter((m) => m.id !== question.id && m.id !== answer.id)
+    if (!chat.messages.length) chat.title = undefined
+    if (asked.mode === 'quiz') chat.mode = 'quiz'
+    const typed = topic.draft.trim()
+    topic.draft = [asked.text, typed].filter(Boolean).join('\n\n')
+    topic.context ??= asked.context
+    topic.quote ??= asked.quote
   }
 
   /**
@@ -610,7 +645,8 @@ export class Workspace {
         about: { role: 'user', text: asked.text, ...(asked.mode && { mode: asked.mode }), ...(context && { context }) },
       })
       // A discussion deleted meanwhile is no longer in its topic; the title just goes nowhere.
-      if (title) chat.title = title
+      // A question taken back (its answer stopped) no longer names the discussion.
+      if (title && chat.messages.some((m) => m.id === asked.id)) chat.title = title
     } catch {
       // Without a title, the start of the question stands in.
     }

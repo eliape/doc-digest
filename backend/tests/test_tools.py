@@ -118,6 +118,22 @@ async def test_overview_is_compact(topic) -> None:
     assert "derivative" not in text  # entries stay behind the tools
 
 
+async def test_a_stopped_answer_still_logs_what_it_cost(topic, tmp_path) -> None:
+    client = FakeAnswerClient([([text("First part. "), text("Second part.")], "end_turn")])
+    usage = UsageLog(tmp_path / "u.jsonl")
+    request = AskRequest(topic="Calc", docs=[], messages=[Turn(role="user", text="Explain")])
+    answer = stream_answer(client, request, topic, usage)
+
+    assert await anext(answer) == {"type": "text", "text": "First part. "}
+    # The server closes the answer when the reader stops it.
+    await answer.aclose()
+
+    [call] = usage.calls
+    assert call.kind == "answer"
+    assert call.stopped
+    assert call.input == 100
+
+
 async def test_answers_after_looking_things_up(topic, tmp_path) -> None:
     client = FakeAnswerClient(
         [

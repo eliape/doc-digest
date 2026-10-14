@@ -133,6 +133,10 @@ export type Topic = {
   draft: string
   context?: PageContext
   quote?: string
+  /** What the reader studies the topic for, in their words (Conventions and purpose, in the topic's ⋮ menu). */
+  purpose?: string
+  /** Conventions the topic's answers follow, like notation and sign conventions, in the reader's words. */
+  conventions?: string
 }
 
 /** One saved tab: the backend keeps its PDF, so only its id and where the reader was are saved. */
@@ -724,6 +728,8 @@ export class Workspace {
           docs,
           open: topic.openDocIds.filter((id) => docs.some((d) => d.id === id)),
           activeDocId: topic.openDocIds.includes(topic.activeDocId ?? '') && docs.some((d) => d.id === topic.activeDocId) ? topic.activeDocId : topic.openDocIds.find((id) => docs.some((d) => d.id === id)),
+          ...(topic.purpose?.trim() && { purpose: topic.purpose }),
+          ...(topic.conventions?.trim() && { conventions: topic.conventions }),
           chatId: topic.chatId,
           chats: topic.chats
             .filter((c) => c.messages.length || c.id === topic.chatId)
@@ -767,6 +773,8 @@ export class Workspace {
         openDocIds,
         activeDocId: t.activeDocId && openDocIds.includes(t.activeDocId) ? t.activeDocId : openDocIds[0],
         ...restoredChats(t),
+        ...(typeof t.purpose === 'string' && t.purpose && { purpose: t.purpose }),
+        ...(typeof t.conventions === 'string' && t.conventions && { conventions: t.conventions }),
         draft: '',
       }
     })
@@ -854,6 +862,8 @@ export function askRequest(
     ...(model && { model }),
     docs: topic.docIds.map(serverId).filter((id): id is string => !!id),
     ...docNames(topic, serverId, nameOf),
+    ...(topic.purpose?.trim() && { purpose: topic.purpose.trim() }),
+    ...(topic.conventions?.trim() && { conventions: topic.conventions.trim() }),
     messages: turns.map((m, i) => requestTurn(m, i === turns.length - 1, serverId)),
   }
 }

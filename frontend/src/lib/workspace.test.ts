@@ -806,6 +806,20 @@ describe('Workspace saving', () => {
     expect(json).toContain('data:small')
   })
 
+  it('saves the conventions and purpose of a topic and sends them with every question', async () => {
+    const { ws, topic } = await saved()
+    topic.purpose = ' Exam in TMA4100 '
+    topic.conventions = '   '
+    expect(askRequest(topic)).toMatchObject({ purpose: 'Exam in TMA4100' })
+    expect(askRequest(topic)).not.toHaveProperty('conventions')
+    topic.conventions = 'j is the imaginary unit'
+    const back = new Workspace()
+    await back.restore(JSON.parse(JSON.stringify(ws.snapshot())), async () => bytes(1, 2))
+    const restored = back.topics[0]
+    expect([restored.purpose, restored.conventions]).toEqual([' Exam in TMA4100 ', 'j is the imaginary unit'])
+    expect(askRequest(restored)).toMatchObject({ purpose: 'Exam in TMA4100', conventions: 'j is the imaginary unit' })
+  })
+
   it('keeps the tab order and the closed sources across a reload, and opens all in old saves', async () => {
     const saved = (open?: string[]) => ({
       version: 1,

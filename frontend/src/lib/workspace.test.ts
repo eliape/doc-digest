@@ -124,6 +124,22 @@ describe('Workspace', () => {
     expect(request.doc_names).toEqual({ srv: 'a.pdf' })
   })
 
+  it('saves which sidebar lists are open for each topic', async () => {
+    const ws = new Workspace()
+    const first = ws.createTopic('First')
+    first.sourcesOpen = true
+    first.discussionsOpen = false
+    ws.createTopic('Second')
+    const json = JSON.parse(JSON.stringify(ws.snapshot()))
+    expect(json.topics[1]).not.toHaveProperty('sourcesOpen')
+    const back = new Workspace()
+    await back.restore(json, async () => bytes(1))
+    expect(back.topics.map((t) => [t.sourcesOpen, t.discussionsOpen])).toEqual([
+      [true, false],
+      [undefined, undefined],
+    ])
+  })
+
   it('moves a tab to a new place in the row', () => {
     const ws = new Workspace()
     const [a, b, c] = ['a', 'b', 'c'].map((n, i) => ws.addDoc(`${n}.pdf`, bytes(i + 1)))

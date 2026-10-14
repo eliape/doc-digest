@@ -462,6 +462,7 @@
     {chatOpen}
     onopenchat={openChatFromSidebar}
     onopensettings={() => (settingsOpen = true)}
+    onupload={() => fileInput.click()}
   />
   {#if settingsOpen}<SettingsDialog {workspace} onclose={() => (settingsOpen = false)} />{/if}
 

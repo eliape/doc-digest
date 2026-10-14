@@ -14,9 +14,11 @@
     chatOpen?: boolean
     /** Called by the Settings button at the bottom. */
     onopensettings?: () => void
+    /** Called by the Upload source row: ask for PDFs to add to the open topic. */
+    onupload?: () => void
   }
 
-  let { workspace, open = $bindable(true), onopenchat, chatOpen = false, onopensettings }: Props = $props()
+  let { workspace, open = $bindable(true), onopenchat, chatOpen = false, onopensettings, onupload }: Props = $props()
 
   // A topic's discussions slide open and shut, quickly, unless motion is reduced.
   const listSlide = () => ({
@@ -228,10 +230,24 @@
           </li>
           {#if topic.id === workspace.activeTopicId && renamingId !== topic.id}
             {@const listed = discussions(topic)}
+            {@const discussionsOpen = topic.discussionsOpen !== false}
+            {@const sourcesOpen = !!topic.sourcesOpen}
             <!-- The open topic's discussions, on a soft line that forks out to each title. -->
             <li class="discussions" transition:slide={listSlide()}>
-              <h3 id={`discussions-${topic.id}`}>Discussions</h3>
-              <ul aria-labelledby={`discussions-${topic.id}`}>
+              <h3>
+                <button
+                  type="button"
+                  class="list-toggle"
+                  id={`discussions-${topic.id}`}
+                  aria-expanded={discussionsOpen}
+                  onclick={() => (topic.discussionsOpen = !discussionsOpen)}
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
+                  Discussions
+                </button>
+              </h3>
+              {#if discussionsOpen}
+              <ul aria-labelledby={`discussions-${topic.id}`} transition:slide={listSlide()}>
                 <!-- Opens an empty discussion in the chat. Never marked: it is an action, not a discussion. -->
                 <li class="discussion">
                   <div class="row">
@@ -287,11 +303,33 @@
                   </li>
                 {/each}
               </ul>
+              {/if}
             </li>
             <!-- The topic's PDFs. Closing a tab only takes it off the tab row; it stays here to reopen. -->
             <li class="discussions sources" transition:slide={listSlide()}>
-              <h3 id={`sources-${topic.id}`}>Sources</h3>
-              <ul aria-labelledby={`sources-${topic.id}`}>
+              <h3>
+                <button
+                  type="button"
+                  class="list-toggle"
+                  id={`sources-${topic.id}`}
+                  aria-expanded={sourcesOpen}
+                  onclick={() => (topic.sourcesOpen = !sourcesOpen)}
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
+                  Sources
+                </button>
+              </h3>
+              {#if sourcesOpen}
+              <ul aria-labelledby={`sources-${topic.id}`} transition:slide={listSlide()}>
+                <!-- Asks for PDFs to add to the topic. An action, never marked. -->
+                <li class="discussion">
+                  <div class="row">
+                    <button type="button" class="topic new-discussion" onclick={() => onupload?.()}>
+                      <span aria-hidden="true">＋</span>
+                      <span class="name">Upload source</span>
+                    </button>
+                  </div>
+                </li>
                 {#each topic.docIds as id (id)}
                   {@const name = workspace.docs[id]?.name ?? ''}
                   {@const isOpen = topic.openDocIds.includes(id)}
@@ -300,9 +338,8 @@
                       <button
                         type="button"
                         class="topic"
-                        class:closed-source={!isOpen}
                         aria-current={isOpen && id === topic.activeDocId ? 'true' : undefined}
-                        title={isOpen ? name : `${name} (closed, click to reopen)`}
+                        title={isOpen ? name : `${name} (closed, click to open)`}
                         onclick={() => workspace.openDoc(id)}
                       >
                         <span class="name" use:marquee><span>{name}</span></span>
@@ -340,6 +377,7 @@
                   </li>
                 {/each}
               </ul>
+              {/if}
             </li>
           {/if}
         {/each}
@@ -663,6 +701,37 @@
     letter-spacing: 0.04em;
     color: var(--muted);
   }
+  .list-toggle {
+    display: flex;
+    align-items: center;
+    gap: 0.125rem;
+    padding: 0;
+    border: none;
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-transform: inherit;
+    letter-spacing: inherit;
+    cursor: pointer;
+  }
+  .list-toggle svg {
+    width: 0.8rem;
+    height: 0.8rem;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2.5;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    transition: transform 0.18s ease;
+  }
+  .list-toggle[aria-expanded='true'] svg {
+    transform: rotate(90deg);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .list-toggle svg {
+      transition: none;
+    }
+  }
   li.discussions ul {
     --branch: color-mix(in srgb, var(--muted) 35%, transparent);
     margin-left: 0.5rem;
@@ -695,12 +764,10 @@
     padding: 0.25rem 0.5rem;
     font-size: 0.8rem;
   }
-  .closed-source {
-    color: var(--muted);
-  }
   /* A small dot after the name of each PDF that is open as a tab. */
   .open-mark {
     flex: none;
+    align-self: center;
     width: 0.375rem;
     height: 0.375rem;
     margin-left: 0.375rem;

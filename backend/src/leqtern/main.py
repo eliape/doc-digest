@@ -15,12 +15,13 @@ from .index import Indexer
 from .library import Library
 from .quiz import QuizRecord, reading_so_far, recommend
 from .register import (
+    TIDY_AFTER,
     DiscussionRequest,
     Registers,
     notes_block,
-    pick,
+    notes_for,
+    tidy,
     valid_topic_id,
-    wants_notes,
     write_notes,
 )
 from .saved import SavedWorkspace
@@ -163,13 +164,13 @@ def error_message(error: Exception) -> str:
 async def register_notes(request: AskRequest, services: Services) -> dict[str, Any] | None:
     """
     The topic's notes on earlier discussions for the newest question, when it gets any (see
-    wants_notes), after waiting for notes still being written about a discussion just left.
+    notes_for), after waiting for notes still being written about a discussion just left.
     """
-    if not request.topic_id or not valid_topic_id(request.topic_id) or not wants_notes(request):
+    if not request.topic_id or not valid_topic_id(request.topic_id):
         return None
     try:
         register = await services.registers.settled(request.topic_id)
-        return notes_block(pick(register, request.messages[-1], request.chat_id))
+        return notes_block(notes_for(register, request))
     except Exception:
         logger.exception("Could not read the register")
         return None
@@ -319,8 +320,9 @@ async def note_discussion(
     services: ServicesDep,
 ) -> dict[str, int]:
     """
-    Note what is new in a discussion the reader left in the topic's register. Questions asked
-    meanwhile in the topic wait for it, so a new discussion starts with these notes.
+    Note what is new in a discussion the reader left in the topic's register, and tidy the
+    register once enough has changed since the last tidy (keeping a copy from before it).
+    Questions asked meanwhile in the topic wait for it, so a new discussion starts with these notes.
     """
     topic_register_id(topic_id)
     registers = services.registers
@@ -337,6 +339,14 @@ async def note_discussion(
             logger.exception("Noting the discussion failed")
             raise HTTPException(status_code=502, detail=error_message(error)) from error
         registers.save(topic_id, register)
+        if changed and register.pending() >= TIDY_AFTER:
+            try:
+                registers.backup(topic_id)
+                await tidy(client, register, request.topic, names, services.usage)
+                registers.save(topic_id, register)
+            except Exception:
+                # The new notes are saved; the tidy is tried again after the next ones.
+                logger.exception("Tidying the register failed")
     return {"changed": changed, "notes": len(register.notes)}
 
 

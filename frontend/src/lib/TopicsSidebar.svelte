@@ -83,6 +83,11 @@
     if (creating) open = false
   }
 
+  /** Take a PDF out of its topic. Unlike closing its tab, the model no longer sees it. */
+  function removeSource(id: string, name: string) {
+    if (confirm(`Delete “${name}” from this topic? The chat will no longer draw on it.`)) workspace.removeDoc(id)
+  }
+
   function remove(id: string, name: string) {
     const topic = workspace.topics.find((t) => t.id === id)
     const pdfs = topic?.docIds.length ?? 0
@@ -271,6 +276,59 @@
                             onclick={() => {
                               menuId = undefined
                               removeChat(topic.id, chat.id, title)
+                            }}
+                          >
+                            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v5M14 11v5" /></svg>
+                            Delete
+                          </button>
+                        </div>
+                      {/if}
+                    </div>
+                  </li>
+                {/each}
+              </ul>
+            </li>
+            <!-- The topic's PDFs. Closing a tab only takes it off the tab row; it stays here to reopen. -->
+            <li class="discussions sources" transition:slide={listSlide()}>
+              <h3 id={`sources-${topic.id}`}>Sources</h3>
+              <ul aria-labelledby={`sources-${topic.id}`}>
+                {#each topic.docIds as id (id)}
+                  {@const name = workspace.docs[id]?.name ?? ''}
+                  {@const isOpen = topic.openDocIds.includes(id)}
+                  <li class="discussion">
+                    <div class="row" class:active={isOpen && id === topic.activeDocId}>
+                      <button
+                        type="button"
+                        class="topic"
+                        class:closed-source={!isOpen}
+                        aria-current={isOpen && id === topic.activeDocId ? 'true' : undefined}
+                        title={isOpen ? name : `${name} (closed, click to reopen)`}
+                        onclick={() => workspace.openDoc(id)}
+                      >
+                        <span class="name" use:marquee><span>{name}</span></span>
+                        {#if isOpen}<span class="open-mark" role="img" aria-label="Open"></span>{/if}
+                      </button>
+                      <button
+                        type="button"
+                        class="dots"
+                        aria-label={`Actions for ${name}`}
+                        aria-haspopup="menu"
+                        aria-expanded={menuId === id}
+                        onclick={() => (menuId = menuId === id ? undefined : id)}
+                      >
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                          <circle cx="12" cy="5" r="1.4" /><circle cx="12" cy="12" r="1.4" /><circle cx="12" cy="19" r="1.4" />
+                        </svg>
+                      </button>
+                      {#if menuId === id}
+                        <div class="topic-menu" role="menu" aria-label={`Actions for ${name}`}>
+                          <button
+                            type="button"
+                            role="menuitem"
+                            class="danger"
+                            onclick={() => {
+                              menuId = undefined
+                              removeSource(id, name)
                             }}
                           >
                             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v5M14 11v5" /></svg>
@@ -636,6 +694,18 @@
   .row .topic {
     padding: 0.25rem 0.5rem;
     font-size: 0.8rem;
+  }
+  .closed-source {
+    color: var(--muted);
+  }
+  /* A small dot after the name of each PDF that is open as a tab. */
+  .open-mark {
+    flex: none;
+    width: 0.375rem;
+    height: 0.375rem;
+    margin-left: 0.375rem;
+    border-radius: 50%;
+    background: var(--muted);
   }
   .new-discussion {
     gap: 0.375rem;

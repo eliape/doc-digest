@@ -118,9 +118,9 @@
     if (doc && !mounted.includes(doc.id)) mounted.push(doc.id)
   })
 
-  // Unmount the panes of closed tabs and deleted topics.
+  // Unmount the panes of closed tabs and deleted topics. A reopened tab starts fresh at its last page.
   $effect(() => {
-    const open = mounted.filter((id) => id in workspace.docs)
+    const open = mounted.filter((id) => workspace.isTabOpen(id))
     if (open.length !== mounted.length) mounted = open
   })
 
@@ -143,6 +143,35 @@
   })
 
   // A mouse wheel only scrolls up and down, so let it scroll the tabs sideways.
+  // Reordering tabs by dragging them. `dropAt` is the place in the row the tab would land.
+  const TAB_TYPE = 'application/x-leqtern-tab'
+  let dragTab = $state<string>()
+  let dropAt = $state<number>()
+
+  function dragTabOver(event: DragEvent, index: number) {
+    if (dragTab === undefined) return
+    event.preventDefault()
+    event.stopPropagation()
+    if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
+    const box = (event.currentTarget as HTMLElement).getBoundingClientRect()
+    dropAt = event.clientX < box.left + box.width / 2 ? index : index + 1
+  }
+
+  function dropTab(event: DragEvent) {
+    if (dragTab === undefined) return
+    event.preventDefault()
+    event.stopPropagation()
+    const order = workspace.activeTopic?.openDocIds ?? []
+    const from = order.indexOf(dragTab)
+    if (dropAt !== undefined && from !== -1) workspace.moveTab(dragTab, dropAt > from ? dropAt - 1 : dropAt)
+    endTabDrag()
+  }
+
+  function endTabDrag() {
+    dragTab = undefined
+    dropAt = undefined
+  }
+
   function scrollTabs(event: WheelEvent) {
     if (event.deltaX !== 0 || event.ctrlKey || !tabsEl) return
     tabsEl.scrollLeft += event.deltaY
@@ -409,6 +438,8 @@
   class="app"
   role="application"
   ondragover={(e) => {
+    // Only files dropped from outside show the drop overlay, not a tab being reordered.
+    if (!e.dataTransfer?.types.includes('Files')) return
     e.preventDefault()
     dragging = true
   }}
@@ -475,9 +506,25 @@
           bind:this={tabsEl}
           onwheel={scrollTabs}
         >
-          {#each workspace.activeTopic.docIds as id (id)}
+          {#each workspace.activeTopic.openDocIds as id, i (id)}
             {@const tab = workspace.docs[id]}
-            <div class="tab" class:active={id === doc?.id}>
+            <div
+              class="tab"
+              class:active={id === doc?.id}
+              class:dragged={id === dragTab}
+              class:drop-before={dropAt === i && dragTab !== undefined}
+              class:drop-after={dropAt === i + 1 && i === workspace.activeTopic.openDocIds.length - 1}
+              role="presentation"
+              draggable="true"
+              ondragstart={(e) => {
+                dragTab = id
+                e.dataTransfer?.setData(TAB_TYPE, id)
+                if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move'
+              }}
+              ondragover={(e) => dragTabOver(e, i)}
+              ondrop={(e) => dropTab(e)}
+              ondragend={endTabDrag}
+            >
               <button
                 type="button"
                 role="tab"
@@ -554,7 +601,7 @@
               }}
               onerror={() => {
                 error = `Could not open ${d.name}. Is it a valid PDF?`
-                workspace.closeDoc(id)
+                workspace.removeDoc(id)
               }}
             />
           </div>
@@ -674,6 +721,15 @@
     border-radius: var(--radius);
     color: var(--muted);
     font-size: 0.9rem;
+  }
+  .tab.dragged {
+    opacity: 0.45;
+  }
+  .tab.drop-before {
+    box-shadow: -2px 0 0 var(--ring);
+  }
+  .tab.drop-after {
+    box-shadow: 2px 0 0 var(--ring);
   }
   .tab:hover,
   .tab.active {

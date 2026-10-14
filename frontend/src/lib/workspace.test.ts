@@ -88,7 +88,38 @@ describe('Workspace', () => {
     ws.closeDoc(a.id)
     expect(ws.activeDoc).toBeUndefined()
     expect(ws.topics).toHaveLength(1)
-    expect(ws.docs).toEqual({})
+    // Closing only takes the tabs away: the PDFs stay as sources.
+    expect(ws.activeTopic?.docIds).toEqual([a.id, b.id, c.id])
+    expect(ws.activeTopic?.openDocIds).toEqual([])
+  })
+
+  it('reopens a closed source at the end of the tabs, and removing one takes it out', () => {
+    const ws = new Workspace()
+    const a = ws.addDoc('a.pdf', bytes(1))
+    const b = ws.addDoc('b.pdf', bytes(2))
+    ws.closeDoc(a.id)
+    expect(ws.isTabOpen(a.id)).toBe(false)
+    ws.openDoc(a.id)
+    expect(ws.activeTopic?.openDocIds).toEqual([b.id, a.id])
+    expect(ws.activeDoc?.id).toBe(a.id)
+    // Adding the same file again reopens its closed tab.
+    ws.closeDoc(a.id)
+    expect(ws.addDoc('a.pdf', bytes(1)).id).toBe(a.id)
+    expect(ws.activeTopic?.openDocIds).toEqual([b.id, a.id])
+    ws.removeDoc(a.id)
+    expect(ws.activeTopic?.docIds).toEqual([b.id])
+    expect(ws.activeTopic?.openDocIds).toEqual([b.id])
+    expect(ws.docs[a.id]).toBeUndefined()
+  })
+
+  it('moves a tab to a new place in the row', () => {
+    const ws = new Workspace()
+    const [a, b, c] = ['a', 'b', 'c'].map((n, i) => ws.addDoc(`${n}.pdf`, bytes(i + 1)))
+    ws.moveTab(c.id, 0)
+    expect(ws.activeTopic?.openDocIds).toEqual([c.id, a.id, b.id])
+    ws.moveTab(c.id, 9)
+    expect(ws.activeTopic?.openDocIds).toEqual([a.id, b.id, c.id])
+    expect(ws.activeTopic?.docIds).toEqual([a.id, b.id, c.id])
   })
 
   it('closing an inactive tab leaves the active one alone', () => {
@@ -676,7 +707,7 @@ describe('Workspace.ask', () => {
       5,
     )
     await new Promise((resolve) => setTimeout(resolve, 1))
-    ws.closeDoc(other.id)
+    ws.removeDoc(other.id)
     await following
     expect(polls).toBe(0)
     expect(ws.indexing[other.id]).toBeUndefined()
@@ -761,6 +792,33 @@ describe('Workspace saving', () => {
     expect(json).not.toContain('PAGETEXT')
     expect(json).not.toContain('half a question')
     expect(json).toContain('data:small')
+  })
+
+  it('keeps the tab order and the closed sources across a reload, and opens all in old saves', async () => {
+    const saved = (open?: string[]) => ({
+      version: 1,
+      activeTopicId: 't',
+      topics: [
+        {
+          id: 't',
+          name: 'T',
+          docs: ['a', 'b', 'c'].map((id) => ({ id, name: `${id}.pdf`, serverId: `s${id}` })),
+          ...(open && { open }),
+          activeDocId: 'c',
+        },
+      ],
+    })
+    const load = async () => bytes(1)
+    const back = new Workspace()
+    await back.restore(saved(['c', 'a']), load)
+    expect(back.activeTopic?.docIds).toEqual(['a', 'b', 'c'])
+    expect(back.activeTopic?.openDocIds).toEqual(['c', 'a'])
+    expect(back.activeDoc?.id).toBe('c')
+    expect(JSON.parse(JSON.stringify(back.snapshot())).topics[0]).toMatchObject({ open: ['c', 'a'] })
+
+    const old = new Workspace()
+    await old.restore(saved(), load)
+    expect(old.activeTopic?.openDocIds).toEqual(['a', 'b', 'c'])
   })
 
   it('leaves out tabs the backend does not have yet', () => {

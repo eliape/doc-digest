@@ -103,7 +103,7 @@ describe('App', () => {
     expect(screen.getByRole('tab', { name: 'Lecture 4.pdf', selected: true })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Show topics' })).toBeInTheDocument()
     await showTopics()
-    expect(screen.getAllByRole('button', { name: /^Actions for / })).toHaveLength(1)
+    expect(screen.getAllByRole('button', { name: /^Actions for (?!.*\.pdf)/ })).toHaveLength(1)
   })
 
   it('opens the PDFs in a mixed pick and names the ones that are not PDFs', async () => {
@@ -129,8 +129,8 @@ describe('App', () => {
     await showTopics()
 
     const topics = within(screen.getByRole('complementary', { name: 'Topics' }))
-    expect(topics.getByRole('button', { name: /^Lecture 4/ })).toHaveAttribute('aria-current', 'true')
-    expect(topics.getAllByRole('button', { name: /^Actions for / })).toHaveLength(1)
+    expect(topics.getByRole('button', { name: /^Lecture 4(?!\.pdf)/ })).toHaveAttribute('aria-current', 'true')
+    expect(topics.getAllByRole('button', { name: /^Actions for (?!.*\.pdf)/ })).toHaveLength(1)
     expect(book).toHaveAttribute('aria-selected', 'true')
     expect(screen.getAllByTestId('pdf-viewer')).toHaveLength(2)
 
@@ -167,7 +167,7 @@ describe('App', () => {
     expect(screen.queryByRole('tab', { name: 'slides.pdf' })).not.toBeInTheDocument()
 
     await showTopics()
-    await fireEvent.click(screen.getByRole('button', { name: /^slides/ }))
+    await fireEvent.click(screen.getByRole('button', { name: /^slides(?!\.pdf)/ }))
     expect(screen.getByRole('tab', { name: 'slides.pdf' })).toHaveAttribute('aria-selected', 'true')
   })
 
@@ -330,9 +330,40 @@ describe('App', () => {
     await pick(pdf('slides.pdf'))
     await screen.findByRole('tab', { name: 'slides.pdf' })
     await showTopics()
-    await fireEvent.click(screen.getByRole('button', { name: /^slides/ }))
+    await fireEvent.click(screen.getByRole('button', { name: /^slides(?!\.pdf)/ }))
     expect(screen.getByRole('button', { name: 'Hide topics' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'New discussion' })).toBeInTheDocument()
+  })
+
+  it('lists a closed tab under Sources and reopens it from there', async () => {
+    renderOffline()
+    await pick(pdf('a.pdf', 'a'))
+    await pick(pdf('b.pdf', 'b'))
+    await screen.findByRole('tab', { name: 'b.pdf' })
+    await fireEvent.click(screen.getByRole('button', { name: 'Close a.pdf' }))
+    expect(screen.queryByRole('tab', { name: 'a.pdf' })).not.toBeInTheDocument()
+    await showTopics()
+    const sources = within(screen.getByRole('list', { name: 'Sources' }))
+    expect(sources.getByRole('button', { name: /^b\.pdf/ })).toBeInTheDocument()
+    await fireEvent.click(sources.getByRole('button', { name: /^a\.pdf/ }))
+    expect(await screen.findByRole('tab', { name: 'a.pdf', selected: true })).toBeInTheDocument()
+  })
+
+  it('reorders tabs by dragging one onto another', async () => {
+    renderOffline()
+    await pick(pdf('a.pdf', 'a'))
+    await pick(pdf('b.pdf', 'b'))
+    await screen.findByRole('tab', { name: 'b.pdf' })
+    const tabs = () => screen.getAllByRole('tab').map((t) => t.textContent?.trim())
+    expect(tabs()).toEqual(['a.pdf', 'b.pdf'])
+    const first = screen.getByRole('tab', { name: 'a.pdf' }).parentElement!
+    const second = screen.getByRole('tab', { name: 'b.pdf' }).parentElement!
+    const data = new Map<string, string>()
+    const dataTransfer = { setData: (k: string, v: string) => data.set(k, v), types: [], dropEffect: '', effectAllowed: '' }
+    await fireEvent.dragStart(first, { dataTransfer })
+    await fireEvent.dragOver(second, { dataTransfer, clientX: 10_000 })
+    await fireEvent.drop(second, { dataTransfer })
+    expect(tabs()).toEqual(['b.pdf', 'a.pdf'])
   })
 
   it('expands the sidebar when New topic is pressed while it is collapsed', async () => {
@@ -449,7 +480,7 @@ describe('App', () => {
     expect(panel.getByLabelText('Ask a question')).toHaveValue('')
 
     await showTopics()
-    await fireEvent.click(screen.getByRole('button', { name: /^slides/ }))
+    await fireEvent.click(screen.getByRole('button', { name: /^slides(?!\.pdf)/ }))
     expect(panel.getByRole('log')).toHaveTextContent('Compare the two')
     expect(panel.getByLabelText('Ask a question')).toHaveValue('half typed')
   })
@@ -547,7 +578,7 @@ describe('App', () => {
     await fireEvent.click(await tool('Select'))
 
     await showTopics()
-    await fireEvent.click(sidebar.getByRole('button', { name: /^slides/ }))
+    await fireEvent.click(sidebar.getByRole('button', { name: /^slides(?!\.pdf)/ }))
     await screen.findByRole('tab', { name: 'slides.pdf' })
     expect((await tool('Click to ask')).getAttribute('aria-pressed')).toBe('true')
     // Clicking a topic leaves the sidebar open.
@@ -728,12 +759,12 @@ describe('App', () => {
 
     // Stats is read with the chat closed; slides has it open.
     await showTopics()
-    await fireEvent.click(sidebar.getByRole('button', { name: /^slides/ }))
+    await fireEvent.click(sidebar.getByRole('button', { name: /^slides(?!\.pdf)/ }))
     await fireEvent.click(screen.getByRole('button', { name: 'Show chat' }))
     expect(chat()).toHaveClass('open')
     await fireEvent.click(sidebar.getByRole('button', { name: /^Stats/ }))
     expect(chat()).not.toHaveClass('open')
-    await fireEvent.click(sidebar.getByRole('button', { name: /^slides/ }))
+    await fireEvent.click(sidebar.getByRole('button', { name: /^slides(?!\.pdf)/ }))
     expect(chat()).toHaveClass('open')
   })
 

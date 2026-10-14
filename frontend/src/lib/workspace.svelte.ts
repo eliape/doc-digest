@@ -123,7 +123,10 @@ export type Branch = { from: string; at: number }
 export type Topic = {
   id: string
   name: string
+  /** Every PDF in the topic: its sources, all of them in the model's context. */
   docIds: string[]
+  /** The sources shown as tabs, in tab order. Closing a tab only takes it off this list. */
+  openDocIds: string[]
   activeDocId?: string
   chats: Chat[]
   chatId: string
@@ -144,8 +147,10 @@ export type SavedDoc = {
  * One saved topic. Its chats are saved without the page images, which only the newest question
  * needs. Workspaces saved before a topic had several discussions have one `chat` and `mode`.
  */
-export type SavedTopic = Omit<Topic, 'docIds' | 'draft' | 'context' | 'quote' | 'chats' | 'chatId'> & {
+export type SavedTopic = Omit<Topic, 'docIds' | 'openDocIds' | 'draft' | 'context' | 'quote' | 'chats' | 'chatId'> & {
   docs: SavedDoc[]
+  /** The ids of the open tabs, in order. Saved before sources could be closed: all are open. */
+  open?: string[]
   chats?: Chat[]
   chatId?: string
   chat?: ChatMessage[]
@@ -231,7 +236,7 @@ export class Workspace {
   createTopic(name = 'New topic'): Topic {
     const left = this.openDiscussion()
     const chat = emptyChat()
-    this.topics.push({ id: newId(), name, docIds: [], chats: [chat], chatId: chat.id, draft: '' })
+    this.topics.push({ id: newId(), name, docIds: [], openDocIds: [], chats: [chat], chatId: chat.id, draft: '' })
     const topic = this.topics[this.topics.length - 1]
     this.activeTopicId = topic.id
     this.noteIfLeft(left)
@@ -275,19 +280,21 @@ export class Workspace {
     const topic = this.activeTopic ?? this.createTopic(topicNameFor(name))
     const existing = topic.docIds.map((id) => this.docs[id]).find((d) => d.name === name && sameBytes(d.data, data))
     if (existing) {
+      if (!topic.openDocIds.includes(existing.id)) topic.openDocIds.push(existing.id)
       topic.activeDocId = existing.id
       return existing
     }
     const doc = { id: newId(), name, data }
     this.docs = { ...this.docs, [doc.id]: doc }
     topic.docIds.push(doc.id)
+    topic.openDocIds.push(doc.id)
     topic.activeDocId = doc.id
     return doc
   }
 
   /**
    * Send a PDF to the backend, which indexes it in the background, and follow
-   * its progress until it is ready or fails. Stops following once the tab is closed.
+   * its progress until it is ready or fails. Stops following once the PDF is removed.
    */
   async index(docId: string, api: IndexApi = realIndexApi, pollMs = 1500): Promise<void> {
     const doc = this.docs[docId]
@@ -648,13 +655,47 @@ export class Workspace {
     this.noteIfLeft(left)
   }
 
-  /** Close a tab. The tab to its right (or else its left) becomes active. */
+  /** Whether a source is open as a tab. */
+  isTabOpen(id: string): boolean {
+    return !!this.topicOf(id)?.openDocIds.includes(id)
+  }
+
+  /**
+   * Close a tab. The PDF stays a source of its topic (and in the model's context), and can be
+   * opened again. The tab to its right (or else its left) becomes active.
+   */
   closeDoc(id: string) {
     const topic = this.topicOf(id)
+    const index = topic?.openDocIds.indexOf(id) ?? -1
+    if (!topic || index === -1) return
+    topic.openDocIds.splice(index, 1)
+    if (topic.activeDocId === id) topic.activeDocId = topic.openDocIds[index] ?? topic.openDocIds[index - 1]
+    if (topic.context?.docId === id) topic.context = undefined
+  }
+
+  /** Open a source as a tab, at the end, and switch to it. An open one is just switched to. */
+  openDoc(id: string) {
+    const topic = this.topicOf(id)
     if (!topic) return
-    const index = topic.docIds.indexOf(id)
-    topic.docIds.splice(index, 1)
-    if (topic.activeDocId === id) topic.activeDocId = topic.docIds[index] ?? topic.docIds[index - 1]
+    if (!topic.openDocIds.includes(id)) topic.openDocIds.push(id)
+    this.selectDoc(id)
+  }
+
+  /** Move an open tab to a place in the tab row (0 is first). */
+  moveTab(id: string, to: number) {
+    const topic = this.topicOf(id)
+    const from = topic?.openDocIds.indexOf(id) ?? -1
+    if (!topic || from === -1) return
+    topic.openDocIds.splice(from, 1)
+    topic.openDocIds.splice(Math.max(0, Math.min(to, topic.openDocIds.length)), 0, id)
+  }
+
+  /** Take a PDF out of its topic for good, tab and source both. */
+  removeDoc(id: string) {
+    const topic = this.topicOf(id)
+    if (!topic) return
+    this.closeDoc(id)
+    topic.docIds.splice(topic.docIds.indexOf(id), 1)
     if (topic.context?.docId === id) topic.context = undefined
     this.docs = omit(this.docs, [id])
     delete this.indexing[id]
@@ -681,7 +722,8 @@ export class Workspace {
           id: topic.id,
           name: topic.name,
           docs,
-          activeDocId: docs.some((d) => d.id === topic.activeDocId) ? topic.activeDocId : docs[0]?.id,
+          open: topic.openDocIds.filter((id) => docs.some((d) => d.id === id)),
+          activeDocId: topic.openDocIds.includes(topic.activeDocId ?? '') && docs.some((d) => d.id === topic.activeDocId) ? topic.activeDocId : topic.openDocIds.find((id) => docs.some((d) => d.id === id)),
           chatId: topic.chatId,
           chats: topic.chats
             .filter((c) => c.messages.length || c.id === topic.chatId)
@@ -717,11 +759,13 @@ export class Workspace {
     this.pages = { ...pages, ...this.pages }
     const restored = saved.topics.map((t): Topic => {
       const docIds = t.docs.map((d) => d.id).filter((id) => id in docs)
+      const openDocIds = t.open ? t.open.filter((id) => docIds.includes(id)) : docIds
       return {
         id: t.id,
         name: t.name,
         docIds,
-        activeDocId: t.activeDocId && docIds.includes(t.activeDocId) ? t.activeDocId : docIds[0],
+        openDocIds,
+        activeDocId: t.activeDocId && openDocIds.includes(t.activeDocId) ? t.activeDocId : openDocIds[0],
         ...restoredChats(t),
         draft: '',
       }

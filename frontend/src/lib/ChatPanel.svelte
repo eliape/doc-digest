@@ -871,7 +871,7 @@
   .message-actions .icon-button {
     position: absolute;
     top: 0.125rem;
-    left: -0.25rem;
+    left: 0;
   }
   .icon-button.small {
     width: 1.75rem;

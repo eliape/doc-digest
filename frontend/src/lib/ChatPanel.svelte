@@ -559,7 +559,7 @@
     width: 0;
     height: 100vh;
     overflow: hidden;
-    background: var(--sidebar-bg);
+    background: var(--chat-bg);
     border-left: 1px solid transparent;
     transition:
       width 0.2s ease,
@@ -678,7 +678,10 @@
     overflow-y: auto;
     display: flex;
     flex-direction: column;
-    gap: 0.5rem;
+    gap: var(--message-gap);
+    /* Room for the branch button under the newest answer, which hangs below it. */
+    padding-bottom: 1.75rem;
+    --message-gap: 1rem;
   }
 
   .message {
@@ -779,20 +782,23 @@
   .message.user {
     align-self: flex-end;
     max-width: 85%;
-    background: var(--hover);
+    background: var(--prompt-bg);
   }
+  /* Answers have no box: they lie on the chat's background. */
   .message.assistant {
-    background: var(--surface);
-    border: 1px solid var(--border);
+    padding: 0 0.25rem;
+    border-radius: 0;
   }
 
-  /* The model's Socratic questions have a coloured edge, matching the question box's shade in that mode. */
-  .message.socratic {
-    box-shadow: inset 3px 0 0 var(--socratic);
-  }
-  /* A quiz's frame has the quiz colour, like a Socratic session's. */
+  /* With no box, a Socratic answer is marked by a coloured line down its left, matching the question box's shade in that mode. */
+  .message.socratic,
   .message.quiz {
-    box-shadow: inset 3px 0 0 var(--quiz);
+    padding-left: 0.75rem;
+    box-shadow: inset 2px 0 0 var(--socratic);
+  }
+  /* A quiz's line has the quiz colour. */
+  .message.quiz {
+    box-shadow: inset 2px 0 0 var(--quiz);
   }
   /* A session or a quiz may start with nothing typed, so its message says what it is. */
   .session-start {
@@ -803,9 +809,11 @@
   }
 
   .message.error {
+    padding: 0.5rem 0.75rem;
+    border: 1px solid #ffcecb;
+    border-radius: 0.5rem;
     color: var(--error, #82071e);
     background: #ffebe9;
-    border-color: #ffcecb;
   }
 
   .steps {
@@ -839,9 +847,13 @@
   }
 
   /* Under an answer, shown while it is hovered (always under the newest one). */
+  /* Takes no height, so the gap after an answer is the same as after a question: the button hangs into
+     that gap and beside the next question, which is right-aligned and so never under it. */
   .message-actions {
-    display: flex;
-    margin-top: -0.375rem;
+    position: relative;
+    z-index: 1;
+    height: 0;
+    margin-top: calc(-1 * var(--message-gap));
     opacity: 0;
     transition: opacity 0.15s;
   }
@@ -855,6 +867,11 @@
     .message-actions {
       opacity: 1;
     }
+  }
+  .message-actions .icon-button {
+    position: absolute;
+    top: 0.125rem;
+    left: -0.25rem;
   }
   .icon-button.small {
     width: 1.75rem;
@@ -891,6 +908,10 @@
     min-width: 0;
     max-width: 75%;
     white-space: nowrap;
+  }
+  /* Clear of the branch button hanging under the answer above. */
+  .message-actions + .branch-divider {
+    margin-top: 1rem;
   }
   .branch-divider svg {
     flex-shrink: 0;
@@ -1076,7 +1097,7 @@
     padding: 0.375rem;
     border: 1px solid var(--border);
     border-radius: 0.75rem;
-    background: var(--surface);
+    background: var(--chat-input);
     transition:
       border-color 0.15s,
       box-shadow 0.15s;

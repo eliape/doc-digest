@@ -25,6 +25,8 @@ export type AskRequest = {
   chat_id?: string
   /** The backend's ids of the topic's PDFs, in tab order. */
   docs?: string[]
+  /** The name each of those PDFs has in this topic, by backend id: citations use these. */
+  doc_names?: Record<string, string>
   messages: AskTurn[]
   /** Which model answers. The backend's default (ANSWER_MODEL) when left out. */
   model?: string

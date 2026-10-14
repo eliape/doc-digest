@@ -89,6 +89,9 @@ class DiscussionRequest(BaseModel):
     chat_id: str
     title: str | None = None
     docs: list[str] = Field(default=[], description="Backend ids of the topic's PDFs")
+    doc_names: dict[str, str] = Field(
+        default={}, description="The name each PDF has in this topic, by backend id"
+    )
     messages: list[RegisterTurn]
 
 

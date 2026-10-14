@@ -180,7 +180,8 @@ async def events(
 ) -> AsyncIterator[str]:
     """The answer as newline-delimited JSON: text pieces and lookup steps, then done or an error."""
     toolbox = Toolbox(
-        services.library, topic_docs(services.library, services.indexer, request.docs)
+        services.library,
+        topic_docs(services.library, services.indexer, request.docs, request.doc_names),
     )
     try:
         notes = await register_notes(request, services)
@@ -227,7 +228,10 @@ async def quiz(
         if not last.text.strip() and last.context and last.context.doc_id:
             doc_id = last.context.doc_id
             ids = request.docs if doc_id in request.docs else [*request.docs, doc_id]
-            toolbox = Toolbox(services.library, topic_docs(services.library, services.indexer, ids))
+            toolbox = Toolbox(
+                services.library,
+                topic_docs(services.library, services.indexer, ids, request.doc_names),
+            )
             reading = await reading_so_far(toolbox, doc_id, last.context.page)
         notes = await register_notes(request, services)
         written = await write_quiz(
@@ -326,7 +330,7 @@ async def note_discussion(
         for doc_id in request.docs:
             info = services.library.get(doc_id)
             if info:
-                names[info.name] = doc_id
+                names[request.doc_names.get(doc_id) or info.name] = doc_id
         try:
             changed = await write_notes(client, register, request, names, services.usage)
         except Exception as error:

@@ -174,6 +174,9 @@ class AskRequest(BaseModel):
     topic_id: str | None = Field(default=None, description="The topic's id, for its register")
     chat_id: str | None = Field(default=None, description="The discussion's id")
     docs: list[str] = Field(default=[], description="Backend ids of the topic's PDFs, tab order")
+    doc_names: dict[str, str] = Field(
+        default={}, description="The name each PDF has in this topic, by backend id"
+    )
     messages: list[Turn]
     model: AnswerModel | None = Field(default=None, description="Defaults to ANSWER_MODEL")
     instructions: str = Field(default="", description="The reader's instructions, from Settings")

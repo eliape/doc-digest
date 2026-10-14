@@ -8,7 +8,7 @@ import base64
 import math
 import re
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from pydantic import BaseModel, Field, ValidationError
@@ -389,12 +389,21 @@ def overview(docs: list[TopicDoc], current: str | None) -> str:
     return "\n".join(lines)
 
 
-def topic_docs(library: Library, indexer: Indexer, ids: list[str]) -> list[TopicDoc]:
-    """The topic's documents that the backend has, under aliases D1, D2, … in the given order."""
+def topic_docs(
+    library: Library, indexer: Indexer, ids: list[str], names: dict[str, str] | None = None
+) -> list[TopicDoc]:
+    """
+    The topic's documents that the backend has, under aliases D1, D2, … in the given order.
+    The backend keeps one copy of a PDF however many topics hold it, so `names` gives the name
+    each has in this topic, which is what citations use.
+    """
     docs = []
     for doc_id in ids:
         info = library.get(doc_id)
         if info:
+            name = (names or {}).get(doc_id, "").strip()
+            if name and name != info.name:
+                info = replace(info, name=name)
             alias = f"D{len(docs) + 1}"
             docs.append(TopicDoc(alias, info, indexer.get(doc_id), indexer.doc_status(doc_id)))
     return docs

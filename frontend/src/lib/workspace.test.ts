@@ -112,6 +112,18 @@ describe('Workspace', () => {
     expect(ws.docs[a.id]).toBeUndefined()
   })
 
+  it('treats the same PDF under a new name as the source it already is, and sends each name', () => {
+    const ws = new Workspace()
+    const a = ws.addDoc('a.pdf', bytes(1))
+    ws.closeDoc(a.id)
+    expect(ws.addDoc('renamed.pdf', bytes(1)).id).toBe(a.id)
+    expect(ws.activeTopic?.docIds).toEqual([a.id])
+    expect(ws.activeTopic?.openDocIds).toEqual([a.id])
+    const request = askRequest(ws.activeTopic!, () => 'srv', undefined, undefined, (id) => ws.docs[id]?.name)
+    expect(request.docs).toEqual(['srv'])
+    expect(request.doc_names).toEqual({ srv: 'a.pdf' })
+  })
+
   it('moves a tab to a new place in the row', () => {
     const ws = new Workspace()
     const [a, b, c] = ['a', 'b', 'c'].map((n, i) => ws.addDoc(`${n}.pdf`, bytes(i + 1)))

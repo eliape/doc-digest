@@ -278,7 +278,7 @@ export class Workspace {
    */
   addDoc(name: string, data: Uint8Array): Doc {
     const topic = this.activeTopic ?? this.createTopic(topicNameFor(name))
-    const existing = topic.docIds.map((id) => this.docs[id]).find((d) => d.name === name && sameBytes(d.data, data))
+    const existing = topic.docIds.map((id) => this.docs[id]).find((d) => sameBytes(d.data, data))
     if (existing) {
       if (!topic.openDocIds.includes(existing.id)) topic.openDocIds.push(existing.id)
       topic.activeDocId = existing.id
@@ -583,7 +583,7 @@ export class Workspace {
       if (uploading.length) await Promise.all(uploading)
       const serverId = (id: string) => this.indexing[id]?.serverId
       const instructions = this.instructions.trim()
-      const request = { ...askRequest(topic, serverId, this.answerModel, chat), ...(instructions && { instructions }) }
+      const request = { ...askRequest(topic, serverId, this.answerModel, chat, (id) => this.docs[id]?.name), ...(instructions && { instructions }) }
       await respond(answer, request, controller.signal)
       answer.status = 'done'
       // An answer that finished after the reader left its discussion was not there to be noted.
@@ -623,7 +623,7 @@ export class Workspace {
    */
   private noteDiscussion(topic: Topic, chat: Chat) {
     if (!chat.messages.some((m) => m.role === 'assistant' && m.status === 'done')) return
-    const request = discussionRequest(topic, chat, (id) => this.indexing[id]?.serverId)
+    const request = discussionRequest(topic, chat, (id) => this.indexing[id]?.serverId, (id) => this.docs[id]?.name)
     void this.registerApi.note(topic.id, request).catch(() => {})
   }
 
@@ -844,6 +844,7 @@ export function askRequest(
   serverId: (docId: string) => string | undefined = () => undefined,
   model?: string,
   chat: Chat = chatOf(topic),
+  nameOf: (docId: string) => string | undefined = () => undefined,
 ): AskRequest {
   const turns = chat.messages.filter((m) => m.status !== 'streaming')
   return {
@@ -852,6 +853,7 @@ export function askRequest(
     chat_id: chat.id,
     ...(model && { model }),
     docs: topic.docIds.map(serverId).filter((id): id is string => !!id),
+    ...docNames(topic, serverId, nameOf),
     messages: turns.map((m, i) => requestTurn(m, i === turns.length - 1, serverId)),
   }
 }
@@ -865,17 +867,34 @@ export function discussionRequest(
   topic: Topic,
   chat: Chat,
   serverId: (docId: string) => string | undefined = () => undefined,
+  nameOf: (docId: string) => string | undefined = () => undefined,
 ): DiscussionRequest {
   return {
     topic: topic.name,
     chat_id: chat.id,
     ...(chat.title && { title: chat.title }),
     docs: topic.docIds.map(serverId).filter((id): id is string => !!id),
+    ...docNames(topic, serverId, nameOf),
     messages: chat.messages
       .slice(chat.branch?.at ?? 0)
       .filter((m) => m.status !== 'streaming')
       .map((m) => ({ key: turnKey(m), ...requestTurn(m, false, serverId) })),
   }
+}
+
+/** The names the topic's PDFs have here, by backend id, for the request. Left out when none are known. */
+function docNames(
+  topic: Topic,
+  serverId: (docId: string) => string | undefined,
+  nameOf: (docId: string) => string | undefined,
+): { doc_names?: Record<string, string> } {
+  const names: Record<string, string> = {}
+  for (const id of topic.docIds) {
+    const server = serverId(id)
+    const name = nameOf(id)
+    if (server && name) names[server] = name
+  }
+  return Object.keys(names).length ? { doc_names: names } : {}
 }
 
 function turnKey(message: ChatMessage): string {

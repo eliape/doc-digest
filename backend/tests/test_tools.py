@@ -195,3 +195,21 @@ async def test_a_quiz_without_a_focus_reads_the_section_up_to_the_page(topic) ->
     assert slides[0]["text"].startswith("No sections are known")
     assert "pp. 1–2" in slides[0]["text"]
     assert await reading_so_far(topic, "missing", 1) == []
+
+
+async def test_topic_docs_use_the_name_the_topic_gives_each_pdf(tmp_path) -> None:
+    from leqtern.index import Indexer
+    from leqtern.tools import topic_docs
+
+    library = Library(tmp_path)
+    doc = await library.add(make_pdf([filler("some page")]), "first.pdf")
+    # The same bytes added by another topic under another name reuse the stored copy.
+    again = await library.add(make_pdf([filler("some page")]), "second.pdf")
+    assert again.id == doc.id
+    indexer = Indexer.__new__(Indexer)
+    indexer.get = lambda _id: None  # type: ignore[method-assign]
+    indexer.doc_status = lambda _id: {}  # type: ignore[method-assign]
+    named = topic_docs(library, indexer, [doc.id], {doc.id: "Lecture notes.pdf"})
+    assert named[0].info.name == "Lecture notes.pdf"
+    assert library.get(doc.id).name != "Lecture notes.pdf"
+    assert topic_docs(library, indexer, [doc.id])[0].info.name == library.get(doc.id).name

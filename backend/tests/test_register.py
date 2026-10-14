@@ -13,13 +13,19 @@ from leqtern.quiz import QuizQuestion, QuizRecord
 from leqtern.register import (
     MAX_NOTES,
     DiscussionRequest,
+    Drop,
+    Merge,
     Note,
     Register,
     Registers,
+    TidyPlan,
     WrittenNote,
     WrittenNotes,
+    apply,
+    apply_tidy,
     note_line,
     notes_block,
+    notes_for,
     pick,
     quiz_summary,
     unread,
@@ -183,6 +189,7 @@ async def test_haiku_adds_new_notes_and_rewrites_the_ones_it_updates(tmp_path) -
             WrittenNote(
                 id="n1",
                 kind="solved",
+                evidence="solved_it",
                 title="July exam Q6 a)",
                 note="Solved it.",
                 doc="EXAM.pdf",
@@ -191,7 +198,9 @@ async def test_haiku_adds_new_notes_and_rewrites_the_ones_it_updates(tmp_path) -
             WrittenNote(
                 kind="struggled", title="Sign of torque", note="Got the sign wrong.", pages=[0, 4]
             ),
-            WrittenNote(kind="understood", title="  ", note="Empty titles are dropped."),
+            WrittenNote(
+                kind="understood", evidence="said_so", title="  ", note="Empty titles are dropped."
+            ),
         ]
     )
     fake = FakeIndexClient(lambda _kwargs: written)
@@ -287,7 +296,15 @@ def test_leaving_a_discussion_notes_it_and_later_questions_get_the_notes(
     client = TestClient(main.app)
     fake = FakeIndexClient(
         lambda _kwargs: WrittenNotes(
-            notes=[WrittenNote(kind="solved", title="Q6 a)", note="Used moments.", pages=[3])]
+            notes=[
+                WrittenNote(
+                    kind="solved",
+                    evidence="solved_it",
+                    title="Q6 a)",
+                    note="Used moments.",
+                    pages=[3],
+                )
+            ]
         )
     )
     main.app.dependency_overrides[main.get_client] = lambda: fake
@@ -332,3 +349,203 @@ def test_leaving_a_discussion_notes_it_and_later_questions_get_the_notes(
     assert client.get("/api/topics/t1/register").json() == {"notes": []}
     assert client.get("/api/topics/..%2Fx/register").status_code in (404, 422)
     assert client.post("/api/topics/bad.id/register", json=left).status_code == 422
+
+
+# ---- Evidence, weights, follow-ups and tidying ----
+
+
+def test_solved_and_understood_need_evidence() -> None:
+    register = Register()
+    written = [
+        WrittenNote(kind="understood", title="Torque", note="Was told what torque is."),
+        WrittenNote(kind="solved", title="Q6 a)", note="The tutor worked it out."),
+        WrittenNote(kind="understood", evidence="explained_back", title="Moments", note="Ok."),
+    ]
+    assert apply(register, written, "c1", {}, 5.0) == 2
+    assert [(n.title, n.kind, n.evidence) for n in register.notes] == [
+        ("Q6 a)", "worked_on", None),
+        ("Moments", "understood", "explained_back"),
+    ]
+
+
+def test_weight_counts_the_discussions_a_note_came_up_in() -> None:
+    register = Register(notes=[note(id="s", kind="struggled", title="Sign of torque")])
+    again = WrittenNote(id="s", kind="struggled", title="Sign of torque", note="Again.")
+    apply(register, [again], "c1", {}, 2.0)
+    assert register.notes[0].weight == 1  # the same discussion again
+    apply(register, [again], "c2", {}, 3.0)
+    apply(register, [again], "c3", {}, 4.0)
+    assert (register.notes[0].weight, register.notes[0].recurring) == (3, True)
+    assert note_line(register.notes[0]).startswith(
+        "- Struggled with (3 discussions): Sign of torque"
+    )
+
+    # Getting past it, with evidence, keeps it a struggle and resolves it.
+    past = WrittenNote(
+        id="s", kind="solved", evidence="answered_right", title="Sign of torque", note="Got it."
+    )
+    apply(register, [past], "c4", {}, 5.0)
+    s = register.notes[0]
+    assert (s.kind, s.resolved, s.recurring, s.weight) == ("struggled", True, False, 4)
+    assert note_line(s).startswith("- Got past (struggled in 4 discussions):")
+    # Without evidence it isn't resolved.
+    claimed = past.model_copy(update={"evidence": None})
+    apply(register, [claimed], "c5", {}, 6.0)
+    assert register.notes[0].resolved is False
+
+
+def test_notes_saved_before_weights_load_with_their_one_discussion() -> None:
+    old = (
+        '{"version": 1, "notes": [{"id": "a", "kind": "solved", "title": "Q1", "note": "x", '
+        '"chat_id": "c1", "created": 1, "updated": 1}], "seen": {}}'
+    )
+    register = Register.model_validate_json(old)
+    assert register.notes[0].chats == ["c1"] and register.notes[0].weight == 1
+    # Never tidied: all its notes count as untidied.
+    assert register.pending() == 1
+    apply(register, [WrittenNote(kind="struggled", title="Q2", note="y")], "c2", {}, 2.0)
+    assert register.pending() == 2
+
+
+def test_struggles_that_keep_coming_back_come_first() -> None:
+    filler_notes = [
+        note(id=f"f{i}", title=f"Exercise {i}", note="Unrelated.", pages=[50 + i], updated=20 + i)
+        for i in range(10)
+    ]
+    once = note(id="once", kind="struggled", title="Units", note="kPa.", pages=[90], updated=30)
+    often = note(
+        id="often",
+        kind="struggled",
+        title="Signs",
+        note="Minus.",
+        pages=[91],
+        chats=["a", "b", "c"],
+    )
+    past = note(
+        id="past",
+        kind="struggled",
+        title="Old",
+        note="Gone.",
+        pages=[92],
+        resolved=True,
+        updated=40,
+    )
+    register = Register(notes=[*filler_notes, once, often, past])
+    picked = [n.id for n in pick(register, turn(text="Hello there"), None)]
+    # Nothing fits the question: unresolved struggles, the one that keeps coming back first.
+    assert picked == ["often", "once"]
+    # Of notes that fit as well, the heavier ones are kept when there are too many.
+    near = [note(id=f"n{i}", pages=[3], updated=10 + i) for i in range(9)]
+    heavy = note(id="heavy", pages=[3], chats=["a", "b"], updated=0)
+    register = Register(notes=[*filler_notes, *near, heavy])
+    question = turn(text="?", context=spot(page=3, point={"x": 0, "y": 0}))
+    ids = [n.id for n in pick(register, question, None)]
+    assert len(ids) == MAX_NOTES and "heavy" in ids and "n0" not in ids
+
+
+def test_a_follow_up_gets_a_recurring_struggle_it_touches_once() -> None:
+    signs = note(
+        id="signs",
+        kind="struggled",
+        title="Sign of torque",
+        note="Keeps dropping the minus sign on clockwise torque.",
+        chats=["a", "b"],
+    )
+    once = note(id="once", kind="struggled", title="Sign of torque", note="Minus sign torque.")
+    register = Register(notes=[signs, once])
+    first = turn(text="Q7?")
+    answer = turn("assistant", "Start with the sum of torques.")
+    follow = turn(text="Is the torque sign negative here?")
+    request = asked(first, answer, follow)
+    assert [n.id for n in notes_for(register, request)] == ["signs"]
+    # Not again once an earlier question in the discussion touched it.
+    later = asked(first, answer, follow, answer, turn(text="And this torque sign?"))
+    assert notes_for(register, later) == []
+    # Not for a question about something else.
+    assert notes_for(register, asked(first, answer, turn(text="What's next?"))) == []
+
+
+def test_a_tidy_merges_and_drops_but_never_loses_a_recurring_struggle() -> None:
+    a = note(
+        id="a", kind="worked_on", title="Q6", note="Started.", chats=["c1"], created=1, updated=1
+    )
+    b = note(
+        id="b",
+        kind="solved",
+        title="Q6",
+        note="Done.",
+        evidence="solved_it",
+        chats=["c2"],
+        created=2,
+        updated=2,
+    )
+    signs = note(id="signs", kind="struggled", title="Signs", note="Minus.", chats=["c1", "c2"])
+    chatter = note(id="chatter", kind="worked_on", title="Hello", note="Small talk.")
+    register = Register(notes=[a, b, signs, chatter], untidied=15)
+    plan = TidyPlan(
+        merges=[
+            Merge(
+                ids=["a", "b", "ghost"],
+                kind="solved",
+                evidence="solved_it",
+                title="Q6",
+                note="Solved Q6.",
+                doc="exam.pdf",
+                pages=[3],
+            ),
+            Merge(
+                ids=["signs"], kind="solved", title="Signs", note="Fine now."
+            ),  # not a struggle any more
+        ],
+        drops=[
+            Drop(id="signs", reason="old"),
+            Drop(id="chatter", reason="small talk"),
+            Drop(id="ghost", reason="?"),
+        ],
+    )
+    assert apply_tidy(register, plan, {"exam.pdf": "exam"}, 9.0) == (1, 1)
+    q6, kept = register.notes
+    assert (q6.id, q6.kind, q6.note, q6.chats, q6.created, q6.updated, q6.doc_id) == (
+        "a",
+        "solved",
+        "Solved Q6.",
+        ["c1", "c2"],
+        1,
+        2,
+        "exam",
+    )
+    assert kept.id == "signs" and kept.kind == "struggled"
+    assert (register.untidied, register.tidied) == (0, 9.0)
+
+
+def test_leaving_enough_new_notes_tidies_the_register_and_keeps_a_copy(services) -> None:
+    client = TestClient(main.app)
+    many = WrittenNotes(
+        notes=[WrittenNote(kind="struggled", title=f"Step {i}", note="Hard.") for i in range(15)]
+    )
+    calls: list[str] = []
+
+    def respond(kwargs):
+        if kwargs["output_format"] is TidyPlan:
+            calls.append("tidy")
+            return TidyPlan(drops=[Drop(id=services.registers.load("t1").notes[0].id, reason="x")])
+        calls.append("notes")
+        return many
+
+    main.app.dependency_overrides[main.get_client] = lambda: FakeIndexClient(respond)
+    left = {
+        "topic": "Mechanics",
+        "chat_id": "c1",
+        "messages": [
+            {"key": "q1", "role": "user", "text": "Q6 a)?"},
+            {"key": "a1", "role": "assistant", "text": "Moments."},
+        ],
+    }
+    assert client.post("/api/topics/t1/register", json=left).json() == {"changed": 15, "notes": 14}
+    assert calls == ["notes", "tidy"]
+    registers = services.registers
+    backup = Register.model_validate_json(registers.backup_path("t1").read_text())
+    assert len(backup.notes) == 15
+    assert registers.load("t1").untidied == 0
+    client.delete("/api/topics/t1/register")
+    assert not registers.backup_path("t1").exists()

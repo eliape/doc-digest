@@ -117,6 +117,7 @@ def report(calls: list[Call], names: dict[str, tuple[str, int]] | None = None) -
         ("quiz", "Quizzes"),
         ("quiz_recommendation", "Quiz review notes"),
         ("register", "Register notes (per discussion left)"),
+        ("register_tidy", "Register tidy-ups"),
     ):
         mine = [c for c in calls if c.kind == kind]
         if mine:
@@ -138,7 +139,7 @@ def report(calls: list[Call], names: dict[str, tuple[str, int]] | None = None) -
             size = f", {pages} pages" if pages else ""
             out(f"  {name}{size}: {cents(sum(c.cost for c in mine))}")
 
-    known = {"answer", "quiz", "quiz_recommendation", "register"}
+    known = {"answer", "quiz", "quiz_recommendation", "register", "register_tidy"}
     others = [c for c in calls if c.kind not in known and not c.kind.startswith("index")]
     if others:
         out("")

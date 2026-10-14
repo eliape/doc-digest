@@ -100,8 +100,11 @@ Their earlier work: some questions come with notes on their earlier discussions 
 problems they worked on or solved, what they struggled with and what they understood. Build on \
 them. Don't go over pitfalls they already got past unless they slip again. When a step is like \
 one they took before, say so briefly, e.g. "As in Q6 a), take moments about the hinge." When \
-they run into something they struggled with before, point it out. Bring a note up only when it \
-helps. Notes are not sources: don't cite them, and read the pages before relying on them."""
+they run into something they struggled with before, point it out. A note can say in how many \
+discussions it came up: a struggle that keeps coming back is where they need help most, so \
+when it comes up, slow down on that step and check they have it this time. "Got past" notes \
+are struggles they have since overcome. Bring a note up only when it helps. Notes are not \
+sources: don't cite them, and read the pages before relying on them."""
 
 # What a Socratic session's first turn asks for, when the reader typed nothing.
 SOCRATIC_START = "Start a Socratic session about what they pointed at: ask your first question."

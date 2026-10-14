@@ -321,12 +321,14 @@ export class Workspace {
 
   /**
    * Attach what the reader pointed at to the topic's next question, replacing what was attached,
-   * and switch to the mode it is for: a plain click or Ask is for asking (Normal); Socratic and
-   * Quiz me in the right-click menu wait for what to focus on, then start.
+   * and switch to the mode it is for: a plain click or Ask is for asking (Normal) in the open
+   * discussion; Socratic and Quiz me in the right-click menu open a new discussion and wait
+   * there for what to focus on, then start.
    */
   attachContext(topicId: string, context: PageContext, mode: Mode = 'normal') {
     const topic = this.topics.find((t) => t.id === topicId)
     if (!topic) return
+    if (mode !== 'normal') this.newChat(topicId)
     topic.context = context
     chatOf(topic).mode = mode
   }

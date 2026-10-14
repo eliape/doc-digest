@@ -413,6 +413,8 @@ def test_quiz_recommendation_comes_from_haiku_only_when_something_was_wrong(
     assert sent["model"] == "claude-haiku-5-5"
     prompt = sent["messages"][0]["content"]
     assert "They are reading p. 3 of a.pdf." in prompt and "focus on: the power rule" in prompt
+    # Maths comes back as LaTeX, which the app renders.
+    assert "LaTeX between dollar signs" in prompt
     assert "1. Wrong: they chose A) x" in prompt
     # Without a focus, the quiz was about the section.
     client.post(

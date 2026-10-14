@@ -415,12 +415,38 @@ describe('Workspace.ask', () => {
       await new Promise<void>((resolve) => (finish = resolve))
     })
     await Promise.resolve()
-    ws.attachContext(topic.id, context(doc.id, 5), 'quiz')
+    ws.attachContext(topic.id, context(doc.id, 5))
+    ws.setMode(topic.id, 'quiz')
     expect(ws.canSend(topic.id)).toBe(false)
     await ws.ask(topic.id, undefined, undefined, fakeQuizApi().api)
     expect(chatOf(topic).messages).toHaveLength(2)
     finish()
     await pending
+  })
+
+  it('opens a new discussion for Socratic or Quiz me on a spot, and keeps the open one for Ask', async () => {
+    const ws = new Workspace()
+    const doc = ws.addDoc('notes.pdf', bytes(1))
+    const topic = ws.activeTopic!
+    topic.draft = 'first'
+    await ws.ask(topic.id, undefined, async function* () {
+      yield { type: 'text' as const, text: 'An answer.' }
+    })
+    const first = chatOf(topic)
+    ws.attachContext(topic.id, context(doc.id, 5))
+    expect(chatOf(topic)).toBe(first)
+
+    ws.attachContext(topic.id, context(doc.id, 6), 'socratic')
+    const session = chatOf(topic)
+    expect(session).not.toBe(first)
+    expect(session).toMatchObject({ messages: [], mode: 'socratic' })
+    expect(first.mode).toBe('normal')
+    expect(topic.context?.page).toBe(6)
+    // While it is still empty, Quiz me reuses it rather than piling up empty discussions.
+    ws.attachContext(topic.id, context(doc.id, 7), 'quiz')
+    expect(chatOf(topic)).toBe(session)
+    expect(session.mode).toBe('quiz')
+    expect(topic.chats).toHaveLength(2)
   })
 
 
@@ -504,10 +530,10 @@ describe('Workspace.ask', () => {
     expect(recommended[0].about.context).not.toHaveProperty('page_image')
     expect(message.quiz).toMatchObject({ recommendation: 'Read p. 12 again.', reviewing: undefined })
 
-    // All right: nothing to review, and no call.
+    // All right: nothing to review, and no call. (Quiz me opens a new discussion for it.)
     ws.attachContext(topic.id, context(doc.id, 5), 'quiz')
     await ws.ask(topic.id, undefined, undefined, api)
-    const perfect = chatOf(topic).messages[3]
+    const perfect = chatOf(topic).messages[1]
     await ws.answerQuiz(topic.id, perfect.id, 0, 1, api)
     await ws.answerQuiz(topic.id, perfect.id, 1, 0, api)
     expect(recommended).toHaveLength(1)

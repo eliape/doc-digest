@@ -146,7 +146,9 @@ The quiz, with the right answers and why:
 Write them a short recommendation, at most two sentences, on what to review: name the idea \
 behind what they got wrong and where to read about it again, e.g. "Try reading the definition \
 of the derivative again (book.pdf, p. 41)." Cite pages only as the explanations above give \
-them, in the form (file name, p. N). Speak to them directly, without a preamble."""
+them, in the form (file name, p. N). Write any maths in LaTeX between dollar signs, as the quiz \
+does, e.g. $f'(x) = 2x$, never as bare LaTeX commands or plain-text formulas: the app renders \
+it. Speak to them directly, without a preamble."""
 
 
 class Recommendation(BaseModel):

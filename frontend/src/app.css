@@ -27,8 +27,8 @@
   /* The document outline over the PDF. */
   --outline-fade: #d6dbe1;
   --outline-text: #3d444d;
-  /* The chat: a warm off-white behind the answers, a light blue for the reader's questions. */
-  --chat-bg: #faf9f5;
+  /* The chat: the sidebar's gray behind the answers, a light blue for the reader's questions. */
+  --chat-bg: var(--sidebar-bg);
   --chat-input: #ffffff;
   --prompt-bg: color-mix(in srgb, var(--accent) 11%, var(--chat-bg));
 }
@@ -52,8 +52,8 @@
   --selected: color-mix(in srgb, var(--accent) 22%, var(--sidebar-bg));
   --outline-fade: #2d333b;
   --outline-text: #c9d1d9;
-  --chat-bg: #1f1e1c;
-  --chat-input: #2a2927;
+  --chat-bg: var(--sidebar-bg);
+  --chat-input: var(--surface);
   --prompt-bg: color-mix(in srgb, var(--accent) 20%, var(--chat-bg));
 }
 @media (prefers-color-scheme: dark) {
@@ -75,8 +75,8 @@
     --selected: color-mix(in srgb, var(--accent) 22%, var(--sidebar-bg));
     --outline-fade: #2d333b;
     --outline-text: #c9d1d9;
-  --chat-bg: #1f1e1c;
-  --chat-input: #2a2927;
+  --chat-bg: var(--sidebar-bg);
+  --chat-input: var(--surface);
   --prompt-bg: color-mix(in srgb, var(--accent) 20%, var(--chat-bg));
   }
 }

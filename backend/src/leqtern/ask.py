@@ -12,7 +12,7 @@ from typing import Any, Literal
 from anthropic import AsyncAnthropic
 from pydantic import BaseModel, Field
 
-from .quiz import Quiz, QuizRecord, clean, quiz_text, results_text
+from .quiz import Quiz, QuizRecord, WrittenQuiz, arrange, quiz_text, results_text
 from .tools import TOOLS, Toolbox, ToolError, TopicDoc, overview
 from .usage import UsageLog, call_from_response
 
@@ -85,10 +85,22 @@ you write a quiz:
 - Ask 4 to 6 questions about what they pointed at, and about what they asked it to focus on, \
 unless they ask for another number. When they give nothing to focus on, you get the section \
 they are reading up to where they are: ask about that, and nothing after that point.
-- Give each question 3 or 4 choices with exactly one right; make the wrong ones plausible \
-mistakes, not jokes.
-- Test understanding (why something holds, what follows, which case applies) rather than \
-recall of wording.
+- Make the wrong answers the heart of each question: each one is what a specific, common \
+mistake produces, never a random or silly option. In maths and physics, the exact result of a \
+procedural slip (a dropped minus sign, the diameter for the radius, a missed factor of 2, the \
+wrong formula for the case); elsewhere, a well-known misconception (e.g. negative \
+reinforcement taken for punishment). Name the mistake behind each wrong answer before you \
+write it, in one sentence the reader is shown after answering.
+- Write a stem that is a complete question on its own: they should know what they are solving \
+before reading the options ("What does chlorophyll do in photosynthesis?", not \
+"Photosynthesis is...").
+- Give each question 4 options, one right. Make them parallel: the same grammatical form, \
+similar length and the same vocabulary level. The right one must not be the longest, the most \
+careful or the only qualified one. Never use "always", "never", "all of the above" or "none of \
+the above".
+- Test application and analysis, not recall: no "what is the definition of". Mix questions \
+that set a short concrete scenario or problem and ask which idea or result applies, with \
+questions that show a flawed application or argument and ask exactly what goes wrong.
 - Explain each right answer in a sentence or two. Don't cite pages as sources; refer to the \
 text only when it helps to look at something, e.g. "Look at equation (2.3) (book.pdf, p. 41)" \
 or "As in the worked example (book.pdf, p. 40)", in the citation form above.
@@ -419,12 +431,12 @@ async def write_quiz(
         max_tokens=16000,
         system=request_system(request),  # type: ignore[arg-type]
         messages=messages,  # type: ignore[arg-type]
-        output_format=Quiz,
+        output_format=WrittenQuiz,
         output_config={"effort": EFFORT},
     )
     if usage:
         usage.record(call_from_response("quiz", model, response, time.monotonic() - began))
-    quiz = clean(response.parsed_output) if response.parsed_output else None
+    quiz = arrange(response.parsed_output) if response.parsed_output else None
     if not quiz or not quiz.questions:
         raise RuntimeError(f"No quiz came back ({response.stop_reason})")
     return quiz

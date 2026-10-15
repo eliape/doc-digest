@@ -1,5 +1,12 @@
 /** One multiple-choice question: `answer` is the index of the right choice. */
-export type QuizQuestion = { question: string; choices: string[]; answer: number; explanation: string }
+export type QuizQuestion = {
+  question: string
+  choices: string[]
+  answer: number
+  explanation: string
+  /** For each choice, the mistake that leads to it; null for the right one. Older quizzes have none. */
+  misconceptions?: (string | null)[]
+}
 
 /** A quiz as the model writes it. */
 export type WrittenQuiz = { title: string; questions: QuizQuestion[] }

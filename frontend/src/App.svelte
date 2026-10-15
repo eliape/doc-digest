@@ -12,6 +12,7 @@
   import { isPdfFile } from './lib/pages'
   import { savedTool, saveTool, type Tool } from './lib/tools'
   import SettingsDialog from './lib/SettingsDialog.svelte'
+  import TopicProfileDialog from './lib/TopicProfileDialog.svelte'
   import TopicsSidebar from './lib/TopicsSidebar.svelte'
   import { type Mode, Workspace } from './lib/workspace.svelte'
 
@@ -59,6 +60,9 @@
   // Every load starts with the topics open and the chat closed.
   let sidebarOpen = $state(true)
   let settingsOpen = $state(false)
+  // The topic whose Conventions and purpose are being edited, if any.
+  let profileTopicId = $state<string>()
+  const profileTopic = $derived(workspace.topics.find((t) => t.id === profileTopicId))
   // Whether each topic's chat is showing, so a topic opens the way it was left. Not saved:
   // the chat starts hidden on every load.
   let chatOpenBy = $state<Record<string, boolean>>({})
@@ -451,7 +455,7 @@
     // Pressing anywhere but the sidebar (the PDF, the tabs, the chat) folds the topics away.
     // A pointer shortcut: the menu button does the same by keyboard.
     const target = e.target as Element
-    if (!target.closest('#topics-sidebar, .settings-dialog')) sidebarOpen = false
+    if (!target.closest('#topics-sidebar, .settings-dialog, .topic-profile-dialog')) sidebarOpen = false
     // The outline closes too, unless the press is in it or on its button.
     if (!target.closest('#topics-sidebar, #doc-outline, .outline-toggle')) outlineOpen = false
   }}
@@ -463,8 +467,10 @@
     onopenchat={openChatFromSidebar}
     onopensettings={() => (settingsOpen = true)}
     onupload={() => fileInput.click()}
+    onopenprofile={(id) => (profileTopicId = id)}
   />
   {#if settingsOpen}<SettingsDialog {workspace} onclose={() => (settingsOpen = false)} />{/if}
+  {#if profileTopic}<TopicProfileDialog topic={profileTopic} onclose={() => (profileTopicId = undefined)} />{/if}
 
   <div class="main">
     <input

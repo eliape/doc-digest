@@ -136,6 +136,10 @@ export type Topic = {
   draft: string
   context?: PageContext
   quote?: string
+  /** What the reader studies the topic for, in their words (Conventions and purpose, in the topic's ⋮ menu). */
+  purpose?: string
+  /** Conventions the topic's answers follow, like notation and sign conventions, in the reader's words. */
+  conventions?: string
 }
 
 /** One saved tab: the backend keeps its PDF, so only its id and where the reader was are saved. */
@@ -203,6 +207,9 @@ export function chatTitle(chat: Chat): string {
   if (first.mode === 'socratic') return 'Socratic session'
   return 'New chat'
 }
+
+/** Why an answer was aborted when the reader pressed Stop (rather than deleting its discussion). */
+const STOPPED = 'stopped'
 
 /** The topics in the sidebar, their tabs, and which ones are selected. */
 export class Workspace {
@@ -447,6 +454,16 @@ export class Workspace {
     topic.quote = undefined
   }
 
+  /**
+   * Stop the answer arriving in the topic's open discussion, as if the question had not been
+   * asked: the question and what came of the answer leave the discussion (so the model never
+   * sees them), and the question goes back in the box to be edited and sent again.
+   */
+  stop(topicId: string) {
+    const topic = this.topics.find((t) => t.id === topicId)
+    if (topic) this.answering.get(topic.chatId)?.abort(STOPPED)
+  }
+
   /** Whether a discussion's latest answer is still arriving. */
   isChatAnswering(chat: Chat): boolean {
     return chat.messages.at(-1)?.status === 'streaming'
@@ -588,15 +605,37 @@ export class Workspace {
       const instructions = this.instructions.trim()
       const request = { ...askRequest(topic, serverId, this.answerModel, chat, (id) => this.docs[id]?.name), ...(instructions && { instructions }) }
       await respond(answer, request, controller.signal)
+      if (controller.signal.reason === STOPPED) return this.takeBack(topic, chat, asked, question, answer)
       answer.status = 'done'
       // An answer that finished after the reader left its discussion was not there to be noted.
       if (!this.isOpen(topic.id, chatId)) this.noteDiscussion(topic, chat)
     } catch (error) {
+      if (controller.signal.reason === STOPPED) return this.takeBack(topic, chat, asked, question, answer)
       answer.status = 'error'
       answer.text = error instanceof Error ? error.message : String(error)
     } finally {
       if (this.answering.get(chatId) === controller) this.answering.delete(chatId)
     }
+  }
+
+  /**
+   * Undo a question whose answer the reader stopped: take it and the answer out of the
+   * discussion, and put it back in the box with its spot and quote, ahead of anything typed since.
+   */
+  private takeBack(
+    topic: Topic,
+    chat: Chat,
+    asked: Pick<ChatMessage, 'text' | 'context' | 'quote' | 'mode'>,
+    question: ChatMessage,
+    answer: ChatMessage,
+  ) {
+    chat.messages = chat.messages.filter((m) => m.id !== question.id && m.id !== answer.id)
+    if (!chat.messages.length) chat.title = undefined
+    if (asked.mode === 'quiz') chat.mode = 'quiz'
+    const typed = topic.draft.trim()
+    topic.draft = [asked.text, typed].filter(Boolean).join('\n\n')
+    topic.context ??= asked.context
+    topic.quote ??= asked.quote
   }
 
   /**
@@ -613,7 +652,8 @@ export class Workspace {
         about: { role: 'user', text: asked.text, ...(asked.mode && { mode: asked.mode }), ...(context && { context }) },
       })
       // A discussion deleted meanwhile is no longer in its topic; the title just goes nowhere.
-      if (title) chat.title = title
+      // A question taken back (its answer stopped) no longer names the discussion.
+      if (title && chat.messages.some((m) => m.id === asked.id)) chat.title = title
     } catch {
       // Without a title, the start of the question stands in.
     }
@@ -729,6 +769,8 @@ export class Workspace {
           activeDocId: topic.openDocIds.includes(topic.activeDocId ?? '') && docs.some((d) => d.id === topic.activeDocId) ? topic.activeDocId : topic.openDocIds.find((id) => docs.some((d) => d.id === id)),
           ...(topic.sourcesOpen && { sourcesOpen: true }),
           ...(topic.discussionsOpen === false && { discussionsOpen: false }),
+          ...(topic.purpose?.trim() && { purpose: topic.purpose }),
+          ...(topic.conventions?.trim() && { conventions: topic.conventions }),
           chatId: topic.chatId,
           chats: topic.chats
             .filter((c) => c.messages.length || c.id === topic.chatId)
@@ -774,6 +816,8 @@ export class Workspace {
         ...(t.sourcesOpen && { sourcesOpen: true }),
         ...(t.discussionsOpen === false && { discussionsOpen: false }),
         ...restoredChats(t),
+        ...(typeof t.purpose === 'string' && t.purpose && { purpose: t.purpose }),
+        ...(typeof t.conventions === 'string' && t.conventions && { conventions: t.conventions }),
         draft: '',
       }
     })
@@ -861,6 +905,8 @@ export function askRequest(
     ...(model && { model }),
     docs: topic.docIds.map(serverId).filter((id): id is string => !!id),
     ...docNames(topic, serverId, nameOf),
+    ...(topic.purpose?.trim() && { purpose: topic.purpose.trim() }),
+    ...(topic.conventions?.trim() && { conventions: topic.conventions.trim() }),
     messages: turns.map((m, i) => requestTurn(m, i === turns.length - 1, serverId)),
   }
 }

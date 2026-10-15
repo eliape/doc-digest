@@ -508,15 +508,31 @@
             onkeydown={onComposerKeydown}
           ></textarea>
           <div class="controls">
-            <button
-              type="submit"
-              class="send"
-              aria-label="Send"
-              title="Send (Enter)"
-              disabled={!workspace.canSend(topic.id)}
-            >
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 10l-5 5 5 5" /><path d="M20 4v7a4 4 0 0 1-4 4H4" /></svg>
-            </button>
+            {#if workspace.isAnswering(topic.id)}
+              <!-- Stopping takes the question back into the box, so nothing of it stays in the chat. -->
+              <button
+                type="button"
+                class="send stop"
+                aria-label="Stop answering"
+                title="Stop answering"
+                onclick={() => {
+                  workspace.stop(topic.id)
+                  composer?.focus()
+                }}
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2" /></svg>
+              </button>
+            {:else}
+              <button
+                type="submit"
+                class="send"
+                aria-label="Send"
+                title="Send (Enter)"
+                disabled={!workspace.canSend(topic.id)}
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 10l-5 5 5 5" /><path d="M20 4v7a4 4 0 0 1-4 4H4" /></svg>
+              </button>
+            {/if}
           </div>
         </div>
       </form>
@@ -1196,5 +1212,11 @@
     stroke-width: 2.2;
     stroke-linecap: round;
     stroke-linejoin: round;
+  }
+  .stop svg {
+    width: 0.8rem;
+    height: 0.8rem;
+    fill: currentColor;
+    stroke: none;
   }
 </style>

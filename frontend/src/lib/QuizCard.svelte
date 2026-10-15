@@ -53,7 +53,13 @@
         onclick={() => onpick(step, i)}
       >
         <span class="letter" aria-hidden="true">{LETTERS[i]}</span>
-        <span class="markdown">{@html inline(choice)}</span>
+        <span class="body">
+          <span class="markdown">{@html inline(choice)}</span>
+          <!-- Once answered, each wrong choice says what mistake leads to it. -->
+          {#if chosen !== null && i !== q.answer && q.misconceptions?.[i]}
+            <span class="why markdown">{@html inline(q.misconceptions[i]!)}</span>
+          {/if}
+        </span>
       </button>
     {/each}
   </div>
@@ -201,6 +207,18 @@
   .choice.wrong {
     border-color: var(--danger);
     background: color-mix(in srgb, var(--danger) 10%, var(--surface));
+  }
+  .body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+  }
+  .why {
+    font-size: 0.85em;
+    color: var(--muted);
+  }
+  .choice.wrong .why {
+    color: inherit;
   }
   .letter {
     flex-shrink: 0;

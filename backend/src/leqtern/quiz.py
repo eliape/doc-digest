@@ -4,8 +4,9 @@ answering model writes them; how the reader did goes back into the chat history,
 so later answers and quizzes can build on it, and Haiku suggests what to review.
 """
 
+import random
 import time
-from typing import Any
+from typing import Any, Literal
 
 from anthropic import AsyncAnthropic
 from pydantic import BaseModel, Field
@@ -20,18 +21,58 @@ RECOMMEND_MODEL = "claude-haiku-5-5"
 LETTERS = "ABCDEFGH"
 
 
-class QuizQuestion(BaseModel):
-    question: str = Field(description="The question. Markdown, with maths in LaTeX")
-    choices: list[str] = Field(description="3 or 4 possible answers, exactly one of them right")
-    answer: int = Field(description="Index of the right choice in `choices`, from 0")
+class Distractor(BaseModel):
+    misconception_rationale: str = Field(
+        description="Written first: the specific mistake or misconception that leads to this "
+        "answer, in one sentence the reader is shown after answering, e.g. 'Uses the diameter "
+        "where the formula needs the radius.' or 'Confuses negative reinforcement with "
+        "punishment.'"
+    )
+    text: str = Field(
+        description="The wrong answer that mistake produces, parallel in form, length and "
+        "vocabulary to the right answer. Markdown, with maths in LaTeX"
+    )
+
+
+class WrittenQuestion(BaseModel):
+    """A question as the model writes it: the right answer, then the mistakes that tempt."""
+
+    level: Literal["application", "analysis"] = Field(
+        description="application: a short scenario or problem where they must recognise and "
+        "apply the right idea; analysis: a flawed application or argument where they must find "
+        "exactly what goes wrong"
+    )
+    question: str = Field(
+        description="The stem: a complete, self-contained question that can be answered before "
+        "reading the options. Markdown, with maths in LaTeX"
+    )
+    answer: str = Field(description="The right answer, written like the wrong ones")
+    distractors: list[Distractor] = Field(description="Exactly 3 wrong answers")
     explanation: str = Field(
         description="Why the right answer is right, in a sentence or two. Cite a page only to "
         "point at something to look at, not as a source"
     )
 
 
-class Quiz(BaseModel):
+class WrittenQuiz(BaseModel):
     title: str = Field(description="A few words naming what the quiz is about")
+    questions: list[WrittenQuestion]
+
+
+class QuizQuestion(BaseModel):
+    """A question as the reader sees it, with the right answer somewhere among the choices."""
+
+    question: str
+    choices: list[str]
+    answer: int = Field(description="Index of the right choice in `choices`, from 0")
+    explanation: str
+    misconceptions: list[str | None] = Field(
+        default=[], description="For each choice, the mistake behind it; None for the right one"
+    )
+
+
+class Quiz(BaseModel):
+    title: str
     questions: list[QuizQuestion]
 
 
@@ -44,12 +85,37 @@ class QuizRecord(Quiz):
     recommendation: str | None = None
 
 
-def clean(quiz: Quiz) -> Quiz:
-    """Drop questions the reader could not answer: too few choices, or no right one among them."""
-    questions = [
-        q for q in quiz.questions if len(q.choices) >= 2 and 0 <= q.answer < len(q.choices)
-    ]
-    return Quiz(title=quiz.title, questions=questions[: len(LETTERS)])
+def arrange(written: WrittenQuiz, rng: random.Random | None = None) -> Quiz:
+    """
+    The quiz as the reader sees it: each right answer put at a random place among its wrong
+    ones, so where it is gives nothing away. Questions without a right answer and at least one
+    wrong one are dropped.
+    """
+    rng = rng or random.Random()
+    questions = []
+    for q in written.questions:
+        wrong = [d for d in q.distractors if d.text.strip()][: len(LETTERS) - 1]
+        if not q.answer.strip() or not wrong:
+            continue
+        # (text, the mistake behind it, whether it is the right one)
+        options: list[tuple[str, str | None, bool]] = [(q.answer, None, True)]
+        options += [(d.text, d.misconception_rationale.strip() or None, False) for d in wrong]
+        rng.shuffle(options)
+        questions.append(
+            QuizQuestion(
+                question=q.question,
+                choices=[text for text, _, _ in options],
+                answer=next(i for i, (_, _, right) in enumerate(options) if right),
+                explanation=q.explanation,
+                misconceptions=[why for _, why, _ in options],
+            )
+        )
+    return Quiz(title=written.title, questions=questions)
+
+
+def misconception(q: QuizQuestion, choice: int) -> str | None:
+    """The mistake behind a wrong choice, if the quiz says."""
+    return q.misconceptions[choice] if 0 <= choice < len(q.misconceptions) else None
 
 
 def quiz_text(quiz: Quiz) -> str:
@@ -57,7 +123,9 @@ def quiz_text(quiz: Quiz) -> str:
     lines = [f"[Quiz] {quiz.title} (shown to them as questions to click through)"]
     for n, q in enumerate(quiz.questions, 1):
         lines.append(f"{n}. {q.question}")
-        lines.extend(f"   {LETTERS[i]}) {choice}" for i, choice in enumerate(q.choices))
+        for i, choice in enumerate(q.choices):
+            why = misconception(q, i) if i != q.answer else None
+            lines.append(f"   {LETTERS[i]}) {choice}" + (f" (the mistake: {why})" if why else ""))
         lines.append(f"   Right answer: {LETTERS[q.answer]}. {q.explanation}")
     return "\n".join(lines)
 
@@ -85,9 +153,11 @@ def results_text(quiz: QuizRecord) -> str | None:
             lines.append(f"{n}. Right.")
         else:
             chose = q.choices[picked] if 0 <= picked < len(q.choices) else "?"
+            why = misconception(q, picked)
             lines.append(
-                f"{n}. Wrong: they chose {LETTERS[picked]}) {chose}; "
-                f"the answer is {LETTERS[q.answer]}) {q.choices[q.answer]}."
+                f"{n}. Wrong: they chose {LETTERS[picked]}) {chose}"
+                + (f" (the mistake: {why})" if why else "")
+                + f"; the answer is {LETTERS[q.answer]}) {q.choices[q.answer]}."
             )
     if quiz.recommendation:
         lines.append(f"They were advised: {quiz.recommendation}")

@@ -1,4 +1,5 @@
 import json
+import random
 
 import pytest
 from fakes import FakeIndexClient
@@ -22,7 +23,16 @@ from leqtern.ask import (
     write_quiz,
 )
 from leqtern.config import Settings, get_settings
-from leqtern.quiz import Quiz, QuizQuestion, QuizRecord, Recommendation
+from leqtern.quiz import (
+    Distractor,
+    Quiz,
+    QuizQuestion,
+    QuizRecord,
+    Recommendation,
+    WrittenQuestion,
+    WrittenQuiz,
+    arrange,
+)
 
 
 def context(**overrides: object) -> Context:
@@ -345,13 +355,23 @@ def test_an_unanswered_quiz_has_no_results_and_a_half_done_one_says_so() -> None
     ]
 
 
+def written_question(question: str, answer: str, *wrong: str) -> WrittenQuestion:
+    return WrittenQuestion(
+        level="application",
+        question=question,
+        answer=answer,
+        distractors=[Distractor(misconception_rationale=f"Why {w}.", text=w) for w in wrong],
+        explanation="Because.",
+    )
+
+
 async def test_write_quiz_uses_the_chosen_model_and_drops_broken_questions() -> None:
-    written = Quiz(
+    written = WrittenQuiz(
         title="Derivatives",
         questions=[
-            *quiz().questions,
-            QuizQuestion(question="Broken", choices=["only one"], answer=0, explanation=""),
-            QuizQuestion(question="No answer", choices=["a", "b"], answer=5, explanation=""),
+            written_question("What is f'(x) for x^2?", "2x", "x", "x^2", "2"),
+            written_question("No wrong answers", "a"),
+            written_question("No right answer", " ", "b", "c"),
         ],
     )
     fake = FakeIndexClient(lambda _kwargs: written)
@@ -360,18 +380,37 @@ async def test_write_quiz_uses_the_chosen_model_and_drops_broken_questions() -> 
     )
     reading = [{"type": "text", "text": "The section they are reading"}]
     result = await write_quiz(fake, request, model="claude-sonnet-5-5", reading=reading)  # type: ignore[arg-type]
-    assert [q.question for q in result.questions] == [q.question for q in quiz().questions]
+    [question] = result.questions
+    assert sorted(question.choices) == ["2", "2x", "x", "x^2"]
+    assert question.choices[question.answer] == "2x"
+    # Each wrong choice keeps the mistake behind it; the right one has none.
+    for choice, why in zip(question.choices, question.misconceptions, strict=True):
+        assert why == (None if choice == "2x" else f"Why {choice}.")
     sent = fake.requests[0]
     assert sent["model"] == "claude-sonnet-5-5"
-    assert sent["output_format"] is Quiz
+    assert sent["output_format"] is WrittenQuiz
     # The section's pages come just before the request.
     *_, section, asked = sent["messages"][-1]["content"]
     assert section == reading[0]
     assert asked["text"] == f"[Quiz] {QUIZ_SECTION}"
 
 
+def test_the_right_answer_lands_anywhere_among_the_choices() -> None:
+    written = WrittenQuiz(title="T", questions=[written_question("Q?", "right", "a", "b", "c")])
+    places = {
+        (quiz := arrange(written, random.Random(seed))).questions[0].answer for seed in range(40)
+    }
+    assert places == {0, 1, 2, 3}
+    assert quiz.questions[0].choices[quiz.questions[0].answer] == "right"
+
+
+def test_quiz_writing_rules_are_in_the_prompt() -> None:
+    for rule in ["mistake", "self-contained", "parallel", "none of the above", "application"]:
+        assert rule in SYSTEM_PROMPT or rule in str(WrittenQuiz.model_json_schema())
+
+
 async def test_write_quiz_fails_when_no_questions_come_back() -> None:
-    fake = FakeIndexClient(lambda _kwargs: Quiz(title="Empty", questions=[]))
+    fake = FakeIndexClient(lambda _kwargs: WrittenQuiz(title="Empty", questions=[]))
     request = AskRequest(topic="T", messages=[Turn(role="user", text="", mode="quiz")])
     with pytest.raises(RuntimeError):
         await write_quiz(fake, request)  # type: ignore[arg-type]
@@ -472,3 +511,30 @@ def test_a_topics_purpose_and_conventions_go_with_its_name_in_the_cached_prompt(
     assert system_blocks("Mechanics", "", " ", "")[-1]["text"] == 'The topic is called "Mechanics".'
     request = AskRequest(topic="Mechanics", purpose="Exam", messages=[Turn(role="user", text="?")])
     assert "<topic_purpose>\nExam\n</topic_purpose>" in request_system(request)[-1]["text"]
+
+
+def test_the_mistake_behind_a_wrong_answer_goes_into_the_history() -> None:
+    record = quiz(picked=[0, 0])
+    record.questions[0].misconceptions = [
+        "Forgets to bring the power down.",
+        None,
+        "Leaves the power as it is.",
+    ]
+    request = AskRequest(
+        topic="T",
+        messages=[
+            Turn(role="user", text="", mode="quiz"),
+            Turn(role="assistant", text="", quiz=record),
+            Turn(role="user", text="next"),
+        ],
+    )
+    _, written, after = build_messages(request)
+    assert (
+        "   A) x (the mistake: Forgets to bring the power down.)" in written["content"][0]["text"]
+    )
+    assert "   B) 2x\n" in written["content"][0]["text"]
+    results = after["content"][0]["text"]
+    assert (
+        "1. Wrong: they chose A) x (the mistake: Forgets to bring the power down.); "
+        "the answer is B) 2x." in results
+    )

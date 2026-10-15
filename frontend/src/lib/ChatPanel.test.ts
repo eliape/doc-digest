@@ -201,7 +201,13 @@ describe('ChatPanel', () => {
       create: async () => ({
         title: 'Derivatives',
         questions: [
-          { question: 'Derivative of x squared?', choices: ['x', '2x'], answer: 1, explanation: 'The power rule.' },
+          {
+            question: 'Derivative of x squared?',
+            choices: ['x', '2x'],
+            answer: 1,
+            explanation: 'The power rule.',
+            misconceptions: ['Forgets to bring the power down.', null],
+          },
           { question: 'What is dx?', choices: ['A small change', 'A constant'], answer: 0, explanation: 'An infinitesimal.' },
         ],
       }),
@@ -224,6 +230,9 @@ describe('ChatPanel', () => {
     expect(choices[0]).toHaveClass('wrong')
     expect(choices[1]).toHaveClass('right')
     expect(choices.every((c) => (c as HTMLButtonElement).disabled)).toBe(true)
+    // Once answered, the wrong choice says what mistake leads to it.
+    expect(choices[0]).toHaveTextContent('Forgets to bring the power down.')
+    expect(choices[1].querySelector('.why')).toBeNull()
     expect(quiz.getByRole('status')).toHaveTextContent('Not quite: the answer is B.')
     expect(quiz.getByRole('status')).toHaveTextContent('The power rule.')
 

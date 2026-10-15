@@ -184,6 +184,8 @@ class AskRequest(BaseModel):
     messages: list[Turn]
     model: AnswerModel | None = Field(default=None, description="Defaults to ANSWER_MODEL")
     instructions: str = Field(default="", description="The reader's instructions, from Settings")
+    purpose: str = Field(default="", description="What the reader studies the topic for")
+    conventions: str = Field(default="", description="Conventions answers in the topic follow")
 
 
 def page_name(page: int, label: str | None) -> str:
@@ -329,22 +331,45 @@ def build_messages(request: AskRequest, aliases: dict[str, str] | None = None) -
     return messages
 
 
-def system_blocks(topic: str, instructions: str = "") -> list[dict[str, Any]]:
+def system_blocks(
+    topic: str, instructions: str = "", purpose: str = "", conventions: str = ""
+) -> list[dict[str, Any]]:
     """
     Fixed instructions, the reader's own (set once in Settings, so they rarely change and
-    stay cached with the rest), and the topic's name, all cached.
+    stay cached with the rest), and the topic: its name, and what the reader wrote about
+    what they study it for and the conventions it follows, all cached.
     """
     own = instructions.strip()
+    about = [f'The topic is called "{topic}".']
+    if purpose.strip():
+        about.append(TOPIC_PURPOSE.format(purpose.strip()))
+    if conventions.strip():
+        about.append(TOPIC_CONVENTIONS.format(conventions.strip()))
     return [
         {"type": "text", "text": SYSTEM_PROMPT},
         *([{"type": "text", "text": READER_INSTRUCTIONS.format(own)}] if own else []),
-        {
-            "type": "text",
-            "text": f'The topic is called "{topic}".',
-            "cache_control": {"type": "ephemeral"},
-        },
+        {"type": "text", "text": "\n\n".join(about), "cache_control": {"type": "ephemeral"}},
     ]
 
+
+def request_system(request: AskRequest) -> list[dict[str, Any]]:
+    return system_blocks(request.topic, request.instructions, request.purpose, request.conventions)
+
+
+TOPIC_PURPOSE = """\
+What they study this topic for, in their words. Let it shape your answers, e.g. exam-style \
+practice for an exam, more depth and sources for research:
+<topic_purpose>
+{}
+</topic_purpose>"""
+
+TOPIC_CONVENTIONS = """\
+Conventions this topic follows, in their words. Use them in your answers (notation, signs, \
+units), even where other sources or general practice differ, and say so when a page you cite \
+uses another one:
+<topic_conventions>
+{}
+</topic_conventions>"""
 
 READER_INSTRUCTIONS = """\
 The reader's own instructions for every answer. Follow them; where they differ from the guidance \
@@ -392,7 +417,7 @@ async def write_quiz(
     response: Any = await client.messages.parse(
         model=model,
         max_tokens=16000,
-        system=system_blocks(request.topic, request.instructions),  # type: ignore[arg-type]
+        system=request_system(request),  # type: ignore[arg-type]
         messages=messages,  # type: ignore[arg-type]
         output_format=Quiz,
         output_config={"effort": EFFORT},
@@ -430,7 +455,7 @@ async def stream_answer(
     aliases = {d.info.id: d.alias for d in toolbox.docs.values()}
     newest = request.messages[-1].context if request.messages else None
     current = aliases.get(newest.doc_id or "") if newest else None
-    system = system_blocks(request.topic, request.instructions)
+    system = request_system(request)
     messages: list[Any] = build_messages(request, aliases)
     topic_map = map_block(list(toolbox.docs.values()), current)
     if messages and messages[-1]["role"] == "user":

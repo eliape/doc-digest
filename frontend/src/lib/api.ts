@@ -32,6 +32,9 @@ export type AskRequest = {
   model?: string
   /** The reader's own instructions for every answer, from Settings. */
   instructions?: string
+  /** What the reader studies the topic for, and the conventions its answers follow, in their words. */
+  purpose?: string
+  conventions?: string
 }
 
 /** A piece of an answer's text, or a lookup the model made while answering. */

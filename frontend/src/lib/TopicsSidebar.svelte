@@ -14,9 +14,11 @@
     chatOpen?: boolean
     /** Called by the Settings button at the bottom. */
     onopensettings?: () => void
+    /** Called by Conventions and purpose in a topic's menu. */
+    onopenprofile?: (topicId: string) => void
   }
 
-  let { workspace, open = $bindable(true), onopenchat, chatOpen = false, onopensettings }: Props = $props()
+  let { workspace, open = $bindable(true), onopenchat, chatOpen = false, onopensettings, onopenprofile }: Props = $props()
 
   // A topic's discussions slide open and shut, quickly, unless motion is reduced.
   const listSlide = () => ({
@@ -209,6 +211,17 @@
                   >
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z" /></svg>
                     Rename
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onclick={() => {
+                      menuId = undefined
+                      onopenprofile?.(topic.id)
+                    }}
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h9l4 4v14H6zM14 3v5h5M9 12h7M9 16h7" /></svg>
+                    Conventions and purpose
                   </button>
                   <button
                     type="button"

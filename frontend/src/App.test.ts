@@ -277,15 +277,39 @@ describe('App', () => {
     await fireEvent.click(dots)
     expect(dots).toHaveAttribute('aria-expanded', 'true')
     const items = screen.getAllByRole('menuitem')
-    expect(items.map((i) => i.textContent?.trim())).toEqual(['Rename', 'Delete'])
+    expect(items.map((i) => i.textContent?.trim())).toEqual(['Rename', 'Conventions and purpose', 'Delete'])
     expect(items.every((i) => i.querySelector('svg'))).toBe(true)
-    expect(items[1]).toHaveClass('danger')
+    expect(items[2]).toHaveClass('danger')
 
     await fireEvent.keyDown(window, { key: 'Escape' })
     expect(screen.queryByRole('menu')).not.toBeInTheDocument()
     await fireEvent.click(dots)
     await fireEvent.pointerDown(document.body)
     expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+  })
+
+  it('edits the conventions and purpose of a topic from its menu, keeping the sidebar open', async () => {
+    renderOffline()
+    await pick(pdf('slides.pdf'))
+    await screen.findByRole('tab', { name: 'slides.pdf' })
+    await showTopics()
+    await fireEvent.click(screen.getByRole('button', { name: 'Actions for slides' }))
+    await fireEvent.click(screen.getByRole('menuitem', { name: 'Conventions and purpose' }))
+    const dialog = within(screen.getByRole('dialog', { name: 'Conventions and purpose' }))
+    const purpose = dialog.getByRole('textbox', { name: /^Purpose/ })
+    expect(purpose).toHaveFocus()
+    await fireEvent.pointerDown(purpose)
+    await fireEvent.input(purpose, { target: { value: 'Exam in December' } })
+    await fireEvent.input(dialog.getByRole('textbox', { name: /^Conventions/ }), { target: { value: 'j is the imaginary unit' } })
+    await fireEvent.keyDown(purpose, { key: 'Escape' })
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Hide topics' })).toBeInTheDocument()
+
+    // It comes back with what was typed.
+    await fireEvent.click(screen.getByRole('button', { name: 'Actions for slides' }))
+    await fireEvent.click(screen.getByRole('menuitem', { name: 'Conventions and purpose' }))
+    expect(screen.getByRole('textbox', { name: /^Purpose/ })).toHaveValue('Exam in December')
+    expect(screen.getByRole('textbox', { name: /^Conventions/ })).toHaveValue('j is the imaginary unit')
   })
 
   it('cancels a new topic on Escape: the placeholder goes, the sidebar stays open and the earlier topic stays selected', async () => {

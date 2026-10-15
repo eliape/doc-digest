@@ -72,10 +72,31 @@ describe('ChatPanel', () => {
     expect(await within(log).findByText('Partial')).toBeInTheDocument()
     expect(within(log).getByText('Read book.pdf, p. 4')).toBeInTheDocument()
     expect(within(log).getByRole('button', { name: 'p. 10' })).toBeInTheDocument()
-    expect(panel.getByRole('button', { name: 'Send' })).toBeDisabled()
+    // While the answer arrives, Stop takes the send arrow's place.
+    expect(panel.queryByRole('button', { name: 'Send' })).toBeNull()
+    expect(panel.getByRole('button', { name: 'Stop answering' })).toBeInTheDocument()
     finish()
     // The newest words fade in, each piece in its own span, so match the paragraph's whole text.
     expect(await within(log).findByText((_, el) => el?.tagName === 'P' && el.textContent === 'Partial answer.')).toBeInTheDocument()
+  })
+
+  it('stops an answer and puts the question back in the box', async () => {
+    const { workspace, topic, panel } = setup()
+    vi.spyOn(workspace, 'ask').mockImplementation((id) =>
+      Workspace.prototype.ask.call(workspace, id, undefined, async function* (_request, signal) {
+        yield { type: 'text', text: 'Partial' }
+        await new Promise((_, reject) => signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError'))))
+      }),
+    )
+    const box = panel.getByLabelText('Ask a question') as HTMLTextAreaElement
+    await fireEvent.input(box, { target: { value: 'Why?' } })
+    await fireEvent.click(panel.getByRole('button', { name: 'Send' }))
+    expect(await within(panel.getByRole('log')).findByText('Partial')).toBeInTheDocument()
+
+    await fireEvent.click(panel.getByRole('button', { name: 'Stop answering' }))
+    await vi.waitFor(() => expect(box.value).toBe('Why?'))
+    expect(chatOf(topic).messages).toEqual([])
+    expect(panel.getByRole('button', { name: 'Send' })).toBeEnabled()
   })
 
   it('shows no chip on a question about the open page, only on one about a spot', async () => {

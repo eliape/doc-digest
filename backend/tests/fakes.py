@@ -40,6 +40,10 @@ class FakeStream:
 
         return events()
 
+    @property
+    def current_message_snapshot(self):
+        return SimpleNamespace(content=self.content, stop_reason=None, usage=usage(output=1))
+
     async def get_final_message(self):
         return SimpleNamespace(content=self.content, stop_reason=self.stop_reason, usage=usage())
 

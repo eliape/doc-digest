@@ -4,6 +4,7 @@ on (and the spot they pointed at), a compact map of the topic's documents,
 and tools to search the indexes and read pages, and decides what to look up.
 """
 
+import asyncio
 import time
 from collections.abc import AsyncIterator
 from typing import Any, Literal
@@ -404,6 +405,15 @@ async def write_quiz(
     return quiz
 
 
+def record_stopped(usage: UsageLog, stream: Any, model: str, seconds: float) -> None:
+    """Log a call the reader stopped, from what the stream had reported when it was stopped."""
+    try:
+        snapshot = stream.current_message_snapshot
+    except Exception:
+        return  # Stopped before the model began: nothing was reported yet.
+    usage.record(call_from_response("answer", model, snapshot, seconds, stopped=True))
+
+
 async def stream_answer(
     client: AsyncAnthropic,
     request: AskRequest,
@@ -453,11 +463,18 @@ async def stream_answer(
             fallbacks="default",
             **options,
         ) as stream:
-            async for event in stream:
-                if event.type == "text":
-                    if first_text is None:
-                        first_text = time.monotonic() - began
-                    yield {"type": "text", "text": event.text}
+            try:
+                async for event in stream:
+                    if event.type == "text":
+                        if first_text is None:
+                            first_text = time.monotonic() - began
+                        yield {"type": "text", "text": event.text}
+            except (asyncio.CancelledError, GeneratorExit):
+                # The reader stopped the answer: leaving the stream closes it, so the model
+                # stops writing. Log what the call cost so far (output is only counted at the end).
+                if usage:
+                    record_stopped(usage, stream, model, time.monotonic() - call_began)
+                raise
             final = await stream.get_final_message()
         if usage:
             usage.record(call_from_response("answer", model, final, time.monotonic() - call_began))

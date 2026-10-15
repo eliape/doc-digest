@@ -466,6 +466,7 @@
     {chatOpen}
     onopenchat={openChatFromSidebar}
     onopensettings={() => (settingsOpen = true)}
+    onupload={() => fileInput.click()}
     onopenprofile={(id) => (profileTopicId = id)}
   />
   {#if settingsOpen}<SettingsDialog {workspace} onclose={() => (settingsOpen = false)} />{/if}

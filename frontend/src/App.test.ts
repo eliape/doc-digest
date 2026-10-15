@@ -367,10 +367,29 @@ describe('App', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Close a.pdf' }))
     expect(screen.queryByRole('tab', { name: 'a.pdf' })).not.toBeInTheDocument()
     await showTopics()
+    // Sources start closed; Discussions start open.
+    expect(screen.getByRole('button', { name: 'Sources' })).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.getByRole('button', { name: 'Discussions' })).toHaveAttribute('aria-expanded', 'true')
+    await fireEvent.click(screen.getByRole('button', { name: 'Sources' }))
     const sources = within(screen.getByRole('list', { name: 'Sources' }))
     expect(sources.getByRole('button', { name: /^b\.pdf/ })).toBeInTheDocument()
     await fireEvent.click(sources.getByRole('button', { name: /^a\.pdf/ }))
     expect(await screen.findByRole('tab', { name: 'a.pdf', selected: true })).toBeInTheDocument()
+  })
+
+  it('opens the file picker from Upload source, and toggles the lists', async () => {
+    renderOffline()
+    await pick(pdf('a.pdf', 'a'))
+    await screen.findByRole('tab', { name: 'a.pdf' })
+    await showTopics()
+    const click = vi.spyOn(HTMLInputElement.prototype, 'click')
+    await fireEvent.click(screen.getByRole('button', { name: 'Sources' }))
+    await fireEvent.click(screen.getByRole('button', { name: /Upload source/ }))
+    expect(click).toHaveBeenCalled()
+    click.mockRestore()
+    await fireEvent.click(screen.getByRole('button', { name: 'Discussions' }))
+    expect(screen.getByRole('button', { name: 'Sources' })).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByRole('button', { name: 'Discussions' })).toHaveAttribute('aria-expanded', 'false')
   })
 
   it('reorders tabs by dragging one onto another', async () => {

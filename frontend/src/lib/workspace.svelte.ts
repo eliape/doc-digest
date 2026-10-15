@@ -128,6 +128,9 @@ export type Topic = {
   /** The sources shown as tabs, in tab order. Closing a tab only takes it off this list. */
   openDocIds: string[]
   activeDocId?: string
+  /** Whether the sidebar shows the topic's sources (closed unless set) and discussions (open unless false). */
+  sourcesOpen?: boolean
+  discussionsOpen?: boolean
   chats: Chat[]
   chatId: string
   draft: string
@@ -764,6 +767,8 @@ export class Workspace {
           docs,
           open: topic.openDocIds.filter((id) => docs.some((d) => d.id === id)),
           activeDocId: topic.openDocIds.includes(topic.activeDocId ?? '') && docs.some((d) => d.id === topic.activeDocId) ? topic.activeDocId : topic.openDocIds.find((id) => docs.some((d) => d.id === id)),
+          ...(topic.sourcesOpen && { sourcesOpen: true }),
+          ...(topic.discussionsOpen === false && { discussionsOpen: false }),
           ...(topic.purpose?.trim() && { purpose: topic.purpose }),
           ...(topic.conventions?.trim() && { conventions: topic.conventions }),
           chatId: topic.chatId,
@@ -808,6 +813,8 @@ export class Workspace {
         docIds,
         openDocIds,
         activeDocId: t.activeDocId && openDocIds.includes(t.activeDocId) ? t.activeDocId : openDocIds[0],
+        ...(t.sourcesOpen && { sourcesOpen: true }),
+        ...(t.discussionsOpen === false && { discussionsOpen: false }),
         ...restoredChats(t),
         ...(typeof t.purpose === 'string' && t.purpose && { purpose: t.purpose }),
         ...(typeof t.conventions === 'string' && t.conventions && { conventions: t.conventions }),

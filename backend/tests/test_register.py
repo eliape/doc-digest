@@ -276,7 +276,7 @@ async def test_notes_come_with_the_question_after_the_map_and_never_in_the_cache
     request = asked(turn(text="b)?"))
     _ = [e async for e in stream_answer(client, request, toolbox, notes=block)]
     content = client.requests[0]["messages"][-1]["content"]
-    assert content[0]["text"].startswith("The topic's documents:")
+    assert content[0]["text"].startswith("Documents not indexed yet")
     assert content[1] == block
     assert "Notes on their earlier" not in str(client.requests[0]["system"])
     assert "Their earlier work" in SYSTEM_PROMPT

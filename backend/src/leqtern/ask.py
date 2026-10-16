@@ -18,7 +18,7 @@ from PIL import Image
 from pydantic import BaseModel, Field
 
 from .quiz import Quiz, QuizRecord, WrittenQuiz, arrange, quiz_text, results_text
-from .tools import TOOLS, Toolbox, ToolError, TopicDoc, overview
+from .tools import TOOLS, Toolbox, ToolError, TopicDoc, catalogue, overview
 from .usage import UsageLog, call_from_response
 
 # The default answering model; ANSWER_MODEL in backend/.env overrides it.
@@ -39,7 +39,9 @@ LONG_CACHE = {"type": "ephemeral", "ttl": "1h"}
 SYSTEM_PROMPT = """\
 You help someone learn from PDFs they are studying, such as textbooks, papers and lecture \
 slides. They read in a viewer next to this chat and ask about what they are reading. The PDFs \
-they study together form a topic; a map of the topic's documents comes with their newest question.
+they study together form a topic. Its indexed documents are listed at the end of these \
+instructions, each with its kind and a summary; which one is open, with its chapters, and any \
+document still being indexed come with their newest question.
 
 With a question you may get:
 - when they clicked or selected something, an image of a band 80% of a page tall centred on \
@@ -55,15 +57,22 @@ Trust the images over the extracted text: the text is often missing (scanned pag
 
 Finding things in the topic:
 - If what they are looking at is enough, answer from it directly.
-- Otherwise use the tools. The map and the index show where things probably are; they are a \
-guide, not the evidence. Search with different words, check other documents, or read \
-neighbouring pages when a lookup finds too little. Read the pages before relying on them.
+- Otherwise use the tools. The document list and the index show where things probably are; \
+they are a guide, not the evidence. Search with different words, check other documents, or \
+read neighbouring pages when a lookup finds too little. Read the pages before relying on them.
+- Use documents for what they are. For how something is examined or what an exam question \
+expects, look at the topic's exams and their solutions; for what the course covers, its \
+syllabus; for notation and standard results, its formula sheets. Limit a search to them with \
+its docs option.
 - Use the images option of read_pages for equations, figures, tables and diagrams.
+- When lookups don't depend on each other, make them together in one step (several tool calls \
+at once) rather than one after another.
 - Keep lookups proportionate: a few searches and reads, not the whole topic.
 
 Citing: cite the pages you actually read or were shown, never the index or summaries. Write \
 each citation as (file name, p. N) or (file name, pp. N–M), with the document's file name \
-exactly as the map lists it (not its alias like D1) and PDF page numbers, e.g. (book.pdf, p. 41). \
+exactly as the document list gives it (not its alias like D1) and PDF page numbers, e.g. \
+(book.pdf, p. 41). \
 Keep this form even when answering in another language: the chat turns it into a link to the \
 page. If the topic does not contain the answer, say so, then answer from general knowledge and \
 say that you are doing so.
@@ -360,12 +369,17 @@ def build_messages(request: AskRequest, aliases: dict[str, str] | None = None) -
 
 
 def system_blocks(
-    topic: str, instructions: str = "", purpose: str = "", conventions: str = ""
+    topic: str,
+    instructions: str = "",
+    purpose: str = "",
+    conventions: str = "",
+    documents: str = "",
 ) -> list[dict[str, Any]]:
     """
     Fixed instructions, the reader's own (set once in Settings, so they rarely change and
-    stay cached with the rest), and the topic: its name, and what the reader wrote about
-    what they study it for and the conventions it follows, all cached.
+    stay cached with the rest), and the topic: its name, what the reader wrote about what
+    they study it for and the conventions it follows, and its indexed documents (see
+    `catalogue`), all cached.
     """
     own = instructions.strip()
     about = [f'The topic is called "{topic}".']
@@ -373,6 +387,8 @@ def system_blocks(
         about.append(TOPIC_PURPOSE.format(purpose.strip()))
     if conventions.strip():
         about.append(TOPIC_CONVENTIONS.format(conventions.strip()))
+    if documents:
+        about.append(documents)
     return [
         {"type": "text", "text": SYSTEM_PROMPT},
         *([{"type": "text", "text": READER_INSTRUCTIONS.format(own)}] if own else []),
@@ -380,8 +396,10 @@ def system_blocks(
     ]
 
 
-def request_system(request: AskRequest) -> list[dict[str, Any]]:
-    return system_blocks(request.topic, request.instructions, request.purpose, request.conventions)
+def request_system(request: AskRequest, documents: str = "") -> list[dict[str, Any]]:
+    return system_blocks(
+        request.topic, request.instructions, request.purpose, request.conventions, documents
+    )
 
 
 TOPIC_PURPOSE = """\
@@ -409,13 +427,12 @@ above on style, length or language, theirs win:
 
 def map_block(docs: list[TopicDoc], current: str | None) -> dict[str, Any] | None:
     """
-    The topic's map, sent with the newest question rather than in the system prompt:
-    it changes as indexing runs and when another tab is opened, and anything that
-    changes before the chat history stops the history being read from the cache.
+    The part of the topic's map that changes, sent with the newest question rather than in
+    the system prompt: which document is open, and indexing progress. Anything that changes
+    before the chat history stops the history being read from the cache.
     """
-    if not docs:
-        return None
-    return text_block(f"The topic's documents:\n{overview(docs, current)}")
+    text = overview(docs, current)
+    return text_block(text) if text else None
 
 
 Event = dict[str, Any]
@@ -558,7 +575,8 @@ async def stream_answer(
     aliases = {d.info.id: d.alias for d in toolbox.docs.values()}
     newest = request.messages[-1].context if request.messages else None
     current = aliases.get(newest.doc_id or "") if newest else None
-    system = request_system(request)
+    documents = catalogue(list(toolbox.docs.values()))
+    system = request_system(request, documents)
     messages: list[Any] = build_messages(request, aliases)
     topic_map = map_block(list(toolbox.docs.values()), current)
     if messages and messages[-1]["role"] == "user":
@@ -571,6 +589,9 @@ async def stream_answer(
         if messages and messages[-1]["role"] == "user"
         else {}
     )
+    if documents:
+        # Sent in the cached system prompt, but logged to see how big it is.
+        parts["document list (cached)"] = round(len(documents) / CHARS_PER_TOKEN)
     began = time.monotonic()
     first_text: float | None = None
     details = {**question_details(request), "question": uuid.uuid4().hex[:12]}

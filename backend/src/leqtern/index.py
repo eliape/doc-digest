@@ -28,6 +28,19 @@ INDEX_IMAGE_SIDE = 1400
 PARALLEL_CHUNKS = 3
 
 EntryKind = Literal["term", "acronym", "definition", "equation", "figure", "table"]
+# What a document is, so the answering model knows what to use it for.
+DocKind = Literal[
+    "textbook",
+    "lecture notes",
+    "slides",
+    "exercises",
+    "exam",
+    "solutions",
+    "syllabus",
+    "formula sheet",
+    "article",
+    "other",
+]
 ReferenceKind = Literal["section", "chapter", "figure", "table", "equation", "document", "other"]
 
 
@@ -66,6 +79,12 @@ class ChunkIndex(BaseModel):
 
 class DocSummary(BaseModel):
     title: str = Field(description="The document's title")
+    kind: DocKind = Field(
+        description="What kind of document it is: exam for an exam, midterm or past paper "
+        "(with or without solutions); solutions for worked solutions on their own; exercises "
+        "for problem sets and homework; syllabus for a course plan or list of what a course "
+        "covers; formula sheet for a collection of formulas"
+    )
     summary: str = Field(
         description="Three to five sentences: what it is, what it covers, for whom"
     )
@@ -82,6 +101,7 @@ class DocIndex(BaseModel):
 
     doc_id: str
     title: str = ""
+    kind: str = ""  # a DocKind; empty for indexes made before kinds were
     summary: str = ""
     page_count: int
     labels: list[str | None]
@@ -110,7 +130,7 @@ printed on the pages. Be brief: one line per summary or description."""
 
 SUMMARY_PROMPT = """\
 Below is an index of "{name}" ({count} pages), written a few pages at a time. Give the \
-document's title and a short summary of the whole document."""
+document's title, what kind of document it is, and a short summary of the whole document."""
 
 
 def chunk_ranges(page_count: int, size: int = PAGES_PER_CHUNK) -> list[tuple[int, int]]:
@@ -258,10 +278,9 @@ class Indexer:
 
     def enqueue(self, doc_id: str) -> None:
         index = self.get(doc_id)
-        if (index and index.complete) or self.status.get(doc_id, {}).get("status") in (
-            "queued",
-            "indexing",
-        ):
+        busy = self.status.get(doc_id, {}).get("status") in ("queued", "indexing")
+        # An index made before documents had kinds is queued once more, to get its kind.
+        if (index and index.complete and index.kind) or busy:
             return
         doc = self.library.get(doc_id)
         self.status[doc_id] = {"status": "queued", "pages_done": 0, "page_count": doc.page_count}
@@ -290,7 +309,16 @@ class Indexer:
         client = self.client_factory()
         if client is None:
             raise RuntimeError("No API key: add ANTHROPIC_API_KEY to backend/.env.")
-        index = self.get(doc_id) or DocIndex(
+        done_before = self.get(doc_id)
+        if done_before and done_before.complete:
+            # Only its kind is missing. The title and summary stay as they were, so the
+            # answering model's cached map changes as little as possible.
+            summary = await self.summarize(client, doc, done_before)
+            done_before.kind = summary.kind
+            self._save(done_before)
+            self.status[doc_id] = self.doc_status(doc_id)
+            return done_before
+        index = done_before or DocIndex(
             doc_id=doc_id,
             page_count=doc.page_count,
             labels=[p.label for p in doc.pages],
@@ -322,6 +350,7 @@ class Indexer:
         await asyncio.gather(*(run(s, e) for s, e in todo))
         summary = await self.summarize(client, doc, index)
         index.title, index.summary, index.complete = summary.title, summary.summary, True
+        index.kind = summary.kind
         self._save(index)
         self.status[doc_id] = {
             "status": "ready",
@@ -403,6 +432,7 @@ def render_outline(
     with_entries: bool = True,
     max_level: int = 4,
     pages: tuple[int, int] | None = None,
+    summaries: bool = True,
 ) -> str:
     """The index as indented text for the model."""
     lo, hi = pages or (1, doc.page_count)
@@ -411,7 +441,7 @@ def render_outline(
         if s.level <= max_level and s.end_page >= lo and s.start_page <= hi:
             indent = "  " * (s.level - 1)
             lines.append(f"{indent}- {s.title} [{page_range(doc, s.start_page, s.end_page)}]")
-            if s.summary:
+            if s.summary and summaries:
                 lines.append(f"{indent}  {s.summary}")
     if with_entries:
         by_kind: dict[str, list[str]] = {}

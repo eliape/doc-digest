@@ -6,7 +6,7 @@ from leqtern.ask import AskRequest, Turn, stream_answer
 from leqtern.index import ChunkRecord, DocIndex, Entry, Section
 from leqtern.library import Library
 from leqtern.quiz import reading_so_far
-from leqtern.tools import Toolbox, ToolError, TopicDoc, overview, terms
+from leqtern.tools import Toolbox, ToolError, TopicDoc, catalogue, overview, terms
 from leqtern.usage import UsageLog
 
 
@@ -87,12 +87,25 @@ async def test_outline_shows_sections_and_entries(topic) -> None:
     assert "not been indexed yet" in unindexed
 
 
+async def test_a_long_documents_outline_is_its_table_of_contents(topic, monkeypatch) -> None:
+    import leqtern.tools
+
+    monkeypatch.setattr(leqtern.tools, "OUTLINE_DETAIL_PAGES", 2)
+    contents = await topic.run("get_outline", {"doc": "D2"})
+    assert "  - 2.1 Chain rule [p. 4]" in contents
+    assert "Figure 2.1" not in contents and "Rates." not in contents
+    assert "ask again with from_page and to_page, at most 2 pages apart" in contents
+    detail = await topic.run("get_outline", {"doc": "D2", "from_page": 4, "to_page": 5})
+    assert "- Figure 2.1 (pp. 5): tangent line" in detail
+
+
 async def test_reads_text_pages_as_text_and_scanned_pages_as_images(topic) -> None:
     blocks = await topic.run("read_pages", {"doc": "D2", "pages": [4, 5]})
     assert [b["type"] for b in blocks] == ["text", "text", "image"]
     assert "composite functions" in blocks[0]["text"]
     with_images = await topic.run("read_pages", {"doc": "D2", "pages": [4], "images": True})
-    assert [b["type"] for b in with_images] == ["text", "image", "text"]
+    # The image only: the extracted text of a page asked for as an image is left out.
+    assert [b["type"] for b in with_images] == ["text", "image"]
     assert topic.pages_read == [("D2", 4), ("D2", 5), ("D2", 4)]
 
 
@@ -111,11 +124,23 @@ async def test_describes_lookups_for_the_chat(topic) -> None:
 
 
 async def test_overview_is_compact(topic) -> None:
-    text = overview(list(topic.docs.values()), current="D2")
-    assert "D1: slides.pdf (2 pages, indexing: 0 of 2 pages done, 1 pages scanned" in text
-    assert "D2: book.pdf (5 pages, indexed, 1 pages scanned or without text) — open now" in text
-    assert "    - 2.1 Chain rule [p. 4]" in text  # level 2 shown for the open document
+    docs = list(topic.docs.values())
+    docs[1].index.kind = "textbook"
+    # What rarely changes, for the cached system prompt: indexed documents with kind and summary.
+    listed = catalogue(docs)
+    assert "D2: book.pdf (5 pages, textbook, 1 pages scanned or without text)" in listed
+    assert "  Calculus. An introductory calculus book." in listed
+    assert "slides.pdf" not in listed  # still indexing
+    assert "Limits" not in listed and "open" not in listed
+    # What goes with the question: the open document's chapters and indexing progress.
+    text = overview(docs, current="D2")
+    assert text.startswith("Open now: D2 (book.pdf)\n  - 1 Limits [pp. 1–3]")
+    assert "  - 2 Derivatives" in text
+    assert "D1: slides.pdf (2 pages, 1 pages scanned or without text), indexing: 0 of 2" in text
+    assert "2.1 Chain rule" not in text  # sections are behind get_outline
     assert "derivative" not in text  # entries stay behind the tools
+    # Documents not open show no contents at all.
+    assert "Derivatives" not in overview(docs, current="D1")
 
 
 async def test_a_stopped_answer_still_logs_what_it_cost(topic, tmp_path) -> None:
@@ -156,10 +181,13 @@ async def test_answers_after_looking_things_up(topic, tmp_path) -> None:
     last = client.requests[-1]["messages"]
     assert [m["role"] for m in last] == ["user", "assistant", "user", "assistant", "user"]
     assert last[-1]["content"][0]["type"] == "tool_result"
-    # The topic map comes with the question, after the cached history, not in the system prompt.
+    # Indexed documents are listed in the cached system prompt; indexing progress comes with
+    # the question, after the cached history.
     first_question = client.requests[0]["messages"][0]["content"]
-    assert "D2: book.pdf" in first_question[0]["text"]
-    assert "D2: book.pdf" not in str(client.requests[0]["system"])
+    assert "D1: slides.pdf" in first_question[0]["text"]
+    assert "D2: book.pdf" not in first_question[0]["text"]
+    system = client.requests[0]["system"]
+    assert "D2: book.pdf (5 pages" in system[-1]["text"] and "cache_control" in system[-1]
     assert usage.summary()["answer"]["calls"] == 3
     # The conversation is cached only once a lookup has started.
     assert "cache_control" not in client.requests[0]

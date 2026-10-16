@@ -504,7 +504,8 @@ def test_the_readers_instructions_come_between_the_fixed_prompt_and_the_topic() 
     assert fixed["text"] == SYSTEM_PROMPT
     assert "<reader_instructions>\nAnswer in Swedish.\n</reader_instructions>" in own["text"]
     # One breakpoint at the end caches all three.
-    assert "cache_control" not in own and topic["cache_control"] == {"type": "ephemeral"}
+    assert "cache_control" not in own
+    assert topic["cache_control"] == {"type": "ephemeral", "ttl": "1h"}
 
 
 def test_a_topics_purpose_and_conventions_go_with_its_name_in_the_cached_prompt() -> None:
@@ -514,7 +515,7 @@ def test_a_topics_purpose_and_conventions_go_with_its_name_in_the_cached_prompt(
     assert (
         "<topic_conventions>\nClockwise torque is positive.\n</topic_conventions>" in topic["text"]
     )
-    assert topic["cache_control"] == {"type": "ephemeral"}
+    assert topic["cache_control"] == {"type": "ephemeral", "ttl": "1h"}
     # Left empty, they add nothing.
     assert system_blocks("Mechanics", "", " ", "")[-1]["text"] == 'The topic is called "Mechanics".'
     request = AskRequest(topic="Mechanics", purpose="Exam", messages=[Turn(role="user", text="?")])
@@ -546,3 +547,42 @@ def test_the_mistake_behind_a_wrong_answer_goes_into_the_history() -> None:
         "1. Wrong: they chose A) x (the mistake: Forgets to bring the power down.); "
         "the answer is B) 2x." in results
     )
+
+
+def test_the_instructions_and_history_are_cached_for_an_hour() -> None:
+    from leqtern.ask import system_blocks
+
+    request = AskRequest(
+        topic="T",
+        messages=[
+            Turn(role="user", text="one"),
+            Turn(role="assistant", text="first answer"),
+            Turn(role="user", text="two"),
+        ],
+    )
+    messages = build_messages(request)
+    assert messages[1]["content"][-1]["cache_control"] == {"type": "ephemeral", "ttl": "1h"}
+    assert system_blocks("T")[-1]["cache_control"] == {"type": "ephemeral", "ttl": "1h"}
+
+
+def test_the_parts_of_a_question_are_measured() -> None:
+    import base64
+    import io
+
+    from PIL import Image
+
+    from leqtern.ask import question_parts
+
+    buffer = io.BytesIO()
+    Image.new("RGB", (750, 100)).save(buffer, "JPEG")
+    image = base64.b64encode(buffer.getvalue()).decode()
+    topic_map = {"type": "text", "text": "m" * 35}
+    content = [
+        topic_map,
+        {"type": "text", "text": "Around where they pointed:"},
+        {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": image}},
+        {"type": "text", "text": "Text the PDF has around that spot:\n" + "x" * 64},
+        {"type": "text", "text": "Text the PDF has on p. 3:\n" + "y" * 74},
+    ]
+    sizes = question_parts(content, map=[topic_map], notes=[None])
+    assert sizes == {"map": 10, "question": 7, "image": 100, "nearby text": 28, "page text": 29}

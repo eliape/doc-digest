@@ -5,12 +5,16 @@ and tools to search the indexes and read pages, and decides what to look up.
 """
 
 import asyncio
+import base64
+import io
 import time
 import uuid
+from collections import defaultdict
 from collections.abc import AsyncIterator
 from typing import Any, Literal
 
 from anthropic import AsyncAnthropic
+from PIL import Image
 from pydantic import BaseModel, Field
 
 from .quiz import Quiz, QuizRecord, WrittenQuiz, arrange, quiz_text, results_text
@@ -27,6 +31,10 @@ EFFORT = "low"
 THINKING = {"type": "adaptive", "display": "summarized"}
 # Rounds of tool use before the model must answer with what it has.
 MAX_ROUNDS = 8
+# The instructions and the chat history are cached for an hour: questions while reading are often
+# more than 5 minutes apart, and rewriting them after the default 5-minute cache expires costs more
+# than the hour's higher write price (2x input instead of 1.25x).
+LONG_CACHE = {"type": "ephemeral", "ttl": "1h"}
 
 SYSTEM_PROMPT = """\
 You help someone learn from PDFs they are studying, such as textbooks, papers and lecture \
@@ -347,7 +355,7 @@ def build_messages(request: AskRequest, aliases: dict[str, str] | None = None) -
     # Cache the history before the newest question. Its images are dropped on the next
     # question, so the request-wide cache entry never matches again, but this one does.
     if len(messages) > 1 and messages[-2]["role"] == "assistant":
-        messages[-2]["content"][-1]["cache_control"] = {"type": "ephemeral"}
+        messages[-2]["content"][-1]["cache_control"] = {**LONG_CACHE}
     return messages
 
 
@@ -368,7 +376,7 @@ def system_blocks(
     return [
         {"type": "text", "text": SYSTEM_PROMPT},
         *([{"type": "text", "text": READER_INSTRUCTIONS.format(own)}] if own else []),
-        {"type": "text", "text": "\n\n".join(about), "cache_control": {"type": "ephemeral"}},
+        {"type": "text", "text": "\n\n".join(about), "cache_control": {**LONG_CACHE}},
     ]
 
 
@@ -433,6 +441,7 @@ async def write_quiz(
         messages[-1]["content"][-1:-1] = reading
     if notes:
         messages[-1]["content"].insert(0, notes)
+    parts = question_parts(messages[-1]["content"], reading=reading, notes=[notes])
     began = time.monotonic()
     response: Any = await client.messages.parse(
         model=model,
@@ -445,13 +454,61 @@ async def write_quiz(
     if usage:
         usage.record(
             call_from_response(
-                "quiz", model, response, time.monotonic() - began, **question_details(request)
+                "quiz",
+                model,
+                response,
+                time.monotonic() - began,
+                **question_details(request),
+                parts=parts,
             )
         )
     quiz = arrange(response.parsed_output) if response.parsed_output else None
     if not quiz or not quiz.questions:
         raise RuntimeError(f"No quiz came back ({response.stop_reason})")
     return quiz
+
+
+# Rough sizes for logging what a question is made of: characters per token of text, and
+# pixels per token of an image.
+CHARS_PER_TOKEN = 3.5
+PIXELS_PER_TOKEN = 750
+
+
+def image_tokens(block: dict[str, Any]) -> int:
+    try:
+        data = base64.b64decode(block["source"]["data"])
+        with Image.open(io.BytesIO(data)) as image:
+            width, height = image.size
+    except Exception:
+        return 0
+    return round(width * height / PIXELS_PER_TOKEN)
+
+
+def question_parts(
+    content: list[dict[str, Any]], **named: list[dict[str, Any] | None] | None
+) -> dict[str, int]:
+    """
+    Estimated tokens of each part of the newest question, for the usage log: the image, the
+    page's text, the text around the spot, the question itself, and the blocks passed by name
+    (the topic's map, the register's notes, a quiz's reading).
+    """
+    owner = {id(b): name for name, blocks in named.items() for b in blocks or [] if b}
+    sizes: dict[str, int] = defaultdict(int)
+    for block in content:
+        name = owner.get(id(block))
+        if block.get("type") == "image":
+            sizes[name or "image"] += image_tokens(block)
+            continue
+        text = block.get("text", "")
+        if name is None:
+            if text.startswith("Text the PDF has around"):
+                name = "nearby text"
+            elif text.startswith("Text the PDF has on"):
+                name = "page text"
+            else:
+                name = "question"
+        sizes[name] += round(len(text) / CHARS_PER_TOKEN)
+    return dict(sizes)
 
 
 def round_first(first_text: float | None, before: float | None) -> float | None:
@@ -514,6 +571,11 @@ async def stream_answer(
             if block:
                 messages[-1]["content"].insert(0, block)
     tools = TOOLS if toolbox.docs else []
+    parts = (
+        question_parts(messages[-1]["content"], map=[topic_map], notes=[notes])
+        if messages and messages[-1]["role"] == "user"
+        else {}
+    )
     began = time.monotonic()
     first_text: float | None = None
     details = {**question_details(request), "question": uuid.uuid4().hex[:12]}
@@ -577,6 +639,7 @@ async def stream_answer(
                     **details,
                     round_no=n,
                     tools=[b.name for b in tool_uses],
+                    parts=parts if n == 0 else {},
                     first_text=round_first(first_text, text_before),
                 )
             )

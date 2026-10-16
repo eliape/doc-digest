@@ -126,3 +126,74 @@ def test_lines_from_the_first_draft_of_these_fields_load(tmp_path) -> None:
     )
     [call] = UsageLog(log).calls
     assert (call.chat_id, call.round_no, call.effort) == ("c1", 0, "low")
+
+
+def test_one_hour_writes_and_opus_cache_reads_are_priced() -> None:
+    from leqtern.usage import cost
+
+    # 1M plain input $4, 1M written for 5 min $5, 1M written for an hour $8, 1M read $0.20.
+    total = cost("claude-opus-5-5", 1_000_000, 0, 2_000_000, 1_000_000, cache_write_1h=1_000_000)
+    assert round(total, 2) == 17.20
+    usage = SimpleNamespace(
+        input_tokens=0,
+        output_tokens=0,
+        cache_creation_input_tokens=1_000_000,
+        cache_read_input_tokens=0,
+        cache_creation=SimpleNamespace(ephemeral_1h_input_tokens=1_000_000),
+    )
+    logged = call_from_response("answer", "claude-sonnet-5-5", SimpleNamespace(usage=usage), 1.0)
+    assert (logged.cache_write_1h, logged.cost) == (1_000_000, 4.0)
+
+
+def test_old_lines_are_repriced_when_loaded(tmp_path) -> None:
+    from leqtern.usage import UsageLog
+
+    log = tmp_path / "usage.jsonl"
+    # Logged when Opus cache reads were priced at $0.40 a million.
+    log.write_text(
+        '{"kind": "answer", "model": "claude-opus-5-5", "input": 0, "output": 0, '
+        '"cache_write": 0, "cache_read": 1000000, "seconds": 1.0, "cost": 0.4, "at": 5}\n'
+    )
+    [old] = UsageLog(log).calls
+    assert round(old.cost, 2) == 0.2
+
+
+def test_unread_writes_count_only_the_write_premium() -> None:
+    calls = [
+        call("answer", 0, 1_000_000, 0, 5.0),  # never read
+        call("answer", 1000, 1_000_000, 0, 8.0, cache_write_1h=1_000_000),  # never read
+    ]
+    # $1 premium on the 5-minute write, $4 on the hour's.
+    assert "($5.00 paid for writing them)" in report(calls)
+
+
+def test_the_hour_cache_counts_reads_up_to_an_hour_later() -> None:
+    calls = [
+        call("answer", 0, 7000, 0, 0.05, cache_write_1h=7000),
+        call("answer", 1800, 1000, 7000, 0.01, cache_write_1h=1000),
+    ]
+    assert "1,000 of 8,000 tokens written were never read" in report(calls)
+
+
+def test_questions_are_split_by_the_pause_before_them() -> None:
+    calls = [
+        call("answer", 0, 7000, 0, 0.04, question="a", chat_id="c"),
+        call("answer", 100, 1000, 7000, 0.01, question="b", chat_id="c"),
+        call("answer", 1300, 8000, 0, 0.05, question="c", chat_id="c"),
+        call("answer", 9000, 9000, 0, 0.05, question="d", chat_id="c"),
+        call("answer", 9100, 7000, 0, 0.05),  # no chat logged
+    ]
+    text = report(calls)
+    assert "Opus 5.5, first in the chat: 1, 0 read from the cache" in text
+    assert "Opus 5.5, under 5 min: 1, 1 read from the cache; 1,000 tokens written" in text
+    assert "Opus 5.5, 5 to 60 min: 1, 0 read" in text
+    assert "Opus 5.5, over an hour: 1, 0 read" in text
+
+
+def test_the_parts_of_questions_are_averaged() -> None:
+    calls = [
+        call("answer", 0, 0, 0, 0.04, question="a", parts={"image": 1800, "map": 1000}),
+        call("answer", 100, 0, 0, 0.04, question="b", parts={"map": 1200, "question": 20}),
+    ]
+    text = report(calls)
+    assert "Opus 5.5, over 2 questions: image 900, map 1,100, question 10" in text

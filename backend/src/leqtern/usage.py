@@ -52,6 +52,19 @@ class Call:
     request_id: str | None = None
     # An answer the reader stopped while it was arriving; its output count is too low.
     stopped: bool = False
+    # The model that really answered, when the API fell back from `model` to another one.
+    served_model: str | None = None
+    stop_reason: str | None = None
+    # What the question asked for, on answer and quiz calls. Older log lines have none of these.
+    effort: str | None = None
+    mode: str | None = None  # "normal", "socratic" or "quiz"
+    attached: str | None = None  # "spot", "selection" or "none"
+    turns: int | None = None  # turns in the conversation sent, the newest question included
+    # Answer calls of one question share an id; round 0 is the first call, later rounds lookups.
+    question: str | None = None
+    round: int | None = None
+    tools: list[str] = field(default_factory=list)  # the lookups the round asked for
+    first_text: float | None = None  # seconds from the question to the answer's first text
 
 
 def call_from_response(kind: str, model: str, response: Any, seconds: float, **extra: Any) -> Call:
@@ -60,6 +73,9 @@ def call_from_response(kind: str, model: str, response: Any, seconds: float, **e
     output = usage.output_tokens or 0
     cache_write = getattr(usage, "cache_creation_input_tokens", None) or 0
     cache_read = getattr(usage, "cache_read_input_tokens", None) or 0
+    served = getattr(response, "model", None)
+    # A dated id of the same model ("claude-opus-5-5-2026...") is not a fallback.
+    served = served if isinstance(served, str) and not served.startswith(model) else None
     return Call(
         kind=kind,
         model=model,
@@ -68,8 +84,11 @@ def call_from_response(kind: str, model: str, response: Any, seconds: float, **e
         cache_write=cache_write,
         cache_read=cache_read,
         seconds=round(seconds, 3),
-        cost=cost(model, input, output, cache_write, cache_read),
+        # Priced as the model that answered, when it is one we know the price of.
+        cost=cost(served if served in PRICES else model, input, output, cache_write, cache_read),
         request_id=getattr(response, "_request_id", None),
+        served_model=served,
+        stop_reason=getattr(response, "stop_reason", None),
         **extra,
     )
 

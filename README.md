@@ -60,7 +60,7 @@ uv run python -m leqtern.evaluate questions.json book.pdf scanned-book.pdf paper
 
 `GET /api/usage` shows tokens, cache use, latency and cost of every model call so far.
 
-`make costs` sums up what the API has cost from that log: per question (straight answers and those with lookups), per quiz, for indexing each PDF, and per day. Narrow it with `make costs ARGS="--since 2026-10-10"` or `ARGS="--days 1"`.
+`make costs` sums up what the API has cost from that log: per question (straight answers and those with lookups), per quiz, for indexing each PDF, and per day. It also shows how often answers read from the prompt cache and how much they wrote to it that nothing read, the median wait for an answer's first text, and any answers cut off or answered by a fallback model. Narrow it with `make costs ARGS="--since 2026-10-10"` or `ARGS="--days 1"`, and split questions with `ARGS="--by effort"` (or `mode`, `attached`, `lookups`, `history`). Questions asked before 2026-10-16 show up as "unknown" in those splits.
 
 The evaluation above uses `ANSWER_MODEL` from `backend/.env` instead of the model menu (default `claude-opus-5-5`), so set `ANSWER_MODEL=claude-sonnet-5-5` and run it again to compare.
 

@@ -6,6 +6,7 @@ and tools to search the indexes and read pages, and decides what to look up.
 
 import asyncio
 import time
+import uuid
 from collections.abc import AsyncIterator
 from typing import Any, Literal
 
@@ -442,20 +443,49 @@ async def write_quiz(
         output_config={"effort": request.effort},
     )
     if usage:
-        usage.record(call_from_response("quiz", model, response, time.monotonic() - began))
+        usage.record(
+            call_from_response(
+                "quiz", model, response, time.monotonic() - began, **question_details(request)
+            )
+        )
     quiz = arrange(response.parsed_output) if response.parsed_output else None
     if not quiz or not quiz.questions:
         raise RuntimeError(f"No quiz came back ({response.stop_reason})")
     return quiz
 
 
-def record_stopped(usage: UsageLog, stream: Any, model: str, seconds: float) -> None:
+def round_first(first_text: float | None, before: float | None) -> float | None:
+    """The time to the first text, if it arrived in this round."""
+    return round(first_text, 2) if first_text is not None and before is None else None
+
+
+def question_details(request: AskRequest) -> dict[str, Any]:
+    """What the newest question asked for, logged with its calls to split costs by it."""
+    newest = request.messages[-1] if request.messages else None
+    context = newest.context if newest else None
+    if context and context.selection:
+        attached = "selection"
+    elif context and context.point:
+        attached = "spot"
+    else:
+        attached = "none"
+    return {
+        "effort": request.effort,
+        "mode": (newest.mode if newest else None) or "normal",
+        "attached": attached,
+        "turns": len(request.messages),
+    }
+
+
+def record_stopped(
+    usage: UsageLog, stream: Any, model: str, seconds: float, **details: Any
+) -> None:
     """Log a call the reader stopped, from what the stream had reported when it was stopped."""
     try:
         snapshot = stream.current_message_snapshot
     except Exception:
         return  # Stopped before the model began: nothing was reported yet.
-    usage.record(call_from_response("answer", model, snapshot, seconds, stopped=True))
+    usage.record(call_from_response("answer", model, snapshot, seconds, stopped=True, **details))
 
 
 async def stream_answer(
@@ -485,6 +515,7 @@ async def stream_answer(
     tools = TOOLS if toolbox.docs else []
     began = time.monotonic()
     first_text: float | None = None
+    details = {**question_details(request), "question": uuid.uuid4().hex[:12]}
 
     for n in range(MAX_ROUNDS):
         last_round = n == MAX_ROUNDS - 1
@@ -497,6 +528,8 @@ async def stream_answer(
             # it cheaply. Most questions take one round, where caching it would cost 25% extra.
             options["cache_control"] = {"type": "ephemeral"}
         call_began = time.monotonic()
+        # The time to the first text goes on the round it arrived in.
+        text_before = first_text
         async with client.beta.messages.stream(
             model=model,
             max_tokens=64000,
@@ -521,13 +554,32 @@ async def stream_answer(
                 # The reader stopped the answer: leaving the stream closes it, so the model
                 # stops writing. Log what the call cost so far (output is only counted at the end).
                 if usage:
-                    record_stopped(usage, stream, model, time.monotonic() - call_began)
+                    record_stopped(
+                        usage,
+                        stream,
+                        model,
+                        time.monotonic() - call_began,
+                        **details,
+                        round=n,
+                        first_text=round_first(first_text, text_before),
+                    )
                 raise
             final = await stream.get_final_message()
-        if usage:
-            usage.record(call_from_response("answer", model, final, time.monotonic() - call_began))
-
         tool_uses = [b for b in final.content if b.type == "tool_use"]
+        if usage:
+            usage.record(
+                call_from_response(
+                    "answer",
+                    model,
+                    final,
+                    time.monotonic() - call_began,
+                    **details,
+                    round=n,
+                    tools=[b.name for b in tool_uses],
+                    first_text=round_first(first_text, text_before),
+                )
+            )
+
         if final.stop_reason == "refusal":
             yield {"type": "text", "text": "\n\n(The model declined to answer this.)"}
             break

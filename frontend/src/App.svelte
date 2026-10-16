@@ -151,26 +151,61 @@
   })
 
   // A mouse wheel only scrolls up and down, so let it scroll the tabs sideways.
-  // Reordering tabs by dragging them. `dropAt` is the place in the row the tab would land.
+  // Reordering tabs by dragging them. `dropAt` is the place in the row the tab would land, shown
+  // as a line (`dropX`, in the scrolled row's own pixels) between two tabs.
   const TAB_TYPE = 'application/x-leqtern-tab'
   let dragTab = $state<string>()
   let dropAt = $state<number>()
+  let dropX = $state(0)
 
-  function dragTabOver(event: DragEvent, index: number) {
-    if (dragTab === undefined) return
+  // A small card to carry along, in place of the browser's picture of the tab's text. It is made
+  // outside the page's styles, so it is styled here, with the page's colours.
+  function dragCard(name: string): HTMLElement {
+    const card = document.createElement('div')
+    const icon = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex:none;color:var(--accent)"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5"/></svg>'
+    card.innerHTML = `${icon}<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>`
+    card.lastElementChild!.textContent = name
+    card.style.cssText =
+      'position:fixed;top:-100px;left:-100px;display:flex;align-items:center;gap:0.5rem;max-width:14rem;' +
+      'padding:0.4rem 0.7rem;border:1px solid var(--border);border-radius:0.5rem;background:var(--surface);' +
+      'color:inherit;font:0.85rem system-ui,sans-serif;box-shadow:0 6px 18px rgb(0 0 0 / 0.22);pointer-events:none'
+    return card
+  }
+
+  function startTabDrag(event: DragEvent, id: string) {
+    dragTab = id
+    const data = event.dataTransfer
+    if (!data) return
+    data.setData(TAB_TYPE, id)
+    data.effectAllowed = 'move'
+    const card = dragCard(workspace.docs[id]?.name ?? '')
+    document.body.appendChild(card)
+    data.setDragImage(card, 16, 16)
+    // The browser has taken its picture by the next turn.
+    setTimeout(() => card.remove())
+  }
+
+  /** Where in the row a drag at this x lands, and the x of the line that shows it. */
+  function dragTabOver(event: DragEvent) {
+    if (dragTab === undefined || !tabsEl) return
     event.preventDefault()
-    event.stopPropagation()
     if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
-    const box = (event.currentTarget as HTMLElement).getBoundingClientRect()
-    dropAt = event.clientX < box.left + box.width / 2 ? index : index + 1
+    const tabs = [...tabsEl.querySelectorAll<HTMLElement>('.tab')]
+    let at = tabs.findIndex((t) => {
+      const box = t.getBoundingClientRect()
+      return event.clientX < box.left + box.width / 2
+    })
+    if (at === -1) at = tabs.length
+    dropAt = at
+    const next = tabs[at]
+    const before = tabs[at - 1]
+    dropX = next && before ? (before.offsetLeft + before.offsetWidth + next.offsetLeft) / 2 : next ? next.offsetLeft - 1 : before ? before.offsetLeft + before.offsetWidth + 1 : 0
   }
 
   function dropTab(event: DragEvent) {
     if (dragTab === undefined) return
     event.preventDefault()
-    event.stopPropagation()
-    const order = workspace.activeTopic?.openDocIds ?? []
-    const from = order.indexOf(dragTab)
+    const from = (workspace.activeTopic?.openDocIds ?? []).indexOf(dragTab)
     if (dropAt !== undefined && from !== -1) workspace.moveTab(dragTab, dropAt > from ? dropAt - 1 : dropAt)
     endTabDrag()
   }
@@ -179,6 +214,12 @@
     dragTab = undefined
     dropAt = undefined
   }
+
+  // The line shows only where dropping would change the order.
+  const dropLine = $derived.by(() => {
+    const from = dragTab === undefined ? -1 : (workspace.activeTopic?.openDocIds.indexOf(dragTab) ?? -1)
+    return dropAt !== undefined && from !== -1 && dropAt !== from && dropAt !== from + 1
+  })
 
   function scrollTabs(event: WheelEvent) {
     if (event.deltaX !== 0 || event.ctrlKey || !tabsEl) return
@@ -514,30 +555,26 @@
         >
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M8 12h12M8 18h12" /></svg>
         </button>
+        <!-- Not focusable itself: its tabs are, and the drag handlers only take drops. -->
+        <!-- svelte-ignore a11y_interactive_supports_focus -->
         <div
           class="tabs"
           role="tablist"
           aria-label={`PDFs in ${workspace.activeTopic.name}`}
           bind:this={tabsEl}
           onwheel={scrollTabs}
+          ondragover={dragTabOver}
+          ondrop={dropTab}
         >
-          {#each workspace.activeTopic.openDocIds as id, i (id)}
+          {#each workspace.activeTopic.openDocIds as id (id)}
             {@const tab = workspace.docs[id]}
             <div
               class="tab"
               class:active={id === doc?.id}
               class:dragged={id === dragTab}
-              class:drop-before={dropAt === i && dragTab !== undefined}
-              class:drop-after={dropAt === i + 1 && i === workspace.activeTopic.openDocIds.length - 1}
               role="presentation"
               draggable="true"
-              ondragstart={(e) => {
-                dragTab = id
-                e.dataTransfer?.setData(TAB_TYPE, id)
-                if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move'
-              }}
-              ondragover={(e) => dragTabOver(e, i)}
-              ondrop={(e) => dropTab(e)}
+              ondragstart={(e) => startTabDrag(e, id)}
               ondragend={endTabDrag}
             >
               <button
@@ -557,6 +594,7 @@
               </button>
             </div>
           {/each}
+          {#if dropLine}<div class="drop-line" style:left={`${dropX}px`} aria-hidden="true"></div>{/if}
         </div>
         <button
           type="button"
@@ -722,6 +760,7 @@
     min-width: 0;
     overflow-x: auto;
     scrollbar-width: none;
+    position: relative;
   }
 
   .controls-slot {
@@ -743,11 +782,16 @@
   .tab.dragged {
     opacity: 0.45;
   }
-  .tab.drop-before {
-    box-shadow: -2px 0 0 var(--ring);
-  }
-  .tab.drop-after {
-    box-shadow: 2px 0 0 var(--ring);
+  /* Where the dragged tab will land: a line between two tabs. */
+  .drop-line {
+    position: absolute;
+    top: 0.125rem;
+    bottom: 0.125rem;
+    width: 2px;
+    margin-left: -1px;
+    border-radius: 1px;
+    background: var(--accent);
+    pointer-events: none;
   }
   .tab:hover,
   .tab.active {

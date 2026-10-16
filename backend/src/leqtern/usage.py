@@ -60,9 +60,10 @@ class Call:
     mode: str | None = None  # "normal", "socratic" or "quiz"
     attached: str | None = None  # "spot", "selection" or "none"
     turns: int | None = None  # turns in the conversation sent, the newest question included
+    chat_id: str | None = None  # the discussion the question was asked in
     # Answer calls of one question share an id; round 0 is the first call, later rounds lookups.
     question: str | None = None
-    round: int | None = None
+    round_no: int | None = None
     tools: list[str] = field(default_factory=list)  # the lookups the round asked for
     first_text: float | None = None  # seconds from the question to the answer's first text
 

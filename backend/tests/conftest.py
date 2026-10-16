@@ -18,3 +18,15 @@ def pytest_collection_modifyitems(items):
     for item in items:
         if inspect.iscoroutinefunction(getattr(item, "function", None)):
             item.add_marker(pytest.mark.anyio)
+
+
+@pytest.fixture(autouse=True)
+def separate_data(tmp_path, monkeypatch):
+    """Keep tests' PDFs and usage log out of the real data folder, so they never add made-up calls
+    to what `make costs` reports."""
+    from leqtern import main
+
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
+    main._services.cache_clear()
+    yield
+    main._services.cache_clear()

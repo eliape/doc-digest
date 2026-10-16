@@ -53,10 +53,10 @@ def test_report_without_calls() -> None:
 
 def test_calls_with_a_question_id_are_grouped_by_it() -> None:
     calls = [
-        call("answer", 0, 7000, 0, 0.04, question="a", round=0),
+        call("answer", 0, 7000, 0, 0.04, question="a", round_no=0),
         # Long after, and reading nothing: the old guess would call this a new question.
-        call("answer", 500, 1200, 0, 0.01, question="a", round=1),
-        call("answer", 501, 6000, 7000, 0.03, question="b", round=0),
+        call("answer", 500, 1200, 0, 0.01, question="a", round_no=1),
+        call("answer", 501, 6000, 7000, 0.03, question="b", round_no=0),
     ]
     assert [len(q) for q in questions(calls)] == [2, 1]
 
@@ -112,3 +112,17 @@ def test_old_log_lines_still_load(tmp_path) -> None:
     )
     [old] = UsageLog(log).calls
     assert old.effort is None and old.tools == []
+
+
+def test_lines_from_the_first_draft_of_these_fields_load(tmp_path) -> None:
+    from leqtern.usage import UsageLog
+
+    log = tmp_path / "usage.jsonl"
+    log.write_text(
+        '{"kind": "answer", "model": "claude-opus-5-5", "input": 1, "output": 2, '
+        '"cache_write": 0, "cache_read": 0, "seconds": 1.0, "cost": 0.01, "at": 5, '
+        '"served_model": null, "effort": "low", "stop_reason": "end_turn", '
+        '"chat_id": "c1", "round_no": 0}\n'
+    )
+    [call] = UsageLog(log).calls
+    assert (call.chat_id, call.round_no, call.effort) == ("c1", 0, "low")

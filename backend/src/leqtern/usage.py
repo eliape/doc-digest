@@ -20,8 +20,15 @@ PRICES: dict[str, dict[str, float]] = {
 }
 
 
+def price_of(model: str) -> dict[str, float] | None:
+    """The list price for a model id, also for a dated one like claude-opus-5-5-20261001."""
+    if model in PRICES:
+        return PRICES[model]
+    return next((p for name, p in PRICES.items() if model.startswith(name + "-")), None)
+
+
 def cost(model: str, input: int, output: int, cache_write: int, cache_read: int) -> float:
-    price = PRICES.get(model)
+    price = price_of(model)
     if not price:
         return 0.0
     per_token = price["input"] / 1e6
@@ -52,6 +59,19 @@ class Call:
     request_id: str | None = None
     # An answer the reader stopped while it was arriving; its output count is too low.
     stopped: bool = False
+    # The model that actually answered, when the API fell back from `model` to another one.
+    served_model: str | None = None
+    effort: str | None = None
+    # Why the model stopped: "end_turn", "tool_use", "max_tokens", "refusal"...
+    stop_reason: str | None = None
+    # The discussion an answer or quiz belongs to, and which lookup round of the question an
+    # answer call was (0 for the first call after the question).
+    chat_id: str | None = None
+    round_no: int | None = None
+
+    @property
+    def answered_by(self) -> str:
+        return self.served_model or self.model
 
 
 def call_from_response(kind: str, model: str, response: Any, seconds: float, **extra: Any) -> Call:
@@ -60,6 +80,10 @@ def call_from_response(kind: str, model: str, response: Any, seconds: float, **e
     output = usage.output_tokens or 0
     cache_write = getattr(usage, "cache_creation_input_tokens", None) or 0
     cache_read = getattr(usage, "cache_read_input_tokens", None) or 0
+    served = getattr(response, "model", None)
+    # The same model under a dated id is not a fallback.
+    if not isinstance(served, str) or served == model or served.startswith(model + "-"):
+        served = None
     return Call(
         kind=kind,
         model=model,
@@ -68,8 +92,10 @@ def call_from_response(kind: str, model: str, response: Any, seconds: float, **e
         cache_write=cache_write,
         cache_read=cache_read,
         seconds=round(seconds, 3),
-        cost=cost(model, input, output, cache_write, cache_read),
+        cost=cost(served or model, input, output, cache_write, cache_read),
         request_id=getattr(response, "_request_id", None),
+        served_model=served,
+        stop_reason=getattr(response, "stop_reason", None),
         **extra,
     )
 

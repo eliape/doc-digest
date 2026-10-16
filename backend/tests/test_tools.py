@@ -144,11 +144,22 @@ async def test_answers_after_looking_things_up(topic, tmp_path) -> None:
     )
     usage = UsageLog(tmp_path / "u.jsonl")
     request = AskRequest(
-        topic="Calc", docs=[], messages=[Turn(role="user", text="Where is the proof?")]
+        topic="Calc",
+        chat_id="c1",
+        effort="medium",
+        docs=[],
+        messages=[Turn(role="user", text="Where is the proof?")],
     )
     events = [e async for e in stream_answer(client, request, topic, usage)]
 
     assert [e["type"] for e in events] == ["step", "step", "text", "done"]
+    # Each call logs its discussion, round, effort and why it ended.
+    assert [(c.chat_id, c.round_no, c.effort) for c in usage.calls] == [
+        ("c1", 0, "medium"),
+        ("c1", 1, "medium"),
+        ("c1", 2, "medium"),
+    ]
+    assert [c.stop_reason for c in usage.calls] == ["tool_use", "tool_use", "end_turn"]
     assert events[0]["text"] == "Searched for “chain rule”"
     assert events[1]["text"] == "Read book.pdf, p. 4"
     assert events[-1]["pages_read"] == ["D2 p. 4"]

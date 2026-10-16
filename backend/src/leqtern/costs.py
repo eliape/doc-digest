@@ -14,10 +14,12 @@ from datetime import datetime
 from pathlib import Path
 
 from .config import get_settings
-from .usage import PRICES, Call, UsageLog
+from .usage import Call, UsageLog, price_of
 
 # A lookup round follows the previous round within this many seconds, and rereads all of it.
 ROUND_GAP = 120
+# How long a cache entry lives without being read.
+CACHE_LIFE = 300
 
 
 def short(model: str) -> str:
@@ -34,7 +36,8 @@ def cents(dollars: float) -> str:
 
 def questions(calls: list[Call]) -> list[list[Call]]:
     """
-    Answer calls grouped by question: a lookup round comes right after the round before it
+    Answer calls grouped by question. Calls log their discussion and lookup round; older
+    ones are grouped by guessing: a lookup round comes right after the round before it
     and reads everything that round sent from the cache, while a new question rereads only
     the instructions and the chat history.
     """
@@ -43,7 +46,12 @@ def questions(calls: list[Call]) -> list[list[Call]]:
         if c.kind != "answer":
             continue
         last = grouped[-1][-1] if grouped else None
-        if (
+        if c.round_no is not None:
+            if c.round_no > 0 and last and last.chat_id == c.chat_id:
+                grouped[-1].append(c)
+            else:
+                grouped.append([c])
+        elif (
             last
             and last.model == c.model
             and c.at - last.at < ROUND_GAP
@@ -69,6 +77,35 @@ def doc_names(data_dir: Path) -> dict[str, tuple[str, int]]:
 
 def average(values: list[float]) -> float:
     return sum(values) / len(values) if values else 0.0
+
+
+def unread_writes(answers: list[Call]) -> tuple[int, int, float]:
+    """
+    Of the tokens answer calls wrote to the cache, how many no later call read: in calls that
+    log their discussion, a write counts as read when the discussion's next call by the same
+    model starts within the cache's life and reads from the cache. Returns the tokens written,
+    those never read, and the 25% extra paid for writing the unread ones.
+    """
+    by_chat: dict[str, list[Call]] = defaultdict(list)
+    for c in answers:
+        if c.chat_id:
+            by_chat[c.chat_id].append(c)
+    written = unread = 0
+    extra = 0.0
+    for mine in by_chat.values():
+        for i, c in enumerate(mine):
+            if not c.cache_write:
+                continue
+            written += c.cache_write
+            later = [n for n in mine[i + 1 :] if n.answered_by == c.answered_by]
+            nxt = later[0] if later else None
+            if nxt and nxt.cache_read and (nxt.at - nxt.seconds) - c.at <= CACHE_LIFE:
+                continue
+            unread += c.cache_write
+            price = price_of(c.answered_by)
+            if price:
+                extra += c.cache_write * price["input"] / 1e6 * 0.25
+    return written, unread, extra
 
 
 def report(calls: list[Call], names: dict[str, tuple[str, int]] | None = None) -> str:
@@ -99,19 +136,78 @@ def report(calls: list[Call], names: dict[str, tuple[str, int]] | None = None) -
         if lookups:
             out(f"    with lookups: {len(lookups)}, {cents(average(lookups))} each")
         answers = [c for q in mine for c in q]
-        price = PRICES.get(model)
-        if price:
+        parts = {"new prompt": 0.0, "cache reads": 0.0, "output": 0.0}
+        for c in answers:
+            price = price_of(c.answered_by)
+            if not price:
+                continue
             per = price["input"] / 1e6
-            parts = {
-                "new prompt": sum(c.input * per + c.cache_write * per * 1.25 for c in answers),
-                "cache reads": sum(c.cache_read * per * 0.1 for c in answers),
-                "output": sum(c.output * price["output"] / 1e6 for c in answers),
-            }
-            total = sum(parts.values()) or 1
+            parts["new prompt"] += c.input * per + c.cache_write * per * 1.25
+            parts["cache reads"] += c.cache_read * per * 0.1
+            parts["output"] += c.output * price["output"] / 1e6
+        total = sum(parts.values())
+        if total:
             out(
                 "    where it goes: "
                 + ", ".join(f"{name} {100 * v / total:.0f}%" for name, v in parts.items())
             )
+
+    efforts = [q for q in asked if q[0].effort]
+    if efforts:
+        out("")
+        out("Questions by effort")
+        for model in sorted({q[0].model for q in efforts}):
+            for effort in ("low", "medium", "high"):
+                mine = [q for q in efforts if q[0].model == model and q[0].effort == effort]
+                if not mine:
+                    continue
+                costs = [sum(c.cost for c in q) for q in mine]
+                output = average([sum(c.output for c in q) for q in mine])
+                out(
+                    f"  {short(model)}, {effort}: {len(mine)}, {cents(average(costs))} each, "
+                    f"{output:.0f} output tokens each"
+                )
+
+    answers = [c for c in calls if c.kind == "answer"]
+    if answers:
+        out("")
+        out("Answer cache")
+        for model in sorted({c.answered_by for c in answers}):
+            mine = [c for c in answers if c.answered_by == model]
+            hits = sum(1 for c in mine if c.cache_read)
+            prompt = sum(c.input + c.cache_write + c.cache_read for c in mine)
+            read = sum(c.cache_read for c in mine)
+            share = 100 * read / prompt if prompt else 0
+            out(
+                f"  {short(model)}: {hits} of {len(mine)} calls read from the cache, "
+                f"{share:.0f}% of prompt tokens"
+            )
+            written, unread, extra = unread_writes(mine)
+            if written:
+                out(
+                    f"    cache writes never read: {100 * unread / written:.0f}% of "
+                    f"{written} tokens written, {cents(extra)} extra paid for them"
+                )
+
+    reasons = [c for c in answers if c.stop_reason or c.stopped]
+    if reasons:
+        out("")
+        out("Why answer calls ended")
+        counts: dict[str, int] = defaultdict(int)
+        for c in reasons:
+            counts["stopped by the reader" if c.stopped else c.stop_reason or "?"] += 1
+        for reason, n in sorted(counts.items(), key=lambda item: -item[1]):
+            out(f"  {reason}: {n}")
+
+    fell_back = [c for c in calls if c.served_model]
+    if fell_back:
+        out("")
+        out("Fallbacks to another model")
+        moves: dict[str, list[Call]] = defaultdict(list)
+        for c in fell_back:
+            moves[f"{short(c.model)} -> {short(c.served_model or '')}"].append(c)
+        for move, mine in moves.items():
+            out(f"  {move}: {len(mine)}, {cents(sum(c.cost for c in mine))}")
 
     for kind, title in (
         ("quiz", "Quizzes"),

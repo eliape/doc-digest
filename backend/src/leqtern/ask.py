@@ -442,20 +442,29 @@ async def write_quiz(
         output_config={"effort": request.effort},
     )
     if usage:
-        usage.record(call_from_response("quiz", model, response, time.monotonic() - began))
+        usage.record(
+            call_from_response(
+                "quiz",
+                model,
+                response,
+                time.monotonic() - began,
+                effort=request.effort,
+                chat_id=request.chat_id,
+            )
+        )
     quiz = arrange(response.parsed_output) if response.parsed_output else None
     if not quiz or not quiz.questions:
         raise RuntimeError(f"No quiz came back ({response.stop_reason})")
     return quiz
 
 
-def record_stopped(usage: UsageLog, stream: Any, model: str, seconds: float) -> None:
+def record_stopped(usage: UsageLog, stream: Any, model: str, seconds: float, **extra: Any) -> None:
     """Log a call the reader stopped, from what the stream had reported when it was stopped."""
     try:
         snapshot = stream.current_message_snapshot
     except Exception:
         return  # Stopped before the model began: nothing was reported yet.
-    usage.record(call_from_response("answer", model, snapshot, seconds, stopped=True))
+    usage.record(call_from_response("answer", model, snapshot, seconds, stopped=True, **extra))
 
 
 async def stream_answer(
@@ -497,6 +506,7 @@ async def stream_answer(
             # it cheaply. Most questions take one round, where caching it would cost 25% extra.
             options["cache_control"] = {"type": "ephemeral"}
         call_began = time.monotonic()
+        logged = {"effort": request.effort, "chat_id": request.chat_id, "round_no": n}
         async with client.beta.messages.stream(
             model=model,
             max_tokens=64000,
@@ -521,11 +531,13 @@ async def stream_answer(
                 # The reader stopped the answer: leaving the stream closes it, so the model
                 # stops writing. Log what the call cost so far (output is only counted at the end).
                 if usage:
-                    record_stopped(usage, stream, model, time.monotonic() - call_began)
+                    record_stopped(usage, stream, model, time.monotonic() - call_began, **logged)
                 raise
             final = await stream.get_final_message()
         if usage:
-            usage.record(call_from_response("answer", model, final, time.monotonic() - call_began))
+            usage.record(
+                call_from_response("answer", model, final, time.monotonic() - call_began, **logged)
+            )
 
         tool_uses = [b for b in final.content if b.type == "tool_use"]
         if final.stop_reason == "refusal":

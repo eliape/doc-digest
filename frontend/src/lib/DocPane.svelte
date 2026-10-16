@@ -23,6 +23,9 @@
     marker?: Pick
     /** Pixels the chat will take beside the PDF when it opens (see PdfViewer). */
     reserve?: number
+    /** Whether the chat is open, and whether the zoom follows it (see PdfViewer). */
+    chatOpen?: boolean
+    followChat?: boolean
     /** What a left click on the PDF does (see PdfViewer). The controls switch it for every tab. */
     tool?: Tool
     ontoolchange?: (tool: Tool) => void
@@ -41,6 +44,8 @@
     controlsTarget,
     marker,
     reserve,
+    chatOpen,
+    followChat,
     tool,
     ontoolchange,
     onpick,
@@ -200,6 +205,8 @@
     bind:scale
     {marker}
     {reserve}
+    {chatOpen}
+    {followChat}
     {tool}
     {onpick}
     {oncontextpick}

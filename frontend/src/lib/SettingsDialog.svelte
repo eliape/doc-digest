@@ -1,19 +1,27 @@
 <script lang="ts">
+  import { saveZoomFollowsChat } from './chatZoom'
   import { applyTheme, savedTheme, THEMES, type Theme } from './theme'
   import type { Workspace } from './workspace.svelte'
 
   type Props = {
     workspace: Workspace
+    /** Whether the PDF's zoom follows the chat opening and closing. */
+    zoomFollowsChat: boolean
     onclose: () => void
   }
 
-  let { workspace, onclose }: Props = $props()
+  let { workspace, zoomFollowsChat = $bindable(), onclose }: Props = $props()
 
   let theme = $state<Theme>(savedTheme())
 
   function pick(next: Theme) {
     theme = next
     applyTheme(next)
+  }
+
+  function pickZoom(follow: boolean) {
+    zoomFollowsChat = follow
+    saveZoomFollowsChat(follow)
   }
 
   let card = $state<HTMLElement>()
@@ -58,6 +66,19 @@
         {#each THEMES as t (t.id)}
           <button type="button" role="radio" aria-checked={theme === t.id} onclick={() => pick(t.id)}>{t.name}</button>
         {/each}
+      </div>
+    </div>
+
+    <div class="field">
+      <span class="label" id="zoom-label">PDF size with the chat</span>
+      <span class="hint">
+        {zoomFollowsChat
+          ? 'The PDF opens a little bigger and shrinks to fit beside the chat when it opens, then grows back.'
+          : 'The PDF keeps one size that already leaves room for the chat beside it.'}
+      </span>
+      <div class="segments" role="radiogroup" aria-labelledby="zoom-label">
+        <button type="button" role="radio" aria-checked={zoomFollowsChat} onclick={() => pickZoom(true)}>Fit to chat</button>
+        <button type="button" role="radio" aria-checked={!zoomFollowsChat} onclick={() => pickZoom(false)}>Fixed size</button>
       </div>
     </div>
   </div>

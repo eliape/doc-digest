@@ -12,6 +12,7 @@
   import { isPdfFile } from './lib/pages'
   import { savedTool, saveTool, type Tool } from './lib/tools'
   import SettingsDialog from './lib/SettingsDialog.svelte'
+  import { savedZoomFollowsChat } from './lib/chatZoom'
   import TopicProfileDialog from './lib/TopicProfileDialog.svelte'
   import TopicsSidebar from './lib/TopicsSidebar.svelte'
   import { type Mode, Workspace } from './lib/workspace.svelte'
@@ -60,6 +61,8 @@
   // Every load starts with the topics open and the chat closed.
   let sidebarOpen = $state(true)
   let settingsOpen = $state(false)
+  // Whether the PDF's zoom follows the chat opening and closing. Set in Settings.
+  let zoomFollowsChat = $state(savedZoomFollowsChat())
   // The topic whose Conventions and purpose are being edited, if any.
   let profileTopicId = $state<string>()
   const profileTopic = $derived(workspace.topics.find((t) => t.id === profileTopicId))
@@ -474,7 +477,7 @@
     onupload={() => fileInput.click()}
     onopenprofile={(id) => (profileTopicId = id)}
   />
-  {#if settingsOpen}<SettingsDialog {workspace} onclose={() => (settingsOpen = false)} />{/if}
+  {#if settingsOpen}<SettingsDialog {workspace} bind:zoomFollowsChat onclose={() => (settingsOpen = false)} />{/if}
   {#if profileTopic}<TopicProfileDialog topic={profileTopic} onclose={() => (profileTopicId = undefined)} />{/if}
 
   <div class="main">
@@ -603,7 +606,9 @@
               active={id === doc?.id}
               controlsTarget={controlsEl}
               marker={markerFor(id)}
-              reserve={chatOpen ? 0 : chatReserve()}
+              reserve={chatOpen || zoomFollowsChat ? 0 : chatReserve()}
+              {chatOpen}
+              followChat={zoomFollowsChat}
               {tool}
               ontoolchange={setTool}
               onpick={(p) => onPick(id, p)}

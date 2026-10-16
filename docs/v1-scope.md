@@ -79,7 +79,7 @@ Rather than putting more and more PDF content into each request, the model gets 
 
 Printed page labels (like "xii" or "41") are kept next to PDF page numbers. Indexes are stored separately and never sent whole.
 
-**What each question carries.** The open page and spot as before, plus a compact overview: one line per PDF with its status and summary, the open PDF's outline to two levels and the other PDFs' top-level outline.
+**What each question carries.** The open page and spot as before, plus a compact overview: one line per PDF with its status and summary, the open PDF's chapters (up to 25); every table of contents is behind get_outline.
 
 **Tools.** `search` looks in the indexes and in the full page text (so it finds things the index missed and works before indexing finishes), `get_outline` gives a document's full outline with entries for a page range, and `read_pages` returns the actual pages, as images when they are scanned or when asked. The index is a guide, not a filter: the model can search again with other words, try another PDF or read neighbouring pages. Answers cite the pages actually read.
 

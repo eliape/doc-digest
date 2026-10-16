@@ -348,11 +348,16 @@ def snippet(text: str, query: list[str], width: int = 220) -> str:
     return ("…" if start else "") + piece + ("…" if start + width < len(flat) else "")
 
 
+# Chapters of the open document shown in the map.
+CHAPTERS = 25
+
+
 def overview(docs: list[TopicDoc], current: str | None) -> str:
     """
     A compact map of the topic for every request: each document's summary and
-    status, and the top of the open document's outline. The rest is looked up
-    with the tools.
+    status, and the chapters of the open document. Tables of contents are looked
+    up with get_outline: in a topic with many documents they made up most of the
+    map, which is sent at full price with every question.
     """
     lines = []
     for d in docs:
@@ -374,18 +379,16 @@ def overview(docs: list[TopicDoc], current: str | None) -> str:
         lines.append(line)
         if d.index and d.index.title:
             lines.append(f"  {d.index.title}. {d.index.summary}")
-        if d.index and d.index.sections:
-            top_level = 2 if d.alias == current else 1
-            limit = 60 if d.alias == current else 25
-            outline = [
-                f"  {'  ' * (s.level - 1)}- {s.title} "
-                f"[{page_range(d.info, s.start_page, s.end_page)}]"
+        if d.alias == current and d.index and d.index.sections:
+            chapters = [
+                f"  - {s.title} [{page_range(d.info, s.start_page, s.end_page)}]"
                 for s in d.index.sections
-                if s.level <= top_level
+                if s.level == 1
             ]
-            lines.extend(outline[:limit])
-            if len(outline) > limit:
-                lines.append(f"  … {len(outline) - limit} more; use get_outline")
+            lines.extend(chapters[:CHAPTERS])
+            if len(chapters) > CHAPTERS:
+                lines.append(f"  … {len(chapters) - CHAPTERS} more")
+    lines.append("Each document's table of contents is available with get_outline.")
     return "\n".join(lines)
 
 

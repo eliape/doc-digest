@@ -114,8 +114,11 @@ async def test_overview_is_compact(topic) -> None:
     text = overview(list(topic.docs.values()), current="D2")
     assert "D1: slides.pdf (2 pages, indexing: 0 of 2 pages done, 1 pages scanned" in text
     assert "D2: book.pdf (5 pages, indexed, 1 pages scanned or without text) — open now" in text
-    assert "    - 2.1 Chain rule [p. 4]" in text  # level 2 shown for the open document
+    assert "  - 2 Derivatives" in text  # the open document's chapters
+    assert "2.1 Chain rule" not in text  # sections are behind get_outline
     assert "derivative" not in text  # entries stay behind the tools
+    # Documents not open show no contents at all.
+    assert "Derivatives" not in overview(list(topic.docs.values()), current="D1")
 
 
 async def test_a_stopped_answer_still_logs_what_it_cost(topic, tmp_path) -> None:

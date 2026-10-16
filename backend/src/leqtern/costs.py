@@ -4,12 +4,16 @@ What the API has cost, from the usage log: per question, per quiz, for indexing,
     uv run python -m leqtern.costs                  # everything in data/usage.jsonl
     uv run python -m leqtern.costs --since 2026-10-10
     uv run python -m leqtern.costs --days 1         # the last 24 hours
+    uv run python -m leqtern.costs --by effort      # questions split by effort, mode,
+                                                    # attached, lookups or history length
 """
 
 import argparse
 import json
+import statistics
 import time
 from collections import defaultdict
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
@@ -18,6 +22,8 @@ from .usage import PRICES, Call, UsageLog
 
 # A lookup round follows the previous round within this many seconds, and rereads all of it.
 ROUND_GAP = 120
+# How long a cache entry lives without being read (the 5-minute cache).
+CACHE_LIFE = 300
 
 
 def short(model: str) -> str:
@@ -36,13 +42,21 @@ def questions(calls: list[Call]) -> list[list[Call]]:
     """
     Answer calls grouped by question: a lookup round comes right after the round before it
     and reads everything that round sent from the cache, while a new question rereads only
-    the instructions and the chat history.
+    the instructions and the chat history. Calls logged with a question id are grouped by it.
     """
     grouped: list[list[Call]] = []
+    by_id: dict[str, list[Call]] = {}
     for c in calls:
         if c.kind != "answer":
             continue
-        last = grouped[-1][-1] if grouped else None
+        if c.question:
+            if c.question in by_id:
+                by_id[c.question].append(c)
+            else:
+                by_id[c.question] = [c]
+                grouped.append(by_id[c.question])
+            continue
+        last = grouped[-1][-1] if grouped and not grouped[-1][-1].question else None
         if (
             last
             and last.model == c.model
@@ -71,7 +85,85 @@ def average(values: list[float]) -> float:
     return sum(values) / len(values) if values else 0.0
 
 
-def report(calls: list[Call], names: dict[str, tuple[str, int]] | None = None) -> str:
+def history_size(turns: int | None) -> str:
+    """A question's place in its chat, by the turns sent with it."""
+    if turns is None:
+        return "unknown"
+    if turns <= 1:
+        return "first question"
+    for limit in (5, 15, 40):
+        if turns <= limit:
+            return f"up to {limit} turns"
+    return "over 40 turns"
+
+
+# What --by splits questions by: each question's group, from its first call.
+GROUPS: dict[str, Callable[[list[Call]], str]] = {
+    "effort": lambda q: q[0].effort or "unknown",
+    "mode": lambda q: q[0].mode or "unknown",
+    "attached": lambda q: q[0].attached or "unknown",
+    "lookups": lambda q: "with lookups" if len(q) > 1 else "answered straight away",
+    "history": lambda q: history_size(q[0].turns),
+}
+
+
+def split(asked: list[list[Call]], by: str) -> list[str]:
+    """Questions per model split into groups: how many, and what they cost on average."""
+    lines = [f"Questions by {by}"]
+    for model in sorted({q[0].model for q in asked}):
+        lines.append(f"  {short(model)}")
+        groups: dict[str, list[float]] = defaultdict(list)
+        for q in asked:
+            if q[0].model == model:
+                groups[GROUPS[by](q)].append(sum(c.cost for c in q))
+        for name, costs in sorted(groups.items()):
+            each, total = cents(average(costs)), cents(sum(costs))
+            lines.append(f"    {name}: {len(costs)}, {each} each ({total} in all)")
+    return lines
+
+
+def unused_writes(calls: list[Call]) -> int:
+    """
+    Tokens written to the cache that no later call of the same model read before it expired,
+    as far as the log shows (a read of fewer tokens than were written counts as a full read).
+    """
+    unused = 0
+    for i, c in enumerate(calls):
+        if not c.cache_write:
+            continue
+        read = False
+        for later in calls[i + 1 :]:
+            if later.at - c.at > CACHE_LIFE:
+                break
+            if later.model == c.model and later.cache_read:
+                read = True
+                break
+        if not read:
+            unused += c.cache_write
+    return unused
+
+
+def caching(calls: list[Call]) -> list[str]:
+    """How well answers use the cache, per model."""
+    answers = [c for c in calls if c.kind == "answer"]
+    lines = ["Cache on answers"]
+    for model in sorted({c.model for c in answers}):
+        mine = [c for c in answers if c.model == model]
+        hits = sum(1 for c in mine if c.cache_read)
+        written = sum(c.cache_write for c in mine)
+        unused = unused_writes(mine)
+        price = PRICES.get(model, {"input": 0.0})["input"] * 1.25 / 1e6
+        lines.append(
+            f"  {short(model)}: {hits} of {len(mine)} calls read from the cache; "
+            f"{unused:,} of {written:,} tokens written were never read "
+            f"({cents(unused * price)} wasted)"
+        )
+    return lines
+
+
+def report(
+    calls: list[Call], names: dict[str, tuple[str, int]] | None = None, by: str | None = None
+) -> str:
     names = names or {}
     if not calls:
         return "No API calls in that period."
@@ -111,6 +203,36 @@ def report(calls: list[Call], names: dict[str, tuple[str, int]] | None = None) -
             out(
                 "    where it goes: "
                 + ", ".join(f"{name} {100 * v / total:.0f}%" for name, v in parts.items())
+            )
+
+    if by and asked:
+        out("")
+        lines.extend(split(asked, by))
+
+    if asked:
+        out("")
+        lines.extend(caching(calls))
+        waits = [c.first_text for c in calls if c.kind == "answer" and c.first_text is not None]
+        if waits:
+            out(
+                f"  time to the first text: {statistics.median(waits):.1f} s median "
+                f"over {len(waits)} answers"
+            )
+
+    logged = [c for c in calls if c.stop_reason]
+    unusual = [c for c in logged if c.stop_reason not in ("end_turn", "tool_use")]
+    fallbacks = [c for c in calls if c.served_model]
+    if unusual or fallbacks:
+        out("")
+        out("Unusual calls")
+        for reason in sorted({c.stop_reason or "" for c in unusual}):
+            out(f"  stopped by {reason}: {sum(1 for c in unusual if c.stop_reason == reason)}")
+        pairs = sorted({(c.model, c.served_model or "") for c in fallbacks})
+        for asked_for, served in pairs:
+            mine = [c for c in fallbacks if (c.model, c.served_model) == (asked_for, served)]
+            out(
+                f"  {short(asked_for)} fell back to {short(served)}: {len(mine)}, "
+                f"{cents(sum(c.cost for c in mine))} in all"
             )
 
     for kind, title in (
@@ -163,6 +285,7 @@ def main() -> None:
     parser.add_argument("log", nargs="?", type=Path, help="usage log (default data/usage.jsonl)")
     parser.add_argument("--since", help="only calls from this date on, e.g. 2026-10-10")
     parser.add_argument("--days", type=float, help="only calls from the last N days")
+    parser.add_argument("--by", choices=sorted(GROUPS), help="split questions into groups")
     args = parser.parse_args()
 
     data_dir = get_settings().data_dir
@@ -175,7 +298,7 @@ def main() -> None:
         calls = [c for c in calls if c.at >= start]
     if args.days:
         calls = [c for c in calls if c.at >= time.time() - args.days * 86400]
-    print(report(calls, doc_names(data_dir)))
+    print(report(calls, doc_names(data_dir), args.by))
 
 
 if __name__ == "__main__":

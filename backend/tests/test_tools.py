@@ -164,6 +164,16 @@ async def test_answers_after_looking_things_up(topic, tmp_path) -> None:
     # The conversation is cached only once a lookup has started.
     assert "cache_control" not in client.requests[0]
     assert all(r["cache_control"] == {"type": "ephemeral"} for r in client.requests[1:])
+    # Each round is logged with the question it belongs to and what it looked up.
+    calls = usage.calls
+    assert len({c.question for c in calls}) == 1 and calls[0].question
+    assert [c.round for c in calls] == [0, 1, 2]
+    assert [c.tools for c in calls] == [["search"], ["read_pages"], []]
+    assert [c.stop_reason for c in calls] == ["tool_use", "tool_use", "end_turn"]
+    assert {(c.effort, c.mode, c.attached, c.turns) for c in calls} == {
+        ("low", "normal", "none", 1)
+    }
+    assert [c.first_text is not None for c in calls] == [False, False, True]
 
 
 async def test_answers_stream_the_thinking_summary_at_the_chosen_effort(topic) -> None:

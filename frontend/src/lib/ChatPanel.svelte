@@ -19,7 +19,7 @@
      * the chat stays with its topic.
      */
     open?: boolean
-    /** Called after C or the close button hides the panel, so focus can go back to the toggle. */
+    /** Called after the close button hides the panel, so focus can go back to the toggle. */
     onclose?: () => void
     /** Send the topic's draft. Defaults to asking with only the attached context. */
     onsend?: (topicId: string) => void
@@ -271,11 +271,16 @@
     composer?.focus({ preventScroll: true })
   }
 
-  /** Hide the panel. What was attached to the next question goes too, and its marker fades. */
-  export function close() {
+  /**
+   * Hide the panel. What was attached to the next question goes too, and its marker fades.
+   * With `refocus` false, focus is not sent back to the chat toggle.
+   */
+  export function close(refocus = true) {
     open = false
     if (topic?.context) workspace.clearContext(topic.id)
-    onclose?.()
+    if (refocus) onclose?.()
+    // An inert panel does not always give up focus at once, which would leave keys typing into it.
+    else if (panel?.contains(document.activeElement)) (document.activeElement as HTMLElement).blur()
   }
 
   function send(event?: SubmitEvent) {
@@ -351,7 +356,7 @@
           }}>New chat</button
         >
         <!-- In the window's top right corner, exactly where the Chat icon is while the chat is closed. -->
-        <button type="button" class="icon-button" aria-label="Close chat" aria-keyshortcuts="C" onclick={close}>
+        <button type="button" class="icon-button" aria-label="Close chat" aria-keyshortcuts="C" onclick={() => close()}>
           <span class="tip" aria-hidden="true">Close chat <kbd>C</kbd></span>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
         </button>

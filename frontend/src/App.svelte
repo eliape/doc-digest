@@ -461,7 +461,9 @@
     if (event.key.toLowerCase() === 'c' && !mod && !event.shiftKey && !event.altKey && !event.isComposing && !event.repeat) {
       if (workspace.activeTopic && !keyIsForTarget(event.target)) {
         event.preventDefault()
-        if (chatOpen) chatPanel?.close()
+        // Closing by key leaves focus where it was, or on the page if it was in the chat:
+        // focusing the toggle from a key press would show its outline and tooltip.
+        if (chatOpen) chatPanel?.close(false)
         else {
           setChatOpen(true)
           tick().then(() => chatPanel?.focus())

@@ -28,9 +28,9 @@ export function saveModel(id: ModelId) {
 
 /** How hard the model works on answers and quizzes. The backend accepts exactly these (ask.py's Effort). */
 export const EFFORTS = [
-  { id: 'low', name: 'Low', hint: 'Quick answers, the cheapest' },
-  { id: 'medium', name: 'Medium', hint: 'Thinks longer and looks up more' },
-  { id: 'high', name: 'High', hint: 'Thinks hardest, for tough problems' },
+  { id: 'low', name: 'Low', hint: 'Low effort: quick answers, the cheapest' },
+  { id: 'medium', name: 'Medium', hint: 'Medium effort: thinks longer and looks up more, so slower and dearer' },
+  { id: 'high', name: 'High', hint: 'High effort: thinks hardest, for tough problems; slowest and dearest' },
 ] as const
 
 export type EffortId = (typeof EFFORTS)[number]['id']

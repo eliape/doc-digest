@@ -13,7 +13,7 @@ The v1 plan, scope and build order are in [docs/v1-scope.md](docs/v1-scope.md).
 - **Right-click** a spot or selection for *Ask*, *Socratic* or *Quiz me*. Each attaches it and opens the chat so you can say what to focus on.
 - **Three modes**, picked under the question box: *Normal* answers, *Socratic* asks you leading questions instead of explaining, and *Quiz* writes a multiple-choice quiz you click through. The quiz ends with your results and, if there is room to improve, a short tip on what to review. Later answers and quizzes build on those results.
 - **Model menu** under the question box: Claude Opus 5.5 or the cheaper Claude Sonnet 5.5 (about half the cost per question). The browser remembers it.
-- **Effort slider** right of the model menu: Low (default), Medium or High. Higher thinks longer and looks up more, so answers and quizzes are slower and cost more. The browser remembers it.
+- **Effort menu** right of the model menu: Low (default), Medium or High. Higher thinks longer and looks up more, so answers and quizzes are slower and cost more. The browser remembers it.
 - **Thinking**: a "Thought for Ns" line above an answer opens a summary of what the model thought about (the API returns a summary, not the raw thinking).
 - **Document index.** Each PDF you add is indexed in the background by a cheap model. Answers use it to search, browse the outline and read pages across the whole topic, not just the page you are on.
 - **Conventions and purpose.** Each topic's ⋮ menu has a place to write what you study it for ("Exam in December") and the conventions answers should follow ("j is the imaginary unit"). Both go with every answer in that topic.

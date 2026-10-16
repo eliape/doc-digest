@@ -99,18 +99,12 @@
     saveModel(model)
   })
 
-  // How hard the model works, on the slider right of the model, also remembered in this browser.
+  // How hard the model works, in the menu right of the model, also remembered in this browser.
   let effort = $state(savedEffort())
   $effect(() => {
     workspace.answerEffort = effort
     saveEffort(effort)
   })
-  let effortLevel = $derived(EFFORTS.findIndex((e) => e.id === effort))
-  const EFFORT_TITLE =
-    'Effort: how hard the model works on answers and quizzes. Higher thinks longer and looks things up more, ' +
-    'so answers are slower and cost more (roughly 1.5–3× per step up). ' +
-    'Changing it mid-discussion rereads the conversation at full price once.'
-
   /** "Thought for 4s", for an answer's finished thinking. */
   function thoughtFor(seconds: number | undefined): string {
     if (seconds === undefined || seconds < 1) return 'Thought for a moment'
@@ -589,19 +583,14 @@
             onchange={(id) => (model = id)}
             align="right"
           />
-          <label class="effort" title={EFFORT_TITLE}>
-            <input
-              type="range"
-              min="0"
-              max={EFFORTS.length - 1}
-              step="1"
-              value={effortLevel}
-              aria-label="Effort"
-              aria-valuetext={EFFORTS[effortLevel]?.name}
-              oninput={(event) => (effort = EFFORTS[Number(event.currentTarget.value)]?.id ?? effort)}
-            />
-            <span class="effort-name">{EFFORTS[effortLevel]?.name}</span>
-          </label>
+          <Dropdown
+            label="Effort"
+            value={effort}
+            options={EFFORTS.map((e) => ({ value: e.id, label: e.name, title: e.hint }))}
+            onchange={(id) => (effort = id)}
+            align="right"
+            plain
+          />
         </div>
       </div>
     {:else}
@@ -1276,56 +1265,6 @@
     gap: 0.25rem;
   }
 
-  /* Effort: a short three-notch slider with the level's name after it. */
-  .effort {
-    display: flex;
-    align-items: center;
-    gap: 0.35rem;
-    padding: 0.15rem 0.35rem;
-    color: var(--muted);
-    font-size: 0.75rem;
-    line-height: 1.2;
-    cursor: pointer;
-  }
-  .effort-name {
-    min-width: 3.6em;
-  }
-  .effort input {
-    --thumb: 0.7rem;
-    width: 2.75rem;
-    height: var(--thumb);
-    margin: 0;
-    background:
-      radial-gradient(circle, var(--muted) 1.5px, transparent 2px) 0 50% / calc(var(--thumb)) 100% no-repeat,
-      radial-gradient(circle, var(--muted) 1.5px, transparent 2px) 50% 50% / calc(var(--thumb)) 100% no-repeat,
-      radial-gradient(circle, var(--muted) 1.5px, transparent 2px) 100% 50% / calc(var(--thumb)) 100% no-repeat,
-      linear-gradient(var(--border), var(--border)) 50% 50% / calc(100% - var(--thumb)) 2px no-repeat;
-    appearance: none;
-    cursor: pointer;
-  }
-  .effort input:focus-visible {
-    outline: 2px solid var(--accent);
-    outline-offset: 2px;
-    border-radius: 0.25rem;
-  }
-  .effort input::-webkit-slider-thumb {
-    width: var(--thumb);
-    height: var(--thumb);
-    border: none;
-    border-radius: 50%;
-    background: var(--accent);
-    appearance: none;
-  }
-  .effort input::-moz-range-thumb {
-    width: var(--thumb);
-    height: var(--thumb);
-    border: none;
-    border-radius: 50%;
-    background: var(--accent);
-  }
-  .effort:hover {
-    color: CanvasText;
-  }
 
   .send {
     display: grid;

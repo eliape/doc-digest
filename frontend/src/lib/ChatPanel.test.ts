@@ -103,12 +103,13 @@ describe('ChatPanel', () => {
     expect(within(details).getByText('both').tagName).toBe('STRONG')
   })
 
-  it('remembers the effort picked on the slider and sends it', async () => {
+  it('remembers the effort picked in its menu and sends it', async () => {
     const { workspace, panel } = setup()
-    const slider = panel.getByRole('slider', { name: 'Effort' })
-    expect(slider).toHaveValue('0')
-    await fireEvent.input(slider, { target: { value: '2' } })
-    expect(panel.getByText('High')).toBeInTheDocument()
+    const menu = panel.getByRole('button', { name: /Effort/ })
+    expect(menu).toHaveTextContent('Low')
+    await fireEvent.click(menu)
+    await fireEvent.click(panel.getByRole('menuitemradio', { name: /High/ }))
+    expect(panel.getByRole('button', { name: /Effort/ })).toHaveTextContent('High')
     expect(workspace.answerEffort).toBe('high')
     expect(localStorage.getItem('leqtern.effort')).toBe('high')
   })

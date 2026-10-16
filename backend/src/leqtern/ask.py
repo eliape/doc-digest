@@ -45,7 +45,7 @@ With a question you may get:
 - when they clicked or selected something, an image of a band 80% of a page tall centred on \
 that spot, which is marked in red; near the top or bottom of a page it runs into the previous or \
 next page, with a grey dashed line at the page break;
-- text extracted from the PDF for what the image shows, and around the spot.
+- text extracted from the PDF for what the image shows.
 When they attached nothing, you only get the page they are on. Such questions usually follow \
 up on the conversation; when one refers to something on the page instead ("this", "the \
 equation", "the figure"), read the page with read_pages before answering.
@@ -171,6 +171,8 @@ class Context(BaseModel):
     section: str | None = None
     point: Point | None = None
     selection: str | None = None
+    # The text right around the spot. The model gets the band's text instead, which holds it;
+    # this one only goes into the register's notes.
     nearby_text: str | None = None
     page_image: str | None = Field(
         default=None, description="Base64 JPEG of the whole page, or of a band around the spot"
@@ -272,8 +274,6 @@ def context_blocks(context: Context) -> list[dict[str, Any]]:
             caption = f"The whole page, {page_name(context.page, context.page_label)}:"
         blocks.append(text_block(caption))
         blocks.append(image_block(context.page_image))
-    if context.nearby_text and not context.selection:
-        blocks.append(text_block(f"Text the PDF has around that spot:\n{context.nearby_text}"))
     for page in context.page_texts:
         if page.text.strip():
             name = page_name(page.page, page.label)
@@ -489,7 +489,7 @@ def question_parts(
 ) -> dict[str, int]:
     """
     Estimated tokens of each part of the newest question, for the usage log: the image, the
-    page's text, the text around the spot, the question itself, and the blocks passed by name
+    page's text, the question itself, and the blocks passed by name
     (the topic's map, the register's notes, a quiz's reading).
     """
     owner = {id(b): name for name, blocks in named.items() for b in blocks or [] if b}
@@ -501,12 +501,7 @@ def question_parts(
             continue
         text = block.get("text", "")
         if name is None:
-            if text.startswith("Text the PDF has around"):
-                name = "nearby text"
-            elif text.startswith("Text the PDF has on"):
-                name = "page text"
-            else:
-                name = "question"
+            name = "page text" if text.startswith("Text the PDF has on") else "question"
         sizes[name] += round(len(text) / CHARS_PER_TOKEN)
     return dict(sizes)
 

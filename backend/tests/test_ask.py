@@ -581,8 +581,22 @@ def test_the_parts_of_a_question_are_measured() -> None:
         topic_map,
         {"type": "text", "text": "Around where they pointed:"},
         {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": image}},
-        {"type": "text", "text": "Text the PDF has around that spot:\n" + "x" * 64},
         {"type": "text", "text": "Text the PDF has on p. 3:\n" + "y" * 74},
     ]
     sizes = question_parts(content, map=[topic_map], notes=[None])
-    assert sizes == {"map": 10, "question": 7, "image": 100, "nearby text": 28, "page text": 29}
+    assert sizes == {"map": 10, "question": 7, "image": 100, "page text": 29}
+
+
+def test_the_text_around_a_spot_is_not_sent_twice() -> None:
+    ctx = context(
+        page_image="BAND",
+        point={"x": 0.5, "y": 0.5},
+        image_pages=[12],
+        nearby_text="NEARBY",
+        page_texts=[{"page": 12, "text": "band text with NEARBY in it"}],
+    )
+    from leqtern.ask import context_blocks
+
+    texts = [b["text"] for b in context_blocks(ctx) if b["type"] == "text"]
+    assert not any(t.endswith("NEARBY") for t in texts)
+    assert any("band text" in t for t in texts)

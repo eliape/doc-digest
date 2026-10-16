@@ -403,6 +403,7 @@ def render_outline(
     with_entries: bool = True,
     max_level: int = 4,
     pages: tuple[int, int] | None = None,
+    summaries: bool = True,
 ) -> str:
     """The index as indented text for the model."""
     lo, hi = pages or (1, doc.page_count)
@@ -411,7 +412,7 @@ def render_outline(
         if s.level <= max_level and s.end_page >= lo and s.start_page <= hi:
             indent = "  " * (s.level - 1)
             lines.append(f"{indent}- {s.title} [{page_range(doc, s.start_page, s.end_page)}]")
-            if s.summary:
+            if s.summary and summaries:
                 lines.append(f"{indent}  {s.summary}")
     if with_entries:
         by_kind: dict[str, list[str]] = {}

@@ -87,6 +87,18 @@ async def test_outline_shows_sections_and_entries(topic) -> None:
     assert "not been indexed yet" in unindexed
 
 
+async def test_a_long_documents_outline_is_its_table_of_contents(topic, monkeypatch) -> None:
+    import leqtern.tools
+
+    monkeypatch.setattr(leqtern.tools, "OUTLINE_DETAIL_PAGES", 2)
+    contents = await topic.run("get_outline", {"doc": "D2"})
+    assert "  - 2.1 Chain rule [p. 4]" in contents
+    assert "Figure 2.1" not in contents and "Rates." not in contents
+    assert "ask again with from_page and to_page, at most 2 pages apart" in contents
+    detail = await topic.run("get_outline", {"doc": "D2", "from_page": 4, "to_page": 5})
+    assert "- Figure 2.1 (pp. 5): tangent line" in detail
+
+
 async def test_reads_text_pages_as_text_and_scanned_pages_as_images(topic) -> None:
     blocks = await topic.run("read_pages", {"doc": "D2", "pages": [4, 5]})
     assert [b["type"] for b in blocks] == ["text", "text", "image"]

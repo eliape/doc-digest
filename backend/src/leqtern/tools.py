@@ -17,6 +17,10 @@ from .index import DocIndex, Indexer, page_range, render_outline
 from .library import DocInfo, Library, page_name
 
 MAX_PAGES_PER_READ = 8
+# get_outline gives the full index (section summaries, terms, equations, figures…) for at most
+# this many pages at a time; for more it gives the table of contents, which for a long book is
+# a small part of the full index.
+OUTLINE_DETAIL_PAGES = 40
 # Pages read as images during lookups; about half the tokens of a full-size 1568 px page.
 READ_IMAGE_SIDE = 1100
 SEARCH_RESULTS = 8
@@ -110,9 +114,12 @@ TOOLS: list[dict[str, Any]] = [
     {
         "name": "get_outline",
         "description": (
-            "A document's full index: its sections with page ranges and summaries, then its "
-            "key terms, definitions, equations, figures, tables and cross-references with "
-            "pages. Optionally only for a range of PDF pages."
+            "A document's index. For a range of up to "
+            f"{OUTLINE_DETAIL_PAGES} PDF pages, or a document that short: its sections with "
+            "page ranges and summaries, then its key terms, definitions, equations, figures, "
+            "tables and cross-references with pages. For more pages: its table of contents "
+            "(chapters and sections with page ranges), from which to ask for the details of "
+            "the part you need."
         ),
         "eager_input_streaming": True,
         "input_schema": {
@@ -263,6 +270,16 @@ class Toolbox:
         if not d.index.complete:
             done = sum(c.end_page - c.start_page + 1 for c in d.index.chunks)
             head += f" (Index in progress: {done} of {d.info.page_count} pages so far.)"
+        if hi - lo + 1 > OUTLINE_DETAIL_PAGES:
+            # The full index of a long book runs to tens of thousands of tokens.
+            contents = render_outline(
+                d.info, d.index, with_entries=False, max_level=2, pages=(lo, hi), summaries=False
+            )
+            return (
+                f"{head}\n\n{contents}\n\nFor section summaries, terms, definitions, equations, "
+                f"figures and tables, ask again with from_page and to_page, at most "
+                f"{OUTLINE_DETAIL_PAGES} pages apart."
+            )
         return f"{head}\n\n{render_outline(d.info, d.index, pages=(lo, hi))}"
 
     async def read(self, args: ReadInput) -> list[dict[str, Any]]:

@@ -10,25 +10,32 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-# List prices in dollars per million tokens (Claude API, October 2026). Cache
-# writes are 1.25x input (5-minute cache) and cache reads 0.1x input.
+# List prices in dollars per million tokens (Claude API, October 2026). Cache writes
+# are 1.25x input for the 5-minute cache and 2x for the 1-hour one.
 # Haiku 5.5 costs 5x more for prompts over 100K tokens; indexing stays under that.
 PRICES: dict[str, dict[str, float]] = {
-    "claude-opus-5-5": {"input": 4.00, "output": 20.00},
-    "claude-sonnet-5-5": {"input": 2.00, "output": 10.00},
-    "claude-haiku-5-5": {"input": 0.10, "output": 0.50},
+    "claude-opus-5-5": {"input": 4.00, "output": 20.00, "cache_read": 0.20},
+    "claude-sonnet-5-5": {"input": 2.00, "output": 10.00, "cache_read": 0.20},
+    "claude-haiku-5-5": {"input": 0.10, "output": 0.50, "cache_read": 0.01},
 }
+# What writing a token to the cache costs, as a multiple of the input price.
+WRITE_5M = 1.25
+WRITE_1H = 2.0
 
 
-def cost(model: str, input: int, output: int, cache_write: int, cache_read: int) -> float:
+def cost(
+    model: str, input: int, output: int, cache_write: int, cache_read: int, cache_write_1h: int = 0
+) -> float:
+    """`cache_write` counts every token written to the cache, `cache_write_1h` those for an hour."""
     price = PRICES.get(model)
     if not price:
         return 0.0
     per_token = price["input"] / 1e6
     return (
         input * per_token
-        + cache_write * per_token * 1.25
-        + cache_read * per_token * 0.1
+        + (cache_write - cache_write_1h) * per_token * WRITE_5M
+        + cache_write_1h * per_token * WRITE_1H
+        + cache_read * price["cache_read"] / 1e6
         + output * price["output"] / 1e6
     )
 
@@ -66,6 +73,17 @@ class Call:
     round_no: int | None = None
     tools: list[str] = field(default_factory=list)  # the lookups the round asked for
     first_text: float | None = None  # seconds from the question to the answer's first text
+    # Of cache_write, the tokens written to the 1-hour cache.
+    cache_write_1h: int = 0
+    # Estimated tokens of each part of the newest question ("image", "page text", "map", ...),
+    # on the first call of a question.
+    parts: dict[str, int] = field(default_factory=dict)
+
+    def priced(self) -> float:
+        """What the call costs at today's prices, as the model that answered when we know it."""
+        model = self.served_model if self.served_model in PRICES else self.model
+        args = (self.input, self.output, self.cache_write, self.cache_read, self.cache_write_1h)
+        return cost(model, *args)
 
 
 def call_from_response(kind: str, model: str, response: Any, seconds: float, **extra: Any) -> Call:
@@ -74,24 +92,28 @@ def call_from_response(kind: str, model: str, response: Any, seconds: float, **e
     output = usage.output_tokens or 0
     cache_write = getattr(usage, "cache_creation_input_tokens", None) or 0
     cache_read = getattr(usage, "cache_read_input_tokens", None) or 0
+    split = getattr(usage, "cache_creation", None)
+    cache_write_1h = getattr(split, "ephemeral_1h_input_tokens", None) or 0
     served = getattr(response, "model", None)
     # A dated id of the same model ("claude-opus-5-5-2026...") is not a fallback.
     served = served if isinstance(served, str) and not served.startswith(model) else None
-    return Call(
+    call = Call(
         kind=kind,
         model=model,
         input=input,
         output=output,
         cache_write=cache_write,
         cache_read=cache_read,
+        cache_write_1h=cache_write_1h,
         seconds=round(seconds, 3),
-        # Priced as the model that answered, when it is one we know the price of.
-        cost=cost(served if served in PRICES else model, input, output, cache_write, cache_read),
+        cost=0.0,
         request_id=getattr(response, "_request_id", None),
         served_model=served,
         stop_reason=getattr(response, "stop_reason", None),
         **extra,
     )
+    call.cost = call.priced()
+    return call
 
 
 class UsageLog:
@@ -101,7 +123,10 @@ class UsageLog:
         if path and path.exists():
             for line in path.read_text().splitlines():
                 if line.strip():
-                    self.calls.append(Call(**json.loads(line)))
+                    call = Call(**json.loads(line))
+                    # Older lines were priced with Opus cache reads at twice their price.
+                    call.cost = call.priced()
+                    self.calls.append(call)
 
     def record(self, call: Call) -> Call:
         self.calls.append(call)

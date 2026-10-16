@@ -18,12 +18,13 @@ from datetime import datetime
 from pathlib import Path
 
 from .config import get_settings
-from .usage import PRICES, Call, UsageLog
+from .usage import PRICES, WRITE_1H, WRITE_5M, Call, UsageLog
 
 # A lookup round follows the previous round within this many seconds, and rereads all of it.
 ROUND_GAP = 120
-# How long a cache entry lives without being read (the 5-minute cache).
+# How long a cache entry lives without being read: the 5-minute cache, and the 1-hour one.
 CACHE_LIFE = 300
+LONG_CACHE_LIFE = 3600
 
 
 def short(model: str) -> str:
@@ -122,25 +123,86 @@ def split(asked: list[list[Call]], by: str) -> list[str]:
     return lines
 
 
-def unused_writes(calls: list[Call]) -> int:
+def unused_writes(calls: list[Call]) -> tuple[int, int]:
     """
-    Tokens written to the cache that no later call of the same model read before it expired,
-    as far as the log shows (a read of fewer tokens than were written counts as a full read).
+    Tokens written to the 5-minute and to the 1-hour cache that no later call of the same model
+    read before they expired, as far as the log shows (a read of fewer tokens than were written
+    counts as a full read).
     """
-    unused = 0
+    short_unused = long_unused = 0
     for i, c in enumerate(calls):
         if not c.cache_write:
             continue
+        life = LONG_CACHE_LIFE if c.cache_write_1h else CACHE_LIFE
         read = False
         for later in calls[i + 1 :]:
-            if later.at - c.at > CACHE_LIFE:
+            if later.at - c.at > life:
                 break
             if later.model == c.model and later.cache_read:
                 read = True
                 break
         if not read:
-            unused += c.cache_write
-    return unused
+            short_unused += c.cache_write - c.cache_write_1h
+            long_unused += c.cache_write_1h
+    return short_unused, long_unused
+
+
+def pause(seconds: float | None) -> str:
+    """How long before a question the chat's previous one was asked."""
+    if seconds is None:
+        return "first in the chat"
+    if seconds < CACHE_LIFE:
+        return "under 5 min"
+    if seconds < LONG_CACHE_LIFE:
+        return "5 to 60 min"
+    return "over an hour"
+
+
+def pauses(asked: list[list[Call]]) -> list[str]:
+    """
+    How the cache does after pauses of different lengths, for questions logged with their chat:
+    within 5 minutes the 5-minute cache still holds the history, within an hour only the
+    1-hour one does.
+    """
+    lines: list[str] = []
+    last_in_chat: dict[str, float] = {}
+    groups: dict[tuple[str, str], list[Call]] = defaultdict(list)
+    for q in asked:
+        first = q[0]
+        if not first.chat_id:
+            continue
+        before = last_in_chat.get(first.chat_id)
+        groups[(first.model, pause(None if before is None else first.at - before))].append(first)
+        last_in_chat[first.chat_id] = first.at
+    if not groups:
+        return lines
+    lines.append("  questions by the pause before them (first round only):")
+    order = ["first in the chat", "under 5 min", "5 to 60 min", "over an hour"]
+    for model, name in sorted(groups, key=lambda k: (k[0], order.index(k[1]))):
+        mine = groups[(model, name)]
+        hits = sum(1 for c in mine if c.cache_read)
+        written = average([c.cache_write for c in mine])
+        read = average([c.cache_read for c in mine])
+        lines.append(
+            f"    {short(model)}, {name}: {len(mine)}, {hits} read from the cache; "
+            f"{written:,.0f} tokens written and {read:,.0f} read on average"
+        )
+    return lines
+
+
+def parts(asked: list[list[Call]]) -> list[str]:
+    """What the newest question is made of, in estimated tokens, for questions that log it."""
+    lines: list[str] = []
+    for model in sorted({q[0].model for q in asked}):
+        logged = [q[0].parts for q in asked if q[0].model == model and q[0].parts]
+        if not logged:
+            continue
+        names = sorted({name for p in logged for name in p})
+        sizes = ", ".join(
+            f"{name} {average([p.get(name, 0) for p in logged]):,.0f}" for name in names
+        )
+        lines.append(f"  {short(model)}, over {len(logged)} questions: {sizes}")
+    return ["The newest question, estimated tokens on average", *lines] if lines else []
 
 
 def caching(calls: list[Call]) -> list[str]:
@@ -151,13 +213,16 @@ def caching(calls: list[Call]) -> list[str]:
         mine = [c for c in answers if c.model == model]
         hits = sum(1 for c in mine if c.cache_read)
         written = sum(c.cache_write for c in mine)
-        unused = unused_writes(mine)
-        price = PRICES.get(model, {"input": 0.0})["input"] * 1.25 / 1e6
+        short_unused, long_unused = unused_writes(mine)
+        # Unread tokens had to be sent anyway; what is lost is the write price above input.
+        per = PRICES.get(model, {"input": 0.0})["input"] / 1e6
+        lost = short_unused * per * (WRITE_5M - 1) + long_unused * per * (WRITE_1H - 1)
         lines.append(
             f"  {short(model)}: {hits} of {len(mine)} calls read from the cache; "
-            f"{unused:,} of {written:,} tokens written were never read "
-            f"({cents(unused * price)} wasted)"
+            f"{short_unused + long_unused:,} of {written:,} tokens written were never read "
+            f"({cents(lost)} paid for writing them)"
         )
+    lines.extend(pauses(questions(calls)))
     return lines
 
 
@@ -194,20 +259,30 @@ def report(
         price = PRICES.get(model)
         if price:
             per = price["input"] / 1e6
-            parts = {
-                "new prompt": sum(c.input * per + c.cache_write * per * 1.25 for c in answers),
-                "cache reads": sum(c.cache_read * per * 0.1 for c in answers),
+            shares = {
+                "new prompt": sum(
+                    c.input * per
+                    + (c.cache_write - c.cache_write_1h) * per * WRITE_5M
+                    + c.cache_write_1h * per * WRITE_1H
+                    for c in answers
+                ),
+                "cache reads": sum(c.cache_read * price["cache_read"] / 1e6 for c in answers),
                 "output": sum(c.output * price["output"] / 1e6 for c in answers),
             }
-            total = sum(parts.values()) or 1
+            total = sum(shares.values()) or 1
             out(
                 "    where it goes: "
-                + ", ".join(f"{name} {100 * v / total:.0f}%" for name, v in parts.items())
+                + ", ".join(f"{name} {100 * v / total:.0f}%" for name, v in shares.items())
             )
 
     if by and asked:
         out("")
         lines.extend(split(asked, by))
+
+    made_of = parts(asked)
+    if made_of:
+        out("")
+        lines.extend(made_of)
 
     if asked:
         out("")

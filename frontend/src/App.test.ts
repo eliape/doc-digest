@@ -417,9 +417,12 @@ describe('App', () => {
     expect(dragImages[0].textContent).toBe('a.pdf')
     await fireEvent.dragOver(second, { dataTransfer, clientX: 10_000 })
     expect(document.querySelector('.drop-line')).toBeInTheDocument()
+    // Once the drag has started, the PDF and chat stop taking the pointer, so nothing auto-scrolls.
+    await waitFor(() => expect(document.querySelector('.app')).toHaveClass('tab-dragging'))
     await fireEvent.drop(second, { dataTransfer })
     expect(tabs()).toEqual(['b.pdf', 'a.pdf'])
     expect(document.querySelector('.drop-line')).not.toBeInTheDocument()
+    expect(document.querySelector('.app')).not.toHaveClass('tab-dragging')
   })
 
   it('expands the sidebar when New topic is pressed while it is collapsed', async () => {

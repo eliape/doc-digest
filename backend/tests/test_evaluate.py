@@ -18,7 +18,7 @@ async def test_reports_whether_the_expected_pages_were_read(tmp_path) -> None:
 
     def respond(kwargs):
         if kwargs["output_format"] is DocSummary:
-            return DocSummary(title="T", summary="S")
+            return DocSummary(title="T", kind="textbook", summary="S")
         return ChunkIndex(summary="s", sections=[], entries=[], references=[])
 
     index_client = FakeIndexClient(respond)

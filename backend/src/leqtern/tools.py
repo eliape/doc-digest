@@ -137,7 +137,7 @@ TOOLS: list[dict[str, Any]] = [
         "description": (
             f"Read up to {MAX_PAGES_PER_READ} pages of a document by PDF page number. Pages "
             "with a text layer come back as text; scanned pages come back as images. Set "
-            "images to true to also see text pages as images, which you need for equations, "
+            "images to true to see text pages as images instead, which you need for equations, "
             "figures, tables and diagrams, since extracted text garbles them. Answers must be "
             "based on pages you have read, not on the index."
         ),
@@ -308,8 +308,6 @@ class Toolbox:
                         },
                     }
                 )
-                if page.text.strip() and not page.scanned:
-                    blocks.append({"type": "text", "text": f"Its extracted text:\n{page.text}"})
             else:
                 blocks.append({"type": "text", "text": f"{header}\n{page.text}"})
         return blocks
@@ -369,43 +367,71 @@ def snippet(text: str, query: list[str], width: int = 220) -> str:
 CHAPTERS = 25
 
 
-def overview(docs: list[TopicDoc], current: str | None) -> str:
+def indexed(d: TopicDoc) -> bool:
+    return bool(d.index and d.index.complete)
+
+
+def doc_line(d: TopicDoc) -> str:
+    """'D2: book.pdf (412 pages, textbook, 3 pages scanned or without text)'."""
+    parts = [f"{d.info.page_count} pages"]
+    if d.index and d.index.kind:
+        parts.append(d.index.kind)
+    scanned = len(d.index.scanned_pages) if d.index else sum(p.scanned for p in d.info.pages)
+    if scanned:
+        parts.append(f"{scanned} pages scanned or without text")
+    return f"{d.alias}: {d.info.name} ({', '.join(parts)})"
+
+
+def catalogue(docs: list[TopicDoc]) -> str:
     """
-    A compact map of the topic for every request: each document's summary and
-    status, and the chapters of the open document. Tables of contents are looked
-    up with get_outline: in a topic with many documents they made up most of the
-    map, which is sent at full price with every question.
+    The part of the topic's map that rarely changes, for the cached system prompt: each indexed
+    document with its kind and summary. It changes only when a document is added, renamed,
+    moved or finishes indexing; which one is open goes with the question (see `overview`).
     """
     lines = []
     for d in docs:
-        line = f"{d.alias}: {d.info.name} ({d.info.page_count} pages"
-        status = d.status.get("status")
-        if status == "ready":
-            line += ", indexed"
-        elif status == "error":
-            line += ", indexing failed: only text search and reading work"
-        else:
-            done = d.status.get("pages_done", 0)
-            line += f", indexing: {done} of {d.info.page_count} pages done"
-        scanned = len(d.index.scanned_pages) if d.index else sum(p.scanned for p in d.info.pages)
-        if scanned:
-            line += f", {scanned} pages scanned or without text"
-        line += ")"
-        if d.alias == current:
-            line += " — open now"
-        lines.append(line)
-        if d.index and d.index.title:
+        if d.index and d.index.complete:
+            lines.append(doc_line(d))
             lines.append(f"  {d.index.title}. {d.index.summary}")
-        if d.alias == current and d.index and d.index.sections:
-            chapters = [
-                f"  - {s.title} [{page_range(d.info, s.start_page, s.end_page)}]"
-                for s in d.index.sections
-                if s.level == 1
-            ]
-            lines.extend(chapters[:CHAPTERS])
-            if len(chapters) > CHAPTERS:
-                lines.append(f"  … {len(chapters) - CHAPTERS} more")
-    lines.append("Each document's table of contents is available with get_outline.")
+    if not lines:
+        return ""
+    return "\n".join(
+        [
+            "The topic's documents:",
+            *lines,
+            "Each document's table of contents is available with get_outline.",
+        ]
+    )
+
+
+def overview(docs: list[TopicDoc], current: str | None) -> str:
+    """
+    The part of the topic's map that goes with the newest question: which document is open,
+    with its chapters, and the documents still being indexed, which the catalogue leaves out.
+    """
+    lines = []
+    for d in docs:
+        if d.alias == current:
+            lines.append(f"Open now: {d.alias} ({d.info.name})")
+            if d.index and d.index.sections:
+                chapters = [
+                    f"  - {s.title} [{page_range(d.info, s.start_page, s.end_page)}]"
+                    for s in d.index.sections
+                    if s.level == 1
+                ]
+                lines.extend(chapters[:CHAPTERS])
+                if len(chapters) > CHAPTERS:
+                    lines.append(f"  … {len(chapters) - CHAPTERS} more")
+    pending = [d for d in docs if not indexed(d)]
+    if pending:
+        lines.append("Documents not indexed yet (only text search and reading work):")
+    for d in pending:
+        status = d.status.get("status")
+        if status == "error":
+            state = "indexing failed"
+        else:
+            state = f"indexing: {d.status.get('pages_done', 0)} of {d.info.page_count} pages done"
+        lines.append(f"{doc_line(d)}, {state}")
     return "\n".join(lines)
 
 

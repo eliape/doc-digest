@@ -6,6 +6,8 @@ from pdfs import filler, make_pdf
 
 from leqtern.index import (
     ChunkIndex,
+    ChunkRecord,
+    DocIndex,
     DocSummary,
     Entry,
     Indexer,
@@ -74,7 +76,7 @@ async def test_indexes_a_document_with_text_and_scanned_pages(library, tmp_path)
 
     def respond(kwargs):
         if kwargs["output_format"] is DocSummary:
-            return DocSummary(title="A Book", summary="About topics.")
+            return DocSummary(title="A Book", kind="textbook", summary="About topics.")
         content = kwargs["messages"][0]["content"]
         start = 1 if any("PDF page 1 " in b.get("text", "") for b in content) else 21
         return ChunkIndex(
@@ -97,7 +99,7 @@ async def test_indexes_a_document_with_text_and_scanned_pages(library, tmp_path)
     indexer = Indexer(library, usage, lambda: client)
     index = await indexer.index(doc.id)
 
-    assert index.complete and index.title == "A Book"
+    assert index.complete and index.title == "A Book" and index.kind == "textbook"
     assert [c.start_page for c in index.chunks] == [1, 21]
     assert index.scanned_pages == [22]
     assert [s.title for s in index.sections] == ["Part 1", "Part 21"]
@@ -142,3 +144,37 @@ async def test_resumes_a_half_indexed_document_after_a_restart(library, tmp_path
     assert indexer.doc_status(doc.id)["status"] == "error"
     indexer.resume(doc.id)
     assert indexer.doc_status(doc.id)["status"] == "error"
+
+
+async def test_an_index_made_before_kinds_gets_its_kind_and_keeps_its_summary(
+    library, tmp_path
+) -> None:
+    doc = await library.add(make_pdf([filler("x")]), "exam.pdf")
+
+    def respond(kwargs):
+        assert kwargs["output_format"] is DocSummary  # no page is indexed again
+        return DocSummary(title="New title", kind="exam", summary="New summary.")
+
+    client = FakeIndexClient(respond)
+    indexer = Indexer(library, UsageLog(None), lambda: client)
+    old = DocIndex(
+        doc_id=doc.id,
+        title="Exam",
+        summary="An exam.",
+        page_count=1,
+        labels=[None],
+        chunks=[ChunkRecord(start_page=1, end_page=1, summary="Q1.")],
+        complete=True,
+    )
+    indexer._save(old)
+    indexer.enqueue(doc.id)
+    for _ in range(50):
+        await asyncio.sleep(0.01)
+        if indexer.get(doc.id).kind:
+            break
+    index = indexer.get(doc.id)
+    assert (index.kind, index.title, index.summary) == ("exam", "Exam", "An exam.")
+    assert indexer.doc_status(doc.id)["status"] == "ready"
+    # Once it has a kind it is not queued again.
+    indexer.enqueue(doc.id)
+    assert len(client.requests) == 1

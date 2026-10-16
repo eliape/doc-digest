@@ -12,13 +12,15 @@
     value: T
     options: Option<T>[]
     onchange: (value: T) => void
+    /** Called after any pick, changed or not, to move focus on (e.g. back to a text box). Without it focus returns to the button. */
+    onpicked?: () => void
     /** Which edge of the button the menu lines up with. It always opens upwards. */
     align?: 'left' | 'right'
     /** Leave out the down arrow after the choice. */
     plain?: boolean
   }
 
-  let { label, value, options, onchange, align = 'left', plain = false }: Props = $props()
+  let { label, value, options, onchange, onpicked, align = 'left', plain = false }: Props = $props()
 
   let open = $state(false)
   let root = $state<HTMLElement>()
@@ -41,8 +43,9 @@
   }
 
   function choose(option: Option<T>) {
-    hide()
+    hide(!onpicked)
     if (option.value !== value) onchange(option.value)
+    onpicked?.()
   }
 
   // A press anywhere else closes the menu.

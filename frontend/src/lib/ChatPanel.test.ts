@@ -41,7 +41,8 @@ describe('ChatPanel', () => {
     box.focus()
     await fireEvent.keyDown(box, { key: 'Escape' })
     expect(topic.context).toBeUndefined()
-    // The panel stays open: the first Escape only removed the spot.
+    // The panel stays open, even on a second Escape: browsers use Escape to leave full screen.
+    await fireEvent.keyDown(box, { key: 'Escape' })
     expect(screen.getByRole('complementary', { name: 'Chat' }).inert).toBe(false)
   })
 
@@ -191,6 +192,12 @@ describe('ChatPanel', () => {
     expect(workspace.answerModel).toBe('claude-sonnet-5-5')
     expect(localStorage.getItem('doc-digest.model')).toBe('claude-sonnet-5-5')
     expect(panel.getByRole('button', { name: 'Model: Sonnet 5.5' })).toBeInTheDocument()
+    // The cursor goes back to the question box, so Enter sends instead of reopening the menu,
+    // even when the pick leaves the model as it was.
+    expect(panel.getByLabelText('Ask a question')).toHaveFocus()
+    await fireEvent.click(panel.getByRole('button', { name: 'Model: Sonnet 5.5' }))
+    await fireEvent.click(within(panel.getByRole('menu', { name: 'Model' })).getAllByRole('menuitemradio')[1])
+    expect(panel.getByLabelText('Ask a question')).toHaveFocus()
     localStorage.removeItem('doc-digest.model')
   })
 

@@ -5,6 +5,8 @@
   import type { PDFViewer } from 'pdfjs-dist/legacy/web/pdf_viewer.mjs'
   import { type Capture, capture as captureContext, type Heading, headingSpot, headings, type Pick } from './context'
   import type { ReadingSpot } from './outline'
+  import { chatReserve } from './chatWidth'
+  import { openingScale, progress } from './chatZoom'
   import { attachZoomGestures, type Origin } from './gestures'
   import { assetOptions, loadPdfjs } from './pdfjs'
   import { isClick, isOnSelection, NOT_PICKABLE, pickAtPoint, pickSelection } from './picking'
@@ -27,6 +29,13 @@
      * the chat does not resize the page.
      */
     reserve?: number
+    /** Whether the chat is open beside the PDF. */
+    chatOpen?: boolean
+    /**
+     * Whether the zoom follows the chat: the PDF opens a little bigger than fits beside the
+     * chat, shrinks to fit when the chat opens and grows back when it closes.
+     */
+    followChat?: boolean
     /**
      * What a left click does: with `ask`, clicking a spot or selecting text calls `onpick`;
      * with `select`, clicks and selections are the browser's own.
@@ -54,6 +63,8 @@
     scale = $bindable(1),
     marker,
     reserve = 0,
+    chatOpen = false,
+    followChat = false,
     tool = 'select',
     onpick,
     oncontextpick,
@@ -76,7 +87,8 @@
       linkService.setViewer(pdfViewer)
       // Fit new documents to the window width, like most PDF readers.
       eventBus.on('pagesinit', () => {
-        fitWidth(pdfViewer)
+        if (followChat) openBesideChat(pdfViewer)
+        else fitWidth(pdfViewer)
         if (startPage > 1 && startPage <= pdfViewer.pagesCount) pdfViewer.currentPageNumber = startPage
       })
       eventBus.on('pagechanging', (e: { pageNumber: number }) => (page = e.pageNumber))
@@ -101,6 +113,100 @@
     pdfViewer.currentScaleValue = 'page-width'
     const free = container.clientWidth - reserve - FIT_MARGIN
     if (reserve > 0 && free > 100) pdfViewer.currentScale = (pdfViewer.currentScale * free) / (container.clientWidth - FIT_MARGIN)
+  }
+
+  /** The zoom at which the page fits a viewer `width` pixels wide. */
+  function fitScale(pdfViewer: PDFViewer, width: number) {
+    const view = pdfViewer.getPageView(pdfViewer.currentPageNumber - 1) as { width: number; scale: number } | undefined
+    return view ? ((width - FIT_MARGIN) / view.width) * view.scale : pdfViewer.currentScale
+  }
+
+  // While the zoom follows the chat: the reader's zoom with the chat closed, and the zoom it
+  // was shrunk to when the chat opened. Closing the chat goes back, unless they zoomed since.
+  let shrunk: { from: number; to: number } | undefined
+  // The resize under way: the width the viewer has with the chat closed, and the frame to come.
+  let resize: { closedWidth: number; frame: number } | undefined
+
+  /** Open a document a little bigger than fits beside the chat, fitted beside it if the chat is open. */
+  function openBesideChat(pdfViewer: PDFViewer) {
+    const room = chatReserve()
+    const closedWidth = container.clientWidth + (chatOpen ? room : 0)
+    const start = room ? openingScale(fitScale(pdfViewer, closedWidth), fitScale(pdfViewer, closedWidth - room)) : 0
+    if (!start) return fitWidth(pdfViewer)
+    if (chatOpen) {
+      shrunk = { from: start, to: fitScale(pdfViewer, closedWidth - room) }
+      pdfViewer.currentScale = shrunk.to
+    } else {
+      shrunk = undefined
+      pdfViewer.currentScale = start
+    }
+  }
+
+  // Follow the chat opening and closing (not the first value: openBesideChat sees to that).
+  let chatWasOpen: boolean | undefined
+  $effect(() => {
+    const open = chatOpen
+    untrack(() => {
+      const was = chatWasOpen
+      chatWasOpen = open
+      if (was !== undefined && was !== open && followChat) resizeWithChat(open)
+    })
+  })
+
+  /**
+   * Zoom along with the chat sliding in or out: the page shrinks as the viewer narrows, so it
+   * always fits, and grows back as it widens. The spot being read stays where it is.
+   */
+  function resizeWithChat(opening: boolean) {
+    const room = chatReserve()
+    if (!viewer?.pagesCount || !room) return
+    const wasResizing = resize
+    if (resize) cancelAnimationFrame(resize.frame)
+    resize = undefined
+
+    const closedWidth = wasResizing?.closedWidth ?? container.clientWidth + (opening ? 0 : room)
+    const endWidth = opening ? closedWidth - room : closedWidth
+    let target: number
+    if (opening) {
+      const fit = fitScale(viewer, endWidth)
+      // Opening again before it had grown back: shrink back to fit beside it.
+      if (wasResizing && shrunk) shrunk.to = fit
+      else shrunk = viewer.currentScale > fit + 0.005 ? { from: viewer.currentScale, to: fit } : undefined
+      if (!shrunk) return
+      target = fit
+    } else {
+      // Zoomed by hand while the chat was open: keep that zoom.
+      const untouched = shrunk && (wasResizing || Math.abs(viewer.currentScale - shrunk.to) < 0.005)
+      if (!shrunk || !untouched) return (shrunk = undefined)
+      target = shrunk.from
+      shrunk = undefined
+    }
+
+    const startScale = viewer.currentScale
+    const startWidth = container.clientWidth
+    const started = performance.now()
+    const step = () => {
+      // The chat slides by animating its width, so the zoom keeps pace with what is left of
+      // the viewer. Without that animation (reduced motion) it is there on the first frame.
+      const p = progress(startWidth, endWidth, container.clientWidth)
+      const done = p >= 1 || performance.now() - started > 600
+      zoomTo(done ? target : startScale + (target - startScale) * p)
+      if (done) resize = undefined
+      else if (resize) resize.frame = requestAnimationFrame(step)
+    }
+    resize = { closedWidth, frame: requestAnimationFrame(step) }
+  }
+
+  $effect(() => () => {
+    if (resize) cancelAnimationFrame(resize.frame)
+  })
+
+  /** Zoom to `value` around the reading line, drawing the pages properly once it settles. */
+  function zoomTo(value: number) {
+    if (!viewer || Math.abs(value - viewer.currentScale) < 0.005) return
+    const [top, left] = viewer.containerTopLeft
+    const origin: Origin = [left + container.clientWidth / 2, top + container.clientHeight * READING_LINE]
+    viewer.updateScale({ scaleFactor: value / viewer.currentScale, origin, drawingDelay: 150 })
   }
 
   // PDF.js rounds each zoom step to whole percents, which would swallow the tiny

@@ -1,3 +1,4 @@
+import collections
 import json
 import random
 
@@ -395,13 +396,20 @@ async def test_write_quiz_uses_the_chosen_model_and_drops_broken_questions() -> 
     assert asked["text"] == f"[Quiz] {QUIZ_SECTION}"
 
 
-def test_the_right_answer_lands_anywhere_among_the_choices() -> None:
+def test_the_right_answer_lands_evenly_among_the_choices() -> None:
+    # The model writes the right answer first; over many questions it lands on each letter
+    # about as often, and each wrong choice keeps the mistake behind it.
     written = WrittenQuiz(title="T", questions=[written_question("Q?", "right", "a", "b", "c")])
-    places = {
-        (quiz := arrange(written, random.Random(seed))).questions[0].answer for seed in range(40)
-    }
-    assert places == {0, 1, 2, 3}
-    assert quiz.questions[0].choices[quiz.questions[0].answer] == "right"
+    rng = random.Random(0)
+    places = collections.Counter()
+    for _ in range(4000):
+        [q] = arrange(written, rng).questions
+        places[q.answer] += 1
+        assert q.choices[q.answer] == "right"
+        for choice, why in zip(q.choices, q.misconceptions, strict=True):
+            assert why == (None if choice == "right" else f"Why {choice}.")
+    assert sorted(places) == [0, 1, 2, 3]
+    assert all(900 < n < 1100 for n in places.values()), places
 
 
 def test_quiz_writing_rules_are_in_the_prompt() -> None:

@@ -12,6 +12,7 @@
   import { isPdfFile } from './lib/pages'
   import { savedTool, saveTool, type Tool } from './lib/tools'
   import SettingsDialog from './lib/SettingsDialog.svelte'
+  import { savedZoomFollowsChat } from './lib/chatZoom'
   import TopicProfileDialog from './lib/TopicProfileDialog.svelte'
   import TopicsSidebar from './lib/TopicsSidebar.svelte'
   import { type Mode, Workspace } from './lib/workspace.svelte'
@@ -60,6 +61,8 @@
   // Every load starts with the topics open and the chat closed.
   let sidebarOpen = $state(true)
   let settingsOpen = $state(false)
+  // Whether the PDF's zoom follows the chat opening and closing. Set in Settings.
+  let zoomFollowsChat = $state(savedZoomFollowsChat())
   // The topic whose Conventions and purpose are being edited, if any.
   let profileTopicId = $state<string>()
   const profileTopic = $derived(workspace.topics.find((t) => t.id === profileTopicId))
@@ -99,10 +102,11 @@
   let chatToggle = $state<HTMLButtonElement>()
   let chatPanel = $state<ChatPanel>()
 
-  /** Whether a key press belongs to the focused element: typing, or pressing a button or link. */
+  /** Whether a key press is typing into a text field, or meant for an open dialog or menu. */
   function keyIsForTarget(target: EventTarget | null) {
+    if (document.querySelector('[aria-modal=true], [role=menu]')) return true
     if (!(target instanceof HTMLElement)) return false
-    return target.isContentEditable || !!target.closest('input, textarea, select, button, a[href], [role=button], [role=tab]')
+    return target.isContentEditable || !!target.closest('input, textarea, select, [contenteditable]')
   }
 
   // Tabs stay mounted once opened, so switching back to one keeps its page,
@@ -411,12 +415,16 @@
       event.preventDefault()
       fileInput.click()
     }
-    // Enter opens the chat, ready to type, unless it is meant for whatever has focus.
-    if (event.key === 'Enter' && !mod && !event.shiftKey && !event.altKey && !event.isComposing) {
+    // C opens the chat, ready to type, or closes it, unless the key is typing or meant for a menu.
+    // (Enter and Escape stay with focused buttons and the browser's full screen.)
+    if (event.key.toLowerCase() === 'c' && !mod && !event.shiftKey && !event.altKey && !event.isComposing && !event.repeat) {
       if (workspace.activeTopic && !keyIsForTarget(event.target)) {
         event.preventDefault()
-        setChatOpen(true)
-        chatPanel?.focus()
+        if (chatOpen) chatPanel?.close()
+        else {
+          setChatOpen(true)
+          tick().then(() => chatPanel?.focus())
+        }
       }
       return
     }
@@ -469,7 +477,7 @@
     onupload={() => fileInput.click()}
     onopenprofile={(id) => (profileTopicId = id)}
   />
-  {#if settingsOpen}<SettingsDialog {workspace} onclose={() => (settingsOpen = false)} />{/if}
+  {#if settingsOpen}<SettingsDialog {workspace} bind:zoomFollowsChat onclose={() => (settingsOpen = false)} />{/if}
   {#if profileTopic}<TopicProfileDialog topic={profileTopic} onclose={() => (profileTopicId = undefined)} />{/if}
 
   <div class="main">
@@ -569,11 +577,12 @@
           inert={chatOpen}
           bind:this={chatToggle}
           aria-label="Show chat"
+          aria-keyshortcuts="C"
           aria-expanded={chatOpen}
           aria-controls="chat-panel"
-          title={`Chat about ${workspace.activeTopic.name}`}
           onclick={() => setChatOpen(!chatOpen)}
         >
+          <span class="tip" aria-hidden="true">Chat <kbd>C</kbd></span>
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path
               d="M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.4 8.4 0 0 1 3.8-.9h.5a8.5 8.5 0 0 1 8 8z"
@@ -597,7 +606,9 @@
               active={id === doc?.id}
               controlsTarget={controlsEl}
               marker={markerFor(id)}
-              reserve={chatOpen ? 0 : chatReserve()}
+              reserve={chatOpen || zoomFollowsChat ? 0 : chatReserve()}
+              {chatOpen}
+              followChat={zoomFollowsChat}
               {tool}
               ontoolchange={setTool}
               onpick={(p) => onPick(id, p)}

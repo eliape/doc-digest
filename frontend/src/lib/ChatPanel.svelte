@@ -259,7 +259,6 @@
   }
 
   /** Hide the panel. What was attached to the next question goes too, and its marker fades. */
-  /** Hide the panel and take off the attached spot, as the close button does. */
   export function close() {
     open = false
     if (topic?.context) workspace.clearContext(topic.id)
@@ -543,10 +542,8 @@
             label="Mode"
             value={chat.mode}
             options={MODES}
-            onchange={(mode) => {
-              workspace.setMode(topic.id, mode)
-              focus()
-            }}
+            onchange={(mode) => workspace.setMode(topic.id, mode)}
+            onpicked={focus}
           />
         </div>
         <Dropdown
@@ -554,6 +551,7 @@
           value={model}
           options={MODELS.map((m) => ({ value: m.id, label: m.name, title: m.hint }))}
           onchange={(id) => (model = id)}
+          onpicked={focus}
           align="right"
         />
       </div>

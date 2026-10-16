@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { tick } from 'svelte'
 import App from './App.svelte'
 
 // PDF.js needs a real browser (canvas, workers), so tests stop at the loader.
@@ -556,6 +557,9 @@ describe('App', () => {
 
     await fireEvent.keyDown(within(panel).getByRole('button', { name: 'Close chat' }), { key: 'c' })
     expect(panel.inert).toBe(true)
+    // Focus does not jump to the chat button, which would light up its outline and tooltip.
+    await tick()
+    expect(screen.getByRole('button', { name: 'Show chat' })).not.toHaveFocus()
   })
 
   it('resizes the chat by dragging or with the arrow keys, and remembers the width', async () => {

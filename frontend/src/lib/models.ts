@@ -25,3 +25,32 @@ export function saveModel(id: ModelId) {
     // Storage can be unavailable (private windows); the pick just isn't remembered.
   }
 }
+
+/** How hard the model works on answers and quizzes. The backend accepts exactly these (ask.py's Effort). */
+export const EFFORTS = [
+  { id: 'low', name: 'Low', hint: 'Quick answers, the cheapest' },
+  { id: 'medium', name: 'Medium', hint: 'Thinks longer and looks up more' },
+  { id: 'high', name: 'High', hint: 'Thinks hardest, for tough problems' },
+] as const
+
+export type EffortId = (typeof EFFORTS)[number]['id']
+
+const EFFORT_KEY = 'leqtern.effort'
+
+/** The effort picked last time in this browser, or low. */
+export function savedEffort(): EffortId {
+  try {
+    const id = localStorage.getItem(EFFORT_KEY)
+    return EFFORTS.find((e) => e.id === id)?.id ?? EFFORTS[0].id
+  } catch {
+    return EFFORTS[0].id
+  }
+}
+
+export function saveEffort(id: EffortId) {
+  try {
+    localStorage.setItem(EFFORT_KEY, id)
+  } catch {
+    // Not remembered without storage, like the model.
+  }
+}

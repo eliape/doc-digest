@@ -80,6 +80,39 @@ describe('ChatPanel', () => {
     expect(await within(log).findByText((_, el) => el?.tagName === 'P' && el.textContent === 'Partial answer.')).toBeInTheDocument()
   })
 
+  it('shows the thinking as a folded row above the answer', async () => {
+    const { workspace, panel } = setup()
+    let finish!: () => void
+    vi.spyOn(workspace, 'ask').mockImplementation((id) =>
+      Workspace.prototype.ask.call(workspace, id, undefined, async function* () {
+        yield { type: 'thinking', text: 'Weighing **both** cases.' }
+        await new Promise<void>((resolve) => (finish = resolve))
+        yield { type: 'text', text: 'Answer.' }
+      }),
+    )
+    await fireEvent.input(panel.getByLabelText('Ask a question'), { target: { value: 'Why?' } })
+    await fireEvent.click(panel.getByRole('button', { name: 'Send' }))
+
+    const log = panel.getByRole('log')
+    expect(await within(log).findByText('Thinking…')).toBeInTheDocument()
+    finish()
+    const row = await within(log).findByText(/^Thought for/)
+    const details = row.closest('details')!
+    expect(details.open).toBe(false)
+    await fireEvent.click(row)
+    expect(within(details).getByText('both').tagName).toBe('STRONG')
+  })
+
+  it('remembers the effort picked on the slider and sends it', async () => {
+    const { workspace, panel } = setup()
+    const slider = panel.getByRole('slider', { name: 'Effort' })
+    expect(slider).toHaveValue('0')
+    await fireEvent.input(slider, { target: { value: '2' } })
+    expect(panel.getByText('High')).toBeInTheDocument()
+    expect(workspace.answerEffort).toBe('high')
+    expect(localStorage.getItem('leqtern.effort')).toBe('high')
+  })
+
   it('stops an answer and puts the question back in the box', async () => {
     const { workspace, topic, panel } = setup()
     vi.spyOn(workspace, 'ask').mockImplementation((id) =>

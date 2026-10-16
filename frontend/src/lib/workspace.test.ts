@@ -228,6 +228,33 @@ describe('Workspace.ask', () => {
     pageTexts: [{ page, text: 'some text' }],
   })
 
+  it("keeps the thinking summary with the answer, sends the effort, and never sends the thinking back", async () => {
+    const ws = new Workspace()
+    ws.addDoc('notes.pdf', bytes(1))
+    const topic = ws.activeTopic!
+    ws.answerEffort = 'high'
+    topic.draft = 'Why?'
+    const requests: AskRequest[] = []
+    const answer = async function* (request: AskRequest) {
+      requests.push(request)
+      yield { type: 'thinking' as const, text: 'Look it ' }
+      yield { type: 'thinking' as const, text: 'up.' }
+      yield { type: 'step' as const, text: 'Searched' }
+      yield { type: 'thinking' as const, text: 'Found it.' }
+      yield { type: 'text' as const, text: 'Because.' }
+    }
+    await ws.ask(topic.id, undefined, answer)
+    const reply = chatOf(topic).messages[1]
+    expect(reply.thinking).toBe('Look it up.\n\nFound it.')
+    expect(reply.thinkingSeconds).toBeGreaterThanOrEqual(0)
+    expect(reply.text).toBe('Because.')
+    expect(requests[0].effort).toBe('high')
+
+    topic.draft = 'And?'
+    await ws.ask(topic.id, undefined, answer)
+    expect(requests[1].messages[1]).toEqual({ role: 'assistant', text: 'Because.' })
+  })
+
   it('streams the answer into the chat and sends the attached context with the question', async () => {
     const ws = new Workspace()
     const doc = ws.addDoc('notes.pdf', bytes(1))

@@ -37,6 +37,8 @@ export type AskRequest = {
   messages: AskTurn[]
   /** Which model answers. The backend's default (ANSWER_MODEL) when left out. */
   model?: string
+  /** How hard the model works on answers and quizzes. The backend's default (low) when left out. */
+  effort?: string
   /** The reader's own instructions for every answer, from Settings. */
   instructions?: string
   /** What the reader studies the topic for, and the conventions its answers follow, in their words. */
@@ -44,15 +46,18 @@ export type AskRequest = {
   conventions?: string
 }
 
-/** A piece of an answer's text, or a lookup the model made while answering. */
-export type AnswerEvent = { type: 'text'; text: string } | { type: 'step'; text: string }
+/**
+ * A piece of an answer's text, a piece of the summary of the model's thinking, or a lookup
+ * the model made while answering.
+ */
+export type AnswerEvent = { type: 'text' | 'thinking' | 'step'; text: string }
 
 /** Something that streams an answer. `fetchAnswer` is the real one; tests pass fakes. */
 export type AnswerStream = (request: AskRequest, signal?: AbortSignal) => AsyncIterable<AnswerEvent>
 
 /**
  * Ask the backend a question and yield the answer as it arrives. The backend
- * sends newline-delimited JSON: text pieces and lookup steps, then "done" or an error.
+ * sends newline-delimited JSON: text and thinking pieces and lookup steps, then "done" or an error.
  */
 export async function* fetchAnswer(
   request: AskRequest,
@@ -76,7 +81,8 @@ export async function* fetchAnswer(
     for (const line of lines) {
       if (!line.trim()) continue
       const event = JSON.parse(line) as { type: string; text?: string; message?: string }
-      if ((event.type === 'text' || event.type === 'step') && event.text) yield { type: event.type, text: event.text }
+      if ((event.type === 'text' || event.type === 'thinking' || event.type === 'step') && event.text)
+        yield { type: event.type, text: event.text }
       else if (event.type === 'error') throw new Error(event.message ?? 'Something went wrong while answering.')
       else if (event.type === 'done') return
     }

@@ -17,6 +17,10 @@ def text(value: str):
     return SimpleNamespace(type="text", text=value)
 
 
+def thinking(value: str):
+    return SimpleNamespace(type="thinking", thinking=value, signature="sig")
+
+
 def tool_use(id: str, name: str, input: dict[str, Any]):
     return SimpleNamespace(type="tool_use", id=id, name=name, input=input)
 
@@ -37,6 +41,8 @@ class FakeStream:
             for block in self.content:
                 if block.type == "text":
                     yield SimpleNamespace(type="text", text=block.text)
+                elif block.type == "thinking":
+                    yield SimpleNamespace(type="thinking", thinking=block.thinking)
 
         return events()
 

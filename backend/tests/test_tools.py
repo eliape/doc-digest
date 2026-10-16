@@ -1,5 +1,5 @@
 import pytest
-from fakes import FakeAnswerClient, text, tool_use
+from fakes import FakeAnswerClient, text, thinking, tool_use
 from pdfs import filler, make_pdf
 
 from leqtern.ask import AskRequest, Turn, stream_answer
@@ -164,6 +164,34 @@ async def test_answers_after_looking_things_up(topic, tmp_path) -> None:
     # The conversation is cached only once a lookup has started.
     assert "cache_control" not in client.requests[0]
     assert all(r["cache_control"] == {"type": "ephemeral"} for r in client.requests[1:])
+
+
+async def test_answers_stream_the_thinking_summary_at_the_chosen_effort(topic) -> None:
+    client = FakeAnswerClient(
+        [
+            ([thinking("Look up the rule."), tool_use("t1", "search", {"query": "x"})], "tool_use"),
+            ([thinking("Found it."), text("Here.")], "end_turn"),
+        ]
+    )
+    request = AskRequest(topic="Calc", messages=[Turn(role="user", text="?")], effort="high")
+    events = [e async for e in stream_answer(client, request, topic)]
+
+    assert [(e["type"], e.get("text")) for e in events[:-1]] == [
+        ("thinking", "Look up the rule."),
+        ("step", "Searched for “x”"),
+        ("thinking", "Found it."),
+        ("text", "Here."),
+    ]
+    assert all(r["output_config"] == {"effort": "high"} for r in client.requests)
+    assert all(
+        r["thinking"] == {"type": "adaptive", "display": "summarized"} for r in client.requests
+    )
+    # Within an answer the thinking goes back with the model's turn, as the API expects.
+    assert client.requests[1]["messages"][1]["content"][0].type == "thinking"
+
+
+async def test_effort_defaults_to_low() -> None:
+    assert AskRequest(topic="Calc", messages=[]).effort == "low"
 
 
 async def test_bad_tool_calls_come_back_as_errors(topic) -> None:

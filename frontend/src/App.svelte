@@ -157,6 +157,9 @@
   let dragTab = $state<string>()
   let dropAt = $state<number>()
   let dropX = $state(0)
+  // While a tab is dragged, the PDF, the chat and the sidebar ignore the pointer, so the browser
+  // has nothing to auto-scroll when the drag nears the top or bottom of the window.
+  let tabDragging = $state(false)
 
   // A small card to carry along, in place of the browser's picture of the tab's text. It is made
   // outside the page's styles, so it is styled here, with the page's colours.
@@ -182,7 +185,11 @@
     document.body.appendChild(card)
     data.setDragImage(card, 16, 16)
     // The browser has taken its picture by the next turn.
-    setTimeout(() => card.remove())
+    setTimeout(() => {
+      card.remove()
+      // Not at once: changing the page while the drag starts can cancel it.
+      if (dragTab === id) tabDragging = true
+    })
   }
 
   /** Where in the row a drag at this x lands, and the x of the line that shows it. */
@@ -212,6 +219,7 @@
 
   function endTabDrag() {
     dragTab = undefined
+    tabDragging = false
     dropAt = undefined
   }
 
@@ -491,6 +499,7 @@
 
 <div
   class="app"
+  class:tab-dragging={tabDragging}
   role="application"
   ondragover={(e) => {
     // Only files dropped from outside show the drop overlay, not a tab being reordered.
@@ -715,6 +724,9 @@
     position: relative;
     display: flex;
     height: 100vh;
+  }
+  .app.tab-dragging :is(.stage, :global(#chat-panel), :global(#topics-sidebar)) {
+    pointer-events: none;
   }
 
   .error {

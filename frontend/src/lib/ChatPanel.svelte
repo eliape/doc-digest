@@ -19,7 +19,7 @@
      * the chat stays with its topic.
      */
     open?: boolean
-    /** Called after Escape or the close button hides the panel, so focus can go back to the toggle. */
+    /** Called after C or the close button hides the panel, so focus can go back to the toggle. */
     onclose?: () => void
     /** Send the topic's draft. Defaults to asking with only the attached context. */
     onsend?: (topicId: string) => void
@@ -259,7 +259,8 @@
   }
 
   /** Hide the panel. What was attached to the next question goes too, and its marker fades. */
-  function close() {
+  /** Hide the panel and take off the attached spot, as the close button does. */
+  export function close() {
     open = false
     if (topic?.context) workspace.clearContext(topic.id)
     onclose?.()
@@ -286,12 +287,11 @@
 <svelte:window
   onresize={() => (width = clampWidth(width))}
   onkeydown={(e) => {
-    // Escape takes off the attached spot, or else closes the panel, while focus is in it
-    // (unless a menu in it took the Escape to close itself).
+    // Escape takes off the attached spot while focus is in the panel (unless a menu in it took
+    // the Escape to close itself). It never closes the panel: browsers use it to leave full screen.
     if (e.key === 'Escape' && !e.defaultPrevented && open && panel?.contains(document.activeElement)) {
       if (topic?.context) workspace.clearContext(topic.id)
       else if (topic?.quote) workspace.clearQuote(topic.id)
-      else close()
     }
   }}
 />
@@ -339,7 +339,7 @@
           }}>New chat</button
         >
         <!-- In the window's top right corner, exactly where the Chat icon is while the chat is closed. -->
-        <button type="button" class="icon-button" aria-label="Close chat" title="Close chat (Esc)" onclick={close}>
+        <button type="button" class="icon-button" aria-label="Close chat" aria-keyshortcuts="C" title="Close chat (C)" onclick={close}>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
         </button>
       </div>

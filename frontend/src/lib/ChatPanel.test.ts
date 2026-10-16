@@ -41,7 +41,8 @@ describe('ChatPanel', () => {
     box.focus()
     await fireEvent.keyDown(box, { key: 'Escape' })
     expect(topic.context).toBeUndefined()
-    // The panel stays open: the first Escape only removed the spot.
+    // The panel stays open, even on a second Escape: browsers use Escape to leave full screen.
+    await fireEvent.keyDown(box, { key: 'Escape' })
     expect(screen.getByRole('complementary', { name: 'Chat' }).inert).toBe(false)
   })
 

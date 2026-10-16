@@ -537,7 +537,7 @@ describe('App', () => {
 
     await pick(pdf('slides.pdf'))
     await screen.findByRole('tab', { name: 'slides.pdf' })
-    expect(screen.getByRole('button', { name: 'Show chat' })).toHaveAttribute('title', 'Chat (C)')
+    expect(screen.getByRole('button', { name: 'Show chat' })).toHaveTextContent('Chat C')
     // Enter belongs to whatever has focus, and C typed in a text box is just a letter.
     await fireEvent.keyDown(screen.getByRole('tabpanel', { name: 'slides.pdf' }), { key: 'Enter' })
     await fireEvent.keyDown(screen.getByLabelText('Page number'), { key: 'c' })
@@ -836,7 +836,9 @@ describe('App', () => {
     const toggle = await screen.findByRole('button', { name: 'Show chat' })
     // An icon, not a word, and out of the way of the tab row while the chat is closed.
     expect(toggle).toHaveClass('icon-button')
-    expect(toggle).toHaveTextContent('')
+    // Its only text is the styled tooltip.
+    expect(toggle).toHaveTextContent('Chat C')
+    expect(toggle.querySelector('.tip')).toHaveAttribute('aria-hidden', 'true')
     expect(toggle.querySelector('svg')).not.toBeNull()
     expect(toggle).not.toHaveClass('hidden')
 

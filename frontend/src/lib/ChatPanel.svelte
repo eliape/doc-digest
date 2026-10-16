@@ -338,7 +338,8 @@
           }}>New chat</button
         >
         <!-- In the window's top right corner, exactly where the Chat icon is while the chat is closed. -->
-        <button type="button" class="icon-button" aria-label="Close chat" aria-keyshortcuts="C" title="Close chat (C)" onclick={close}>
+        <button type="button" class="icon-button" aria-label="Close chat" aria-keyshortcuts="C" onclick={close}>
+          <span class="tip" aria-hidden="true">Close chat <kbd>C</kbd></span>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
         </button>
       </div>

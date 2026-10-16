@@ -402,11 +402,23 @@ describe('App', () => {
     const first = screen.getByRole('tab', { name: 'a.pdf' }).parentElement!
     const second = screen.getByRole('tab', { name: 'b.pdf' }).parentElement!
     const data = new Map<string, string>()
-    const dataTransfer = { setData: (k: string, v: string) => data.set(k, v), types: [], dropEffect: '', effectAllowed: '' }
+    const dragImages: Element[] = []
+    const dataTransfer = {
+      setData: (k: string, v: string) => data.set(k, v),
+      setDragImage: (el: Element) => dragImages.push(el),
+      types: [],
+      dropEffect: '',
+      effectAllowed: '',
+    }
     await fireEvent.dragStart(first, { dataTransfer })
+    // A card with the PDF's name is carried along, and a line shows where the tab will land.
+    expect(dragImages).toHaveLength(1)
+    expect(dragImages[0].textContent).toBe('a.pdf')
     await fireEvent.dragOver(second, { dataTransfer, clientX: 10_000 })
+    expect(document.querySelector('.drop-line')).toBeInTheDocument()
     await fireEvent.drop(second, { dataTransfer })
     expect(tabs()).toEqual(['b.pdf', 'a.pdf'])
+    expect(document.querySelector('.drop-line')).not.toBeInTheDocument()
   })
 
   it('expands the sidebar when New topic is pressed while it is collapsed', async () => {

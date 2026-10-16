@@ -167,7 +167,7 @@ async def test_answers_after_looking_things_up(topic, tmp_path) -> None:
     # Each round is logged with the question it belongs to and what it looked up.
     calls = usage.calls
     assert len({c.question for c in calls}) == 1 and calls[0].question
-    assert [c.round for c in calls] == [0, 1, 2]
+    assert [c.round_no for c in calls] == [0, 1, 2]
     assert [c.tools for c in calls] == [["search"], ["read_pages"], []]
     assert [c.stop_reason for c in calls] == ["tool_use", "tool_use", "end_turn"]
     assert {(c.effort, c.mode, c.attached, c.turns) for c in calls} == {

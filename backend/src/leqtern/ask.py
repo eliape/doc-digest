@@ -474,6 +474,7 @@ def question_details(request: AskRequest) -> dict[str, Any]:
         "mode": (newest.mode if newest else None) or "normal",
         "attached": attached,
         "turns": len(request.messages),
+        "chat_id": request.chat_id,
     }
 
 
@@ -560,7 +561,7 @@ async def stream_answer(
                         model,
                         time.monotonic() - call_began,
                         **details,
-                        round=n,
+                        round_no=n,
                         first_text=round_first(first_text, text_before),
                     )
                 raise
@@ -574,7 +575,7 @@ async def stream_answer(
                     final,
                     time.monotonic() - call_began,
                     **details,
-                    round=n,
+                    round_no=n,
                     tools=[b.name for b in tool_uses],
                     first_text=round_first(first_text, text_before),
                 )

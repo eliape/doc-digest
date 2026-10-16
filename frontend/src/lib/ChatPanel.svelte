@@ -5,7 +5,7 @@
   import { contextLabel, type PageContext, type Pick } from './context'
   import Dropdown from './Dropdown.svelte'
   import { type CitableDocs, renderMarkdown, selectedMarkdown } from './markdown'
-  import { MODELS, savedModel, saveModel } from './models'
+  import { EFFORTS, MODELS, savedEffort, saveEffort, savedModel, saveModel } from './models'
   import { MODES } from './modes'
   import ChatSwitcher from './ChatSwitcher.svelte'
   import QuizCard from './QuizCard.svelte'
@@ -99,6 +99,18 @@
     saveModel(model)
   })
 
+  // How hard the model works, in the menu right of the model, also remembered in this browser.
+  let effort = $state(savedEffort())
+  $effect(() => {
+    workspace.answerEffort = effort
+    saveEffort(effort)
+  })
+  /** "Thought for 4s", for an answer's finished thinking. */
+  function thoughtFor(seconds: number | undefined): string {
+    if (seconds === undefined || seconds < 1) return 'Thought for a moment'
+    return seconds < 60 ? `Thought for ${Math.round(seconds)}s` : `Thought for ${Math.floor(seconds / 60)}m ${Math.round(seconds % 60)}s`
+  }
+
   // The question box grows with its text (up to its max-height, then it scrolls).
   $effect(() => {
     void topic?.draft
@@ -177,7 +189,7 @@
     const selection = document.getSelection()
     const range = selection && !selection.isCollapsed && selection.rangeCount ? selection.getRangeAt(0) : undefined
     const answer = (node: Node | null | undefined) =>
-      (node instanceof Element ? node : node?.parentElement)?.closest('.message.assistant .markdown')
+      (node instanceof Element ? node : node?.parentElement)?.closest('.message.assistant .markdown:not(.thought-text)')
     const inside = range && answer(range.startContainer)
     if (!range || !inside || inside !== answer(range.endContainer) || !log?.contains(inside)) {
       reply = undefined
@@ -215,6 +227,7 @@
     if (!chat) return
     void chat.messages.at(-1)?.text
     void chat.messages.at(-1)?.steps?.length
+    void chat.messages.at(-1)?.thinking
     const length = chat.messages.length
     // A new question, or another discussion, always starts at the bottom. A question arrives with
     // its answer's placeholder after it, so look at everything added since the last run.
@@ -376,13 +389,26 @@
                 <span>{chipName(message.context)}</span>
               </button>
             {/if}
+            {#if message.role === 'assistant' && message.thinking}
+              <!-- The API's summary of the model's thinking, folded away; it never sends the thinking itself. -->
+              {@const live = message.status === 'streaming' && !message.text}
+              <details class="thought">
+                <summary title="Show a summary of what the model thought about">
+                  <span class:thinking={live}>{live ? 'Thinking…' : thoughtFor(message.thinkingSeconds)}</span>
+                  <svg class="chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>
+                </summary>
+                <div class="thought-text markdown">{@html renderMarkdown(message.thinking)}</div>
+              </details>
+            {/if}
             {#if message.steps?.length}
               <ul class="steps" aria-label="Looked up">
                 {#each message.steps as step, i (i)}<li>{step}</li>{/each}
               </ul>
             {/if}
-            {#if message.status === 'streaming' && !message.text}
+            {#if message.status === 'streaming' && !message.text && !message.thinking}
               <span class="thinking">{message.mode === 'quiz' ? 'Writing a quiz…' : 'Thinking…'}</span>
+            {:else if message.status === 'streaming' && !message.text}
+              <!-- Still thinking: the row above says so. -->
             {:else if message.quiz}
               <QuizCard
                 quiz={message.quiz}
@@ -547,14 +573,25 @@
             onpicked={focus}
           />
         </div>
-        <Dropdown
-          label="Model"
-          value={model}
-          options={MODELS.map((m) => ({ value: m.id, label: m.name, title: m.hint }))}
-          onchange={(id) => (model = id)}
-          onpicked={focus}
-          align="right"
-        />
+        <div class="answer-settings">
+          <Dropdown
+            label="Model"
+            value={model}
+            options={MODELS.map((m) => ({ value: m.id, label: m.name, title: m.hint }))}
+            onchange={(id) => (model = id)}
+            onpicked={focus}
+            align="right"
+          />
+          <Dropdown
+            label="Effort"
+            value={effort}
+            options={EFFORTS.map((e) => ({ value: e.id, label: e.name, title: e.hint }))}
+            onchange={(id) => (effort = id)}
+            onpicked={focus}
+            align="right"
+            plain
+          />
+        </div>
       </div>
     {:else}
       <p class="hint">Open a PDF to start a chat about it.</p>
@@ -829,6 +866,52 @@
     border-radius: 0.5rem;
     color: var(--error, #82071e);
     background: #ffebe9;
+  }
+
+  /* The folded summary of the model's thinking, a muted line above the answer. */
+  .thought {
+    margin: 0 0 0.375rem;
+    color: var(--muted);
+    font-size: 0.8rem;
+  }
+  .thought summary {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.2rem;
+    padding: 0.1rem 0.3rem 0.1rem 0;
+    border-radius: 0.375rem;
+    list-style: none;
+    cursor: pointer;
+    user-select: none;
+  }
+  .thought summary::-webkit-details-marker {
+    display: none;
+  }
+  .thought summary:hover {
+    color: CanvasText;
+  }
+  .thought summary:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
+  .thought .chevron {
+    width: 0.75rem;
+    height: 0.75rem;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    transition: transform 0.15s;
+  }
+  .thought[open] .chevron {
+    transform: rotate(90deg);
+  }
+  .thought-text {
+    margin: 0.25rem 0 0.5rem;
+    padding-left: 0.6rem;
+    border-left: 2px solid var(--border);
+    line-height: 1.45;
   }
 
   .steps {
@@ -1176,6 +1259,12 @@
     justify-content: space-between;
     margin-bottom: -0.25rem;
   }
+  .answer-settings {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+  }
+
 
   .send {
     display: grid;

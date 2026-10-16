@@ -16,9 +16,11 @@
     onpicked?: () => void
     /** Which edge of the button the menu lines up with. It always opens upwards. */
     align?: 'left' | 'right'
+    /** Leave out the down arrow after the choice. */
+    plain?: boolean
   }
 
-  let { label, value, options, onchange, onpicked, align = 'left' }: Props = $props()
+  let { label, value, options, onchange, onpicked, align = 'left', plain = false }: Props = $props()
 
   let open = $state(false)
   let root = $state<HTMLElement>()
@@ -92,7 +94,7 @@
   >
     {#if current?.icon}<svg viewBox="0 0 24 24" aria-hidden="true"><path d={current.icon} /></svg>{/if}
     <span>{current?.label ?? value}</span>
-    <svg class="chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" /></svg>
+    {#if !plain}<svg class="chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" /></svg>{/if}
   </button>
   {#if open}
     <!-- svelte-ignore a11y_interactive_supports_focus -->

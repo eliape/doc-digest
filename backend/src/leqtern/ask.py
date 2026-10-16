@@ -19,7 +19,11 @@ from .usage import UsageLog, call_from_response
 # The default answering model; ANSWER_MODEL in backend/.env overrides it.
 MODEL = "claude-opus-5-5"
 # Low effort keeps thinking and lookups short, which is most of what an answer costs.
+# The reader can raise it for answers and quizzes in the chat.
 EFFORT = "low"
+# Answers think adaptively and send a readable summary of it, which the chat shows above the
+# answer. The API never returns the raw thinking; without this the summary comes back empty.
+THINKING = {"type": "adaptive", "display": "summarized"}
 # Rounds of tool use before the model must answer with what it has.
 MAX_ROUNDS = 8
 
@@ -183,6 +187,8 @@ class Turn(BaseModel):
 
 # The models the reader can pick in the chat.
 AnswerModel = Literal["claude-opus-5-5", "claude-sonnet-5-5"]
+# How hard the model works on an answer: higher thinks longer and looks up more, at more cost.
+Effort = Literal["low", "medium", "high"]
 
 
 class AskRequest(BaseModel):
@@ -195,6 +201,7 @@ class AskRequest(BaseModel):
     )
     messages: list[Turn]
     model: AnswerModel | None = Field(default=None, description="Defaults to ANSWER_MODEL")
+    effort: Effort = Field(default=EFFORT, description="For answers and quizzes only")
     instructions: str = Field(default="", description="The reader's instructions, from Settings")
     purpose: str = Field(default="", description="What the reader studies the topic for")
     conventions: str = Field(default="", description="Conventions answers in the topic follow")
@@ -432,7 +439,7 @@ async def write_quiz(
         system=request_system(request),  # type: ignore[arg-type]
         messages=messages,  # type: ignore[arg-type]
         output_format=WrittenQuiz,
-        output_config={"effort": EFFORT},
+        output_config={"effort": request.effort},
     )
     if usage:
         usage.record(call_from_response("quiz", model, response, time.monotonic() - began))
@@ -460,8 +467,9 @@ async def stream_answer(
     notes: dict[str, Any] | None = None,
 ) -> AsyncIterator[Event]:
     """
-    Yield the answer as events: {"type": "text"} pieces as they arrive, and a
-    {"type": "step"} for each lookup the model makes. `notes` are the register's notes for
+    Yield the answer as events: {"type": "text"} pieces as they arrive, {"type": "thinking"}
+    pieces of the summary of the model's thinking, and a {"type": "step"} for each lookup
+    the model makes. `notes` are the register's notes for
     the question, sent with it like the map, so they never break the history's cache.
     """
     aliases = {d.info.id: d.alias for d in toolbox.docs.values()}
@@ -494,7 +502,8 @@ async def stream_answer(
             max_tokens=64000,
             system=system,  # type: ignore[arg-type]
             messages=messages,
-            output_config={"effort": EFFORT},
+            thinking=THINKING,  # type: ignore[arg-type]
+            output_config={"effort": request.effort},
             # If a safety check declines the request, the API retries it on a suitable model.
             betas=["server-side-fallback-2026-07-01"],
             fallbacks="default",
@@ -506,6 +515,8 @@ async def stream_answer(
                         if first_text is None:
                             first_text = time.monotonic() - began
                         yield {"type": "text", "text": event.text}
+                    elif event.type == "thinking" and event.thinking:
+                        yield {"type": "thinking", "text": event.thinking}
             except (asyncio.CancelledError, GeneratorExit):
                 # The reader stopped the answer: leaving the stream closes it, so the model
                 # stops writing. Log what the call cost so far (output is only counted at the end).

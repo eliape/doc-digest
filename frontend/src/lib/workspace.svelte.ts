@@ -45,6 +45,12 @@ export type ChatMessage = {
   status?: 'streaming' | 'done' | 'error'
   /** The lookups the model made while answering, e.g. "Read book.pdf, pp. 4–5". */
   steps?: string[]
+  /**
+   * On the model's side: the API's summary of what the model thought about while answering
+   * (it never returns the thinking itself), and how long it thought. Shown, not sent back.
+   */
+  thinking?: string
+  thinkingSeconds?: number
   /** On the model's side: the quiz it wrote, which the reader clicks through. */
   quiz?: Quiz
 }
@@ -219,6 +225,8 @@ export class Workspace {
   activeTopicId = $state<string>()
   /** The model that answers new questions, picked in the chat. */
   answerModel = $state<string>()
+  /** How hard the model works on new answers and quizzes, picked in the chat. */
+  answerEffort = $state<string>()
   /** The reader's own instructions, sent with every question (set in Settings). */
   instructions = $state('')
   /** Indexing progress per PDF (by tab id). */
@@ -518,10 +526,31 @@ export class Workspace {
       })
     } else {
       await this.converse(topic, chat, question, fill, async (answer, request, signal) => {
-        for await (const event of stream(request, signal)) {
-          if (signal.aborted) break
-          if (event.type === 'text') answer.text += event.text
-          else answer.steps = [...(answer.steps ?? []), event.text]
+        // When the current stretch of thinking began; the model can think again after a lookup.
+        let thinkingSince: number | undefined
+        const stopThinking = () => {
+          if (thinkingSince === undefined) return
+          const seconds = (answer.thinkingSeconds ?? 0) + (Date.now() - thinkingSince) / 1000
+          answer.thinkingSeconds = Math.round(seconds * 10) / 10
+          thinkingSince = undefined
+        }
+        try {
+          for await (const event of stream(request, signal)) {
+            if (signal.aborted) break
+            if (event.type === 'thinking') {
+              if (thinkingSince === undefined) {
+                thinkingSince = Date.now()
+                if (answer.thinking) answer.thinking += '\n\n'
+              }
+              answer.thinking = (answer.thinking ?? '') + event.text
+              continue
+            }
+            stopThinking()
+            if (event.type === 'text') answer.text += event.text
+            else answer.steps = [...(answer.steps ?? []), event.text]
+          }
+        } finally {
+          stopThinking()
         }
       })
     }
@@ -603,7 +632,11 @@ export class Workspace {
       if (uploading.length) await Promise.all(uploading)
       const serverId = (id: string) => this.indexing[id]?.serverId
       const instructions = this.instructions.trim()
-      const request = { ...askRequest(topic, serverId, this.answerModel, chat, (id) => this.docs[id]?.name), ...(instructions && { instructions }) }
+      const request = {
+        ...askRequest(topic, serverId, this.answerModel, chat, (id) => this.docs[id]?.name),
+        ...(this.answerEffort && { effort: this.answerEffort }),
+        ...(instructions && { instructions }),
+      }
       await respond(answer, request, controller.signal)
       if (controller.signal.reason === STOPPED) return this.takeBack(topic, chat, asked, question, answer)
       answer.status = 'done'

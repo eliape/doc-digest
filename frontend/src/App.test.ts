@@ -497,7 +497,7 @@ describe('App', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Show chat' }))
     expect(within(panel).getByRole('log')).toHaveTextContent('What is on slide 3?')
 
-    await fireEvent.keyDown(within(panel).getByLabelText('Ask a question'), { key: 'Escape' })
+    await fireEvent.keyDown(document.body, { key: 'c' })
     expect(panel.inert).toBe(true)
   })
 
@@ -528,28 +528,34 @@ describe('App', () => {
     expect(panel.getByLabelText('Ask a question')).toHaveValue('half typed')
   })
 
-  it('opens the chat with Enter, unless Enter is meant for a button or a text box', async () => {
+  it('toggles the chat with C, unless C is typing or meant for a menu, and leaves Enter and Escape alone', async () => {
     renderOffline()
-    await fireEvent.keyDown(document.body, { key: 'Enter' })
+    await fireEvent.keyDown(document.body, { key: 'c' })
     const panel = screen.getByRole('complementary', { name: 'Chat' }) as HTMLElement & { inert: boolean }
     // No topic yet, so there is no chat to open.
     expect(panel.inert).toBe(true)
 
     await pick(pdf('slides.pdf'))
     await screen.findByRole('tab', { name: 'slides.pdf' })
-    await fireEvent.keyDown(screen.getByLabelText('Page number'), { key: 'Enter' })
-    await fireEvent.keyDown(screen.getByRole('button', { name: 'Show chat' }), { key: 'Enter' })
+    expect(screen.getByRole('button', { name: 'Show chat' })).toHaveTextContent('Chat C')
+    // Enter belongs to whatever has focus, and C typed in a text box is just a letter.
+    await fireEvent.keyDown(screen.getByRole('tabpanel', { name: 'slides.pdf' }), { key: 'Enter' })
+    await fireEvent.keyDown(screen.getByLabelText('Page number'), { key: 'c' })
+    await fireEvent.keyDown(document.body, { key: 'c', ctrlKey: true })
     expect(panel.inert).toBe(true)
 
-    await fireEvent.keyDown(screen.getByRole('tabpanel', { name: 'slides.pdf' }), { key: 'Enter' })
+    // C works with a button focused, since it does nothing for a button.
+    await fireEvent.keyDown(screen.getByRole('button', { name: 'Show chat' }), { key: 'c' })
     expect(panel.inert).toBe(false)
-    expect(within(panel).getByLabelText('Ask a question')).toHaveFocus()
+    await waitFor(() => expect(within(panel).getByLabelText('Ask a question')).toHaveFocus())
 
-    // With the panel already open, Enter brings the cursor back to the question box.
-    screen.getByRole('tabpanel', { name: 'slides.pdf' }).focus()
-    ;(document.activeElement as HTMLElement).blur()
-    await fireEvent.keyDown(document.body, { key: 'Enter' })
-    expect(within(panel).getByLabelText('Ask a question')).toHaveFocus()
+    // Escape leaves the chat open (the browser uses it to leave full screen); C in the box types.
+    await fireEvent.keyDown(within(panel).getByLabelText('Ask a question'), { key: 'Escape' })
+    await fireEvent.keyDown(within(panel).getByLabelText('Ask a question'), { key: 'c' })
+    expect(panel.inert).toBe(false)
+
+    await fireEvent.keyDown(within(panel).getByRole('button', { name: 'Close chat' }), { key: 'c' })
+    expect(panel.inert).toBe(true)
   })
 
   it('resizes the chat by dragging or with the arrow keys, and remembers the width', async () => {
@@ -830,7 +836,9 @@ describe('App', () => {
     const toggle = await screen.findByRole('button', { name: 'Show chat' })
     // An icon, not a word, and out of the way of the tab row while the chat is closed.
     expect(toggle).toHaveClass('icon-button')
-    expect(toggle).toHaveTextContent('')
+    // Its only text is the styled tooltip.
+    expect(toggle).toHaveTextContent('Chat C')
+    expect(toggle.querySelector('.tip')).toHaveAttribute('aria-hidden', 'true')
     expect(toggle.querySelector('svg')).not.toBeNull()
     expect(toggle).not.toHaveClass('hidden')
 

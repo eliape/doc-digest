@@ -1,7 +1,7 @@
 .PHONY: install dev test check costs
 
 install:
-	cd backend && uv sync
+	cd backend && uv sync --extra embeddings
 	cd frontend && npm install
 
 dev:

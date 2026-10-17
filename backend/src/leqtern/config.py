@@ -13,6 +13,10 @@ class Settings(BaseSettings):
     data_dir: Path = Path("data")
     # The model that answers questions. claude-sonnet-5-5 costs about half as much.
     answer_model: str = "claude-opus-5-5"
+    # Whether flashcard duplicates are also found by meaning, with a local embedding model
+    # (needs the optional "embeddings" extra: uv sync --extra embeddings).
+    embeddings: bool = True
+    embedding_model: str = "BAAI/bge-small-en-v1.5"
 
 
 def get_settings() -> Settings:

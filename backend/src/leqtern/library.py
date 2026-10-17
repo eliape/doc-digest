@@ -9,7 +9,9 @@ import io
 import json
 import logging
 import os
+import shutil
 import threading
+import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -135,6 +137,8 @@ class Library:
     def __init__(self, root: Path) -> None:
         self.root = root
         self._docs: dict[str, DocInfo] = {}
+        # When each document was last added in this run, so one just added isn't deleted.
+        self.added_at: dict[str, float] = {}
 
     def folder(self, doc_id: str) -> Path:
         return self.root / "docs" / doc_id
@@ -142,6 +146,7 @@ class Library:
     async def add(self, data: bytes, name: str) -> DocInfo:
         """Store a PDF (once, however often it is added) and read its pages."""
         doc_id = hashlib.sha256(data).hexdigest()[:16]
+        self.added_at[doc_id] = time.time()
         folder = self.folder(doc_id)
         source = folder / "source.pdf"
         # Read before (and still on disk, in case its folder was deleted meanwhile).
@@ -167,6 +172,17 @@ class Library:
             if doc:
                 self._docs[doc_id] = doc
         return self._docs.get(doc_id)
+
+    def remove(self, doc_id: str) -> bool:
+        """Delete a document's folder (the PDF, its pages and its index). False if it had none."""
+        if not doc_id.isalnum():
+            return False
+        self._docs.pop(doc_id, None)
+        folder = self.folder(doc_id)
+        if not folder.is_dir():
+            return False
+        shutil.rmtree(folder)
+        return True
 
     def _load(self, doc_id: str) -> DocInfo | None:
         """The pages read earlier, or None if they weren't, or their file is damaged."""

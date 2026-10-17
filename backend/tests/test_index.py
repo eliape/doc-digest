@@ -1,7 +1,8 @@
 import asyncio
+from types import SimpleNamespace
 
 import pytest
-from fakes import FakeIndexClient
+from fakes import FakeIndexClient, usage
 from pdfs import filler, make_pdf
 
 from leqtern.index import (
@@ -223,3 +224,36 @@ async def test_damaged_pages_are_read_again_from_the_pdf(tmp_path) -> None:
     again = Library(tmp_path).get(doc.id)
     assert again is not None and "limits" in again.pages[0].text
     assert Library(tmp_path).get("../docs") is None
+
+
+async def test_deleting_a_document_stops_its_indexing_and_the_worker_goes_on(library) -> None:
+    slow = await library.add(make_pdf([filler("slow")]), "slow.pdf")
+    next_doc = await library.add(make_pdf([filler("next")]), "next.pdf")
+    started = asyncio.Event()
+
+    class Client:
+        def __init__(self) -> None:
+            self.messages = SimpleNamespace(parse=self.parse)
+
+        async def parse(self, **kwargs):
+            if "slow" in str(kwargs["messages"]):
+                started.set()
+                await asyncio.sleep(30)
+            output = (
+                DocSummary(title="T", kind="other", summary="S.")
+                if kwargs["output_format"] is DocSummary
+                else ChunkIndex(summary="s", sections=[], entries=[], references=[])
+            )
+            return SimpleNamespace(parsed_output=output, usage=usage(), stop_reason="end_turn")
+
+    indexer = Indexer(library, UsageLog(None), lambda: Client())
+    indexer.enqueue(slow.id)
+    indexer.enqueue(next_doc.id)
+    await asyncio.wait_for(started.wait(), 1)
+    indexer.forget(slow.id)
+    for _ in range(100):
+        await asyncio.sleep(0.01)
+        if indexer.doc_status(next_doc.id)["status"] == "ready":
+            break
+    assert indexer.doc_status(next_doc.id)["status"] == "ready"
+    assert indexer.get(slow.id) is None or not indexer.get(slow.id).complete

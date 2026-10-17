@@ -101,7 +101,9 @@
 
   /** Take a PDF out of its topic. Unlike closing its tab, the model no longer sees it. */
   function removeSource(id: string, name: string) {
-    if (confirm(`Delete “${name}” from this topic? The chat will no longer draw on it.`)) workspace.removeDoc(id)
+    const others = workspace.otherTopicsWith(id).map((t) => `“${t.name}”`)
+    const stays = others.length ? ` It stays in ${others.join(', ')}.` : ''
+    if (confirm(`Delete “${name}” from this topic? The chat will no longer draw on it.${stays}`)) workspace.removeDoc(id)
   }
 
   function remove(id: string, name: string) {

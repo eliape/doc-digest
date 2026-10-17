@@ -247,6 +247,10 @@ class Indexer:
         self._indexes: dict[str, DocIndex] = {}
         # Automatic retries so far, per document that failed.
         self._retries: dict[str, int] = {}
+        # Documents deleted from the library, so the worker skips them if they are still queued.
+        self._forgotten: set[str] = set()
+        # The document being indexed now, with its task, so deleting it can stop it.
+        self._current: tuple[str, asyncio.Task] | None = None
 
     def index_path(self, doc_id: str) -> Path:
         return self.library.folder(doc_id) / "index.json"
@@ -314,16 +318,42 @@ class Indexer:
         if (index and index.complete and index.kind) or busy:
             return
         doc = self.library.get(doc_id)
+        self._forgotten.discard(doc_id)
         self.status[doc_id] = {"status": "queued", "pages_done": 0, "page_count": doc.page_count}
         self._queue.put_nowait(doc_id)
         if self._worker is None or self._worker.done():
             self._worker = asyncio.create_task(self._work())
 
+    def forget(self, doc_id: str) -> None:
+        """
+        Stop indexing a document that is being deleted (cancelling its model calls), and drop
+        what is kept about it in memory.
+        """
+        self._forgotten.add(doc_id)
+        if self._current and self._current[0] == doc_id:
+            self._current[1].cancel()
+        self.status.pop(doc_id, None)
+        self._indexes.pop(doc_id, None)
+        self._retries.pop(doc_id, None)
+
     async def _work(self) -> None:
         while not self._queue.empty():
             doc_id = await self._queue.get()
+            done = self.get(doc_id)
+            # Deleted while it waited, or queued twice and already done.
+            if doc_id in self._forgotten or (done and done.complete and done.kind):
+                continue
+            task = asyncio.create_task(self.index(doc_id))
+            self._current = (doc_id, task)
             try:
-                await self.index(doc_id)
+                await task
+            except asyncio.CancelledError:
+                # Only the document being deleted was stopped; the worker goes on, unless it
+                # is being cancelled itself (the backend shutting down).
+                current = asyncio.current_task()
+                if doc_id in self._forgotten and not (current and current.cancelling()):
+                    continue
+                raise
             except Exception as error:
                 logger.exception("Indexing %s failed", doc_id)
                 self.status[doc_id] = {
@@ -332,6 +362,8 @@ class Indexer:
                     "error": str(error) or type(error).__name__,
                     "failed_at": time.time(),
                 }
+            finally:
+                self._current = None
 
     async def index(self, doc_id: str) -> DocIndex:
         """Index a document, reusing chunks already done if an earlier run stopped."""

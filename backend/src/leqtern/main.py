@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import threading
+import time
 from collections.abc import AsyncIterator
 from functools import cache
 from typing import Annotated, Any
@@ -177,13 +178,61 @@ def load_workspace(services: ServicesDep) -> dict[str, Any]:
     return {**(services.saved.load() or {}), "revision": services.saved.revision()}
 
 
+# A PDF uploaded this recently is not deleted yet: a tab may have just added it again,
+# before saving. The tab asks again with a later save.
+KEEP_NEW_SECONDS = 30.0
+
+
+def saved_doc_ids(workspace: dict[str, Any]) -> set[str]:
+    """The backend ids of every PDF in every topic of a saved workspace."""
+    ids = set()
+    for topic in workspace.get("topics") or []:
+        for doc in (topic.get("docs") or []) if isinstance(topic, dict) else []:
+            if isinstance(doc, dict) and isinstance(doc.get("serverId"), str):
+                ids.add(doc["serverId"])
+    return ids
+
+
+def delete_unused(
+    services: Services, workspace: dict[str, Any], ids: list[str]
+) -> tuple[list[str], list[str]]:
+    """
+    Delete the PDFs among `ids` that no topic in the saved workspace has any more, with their
+    pages and index, and stop indexing them. A PDF that is in another topic is kept. Returns
+    the ids deleted, and those added too recently to delete yet.
+    """
+    used = saved_doc_ids(workspace)
+    deleted, later = [], []
+    for doc_id in dict.fromkeys(ids):
+        if doc_id in used or not doc_id.isalnum():
+            continue
+        if time.time() - services.library.added_at.get(doc_id, 0) < KEEP_NEW_SECONDS:
+            later.append(doc_id)
+            continue
+        services.indexer.forget(doc_id)
+        try:
+            if services.library.remove(doc_id):
+                deleted.append(doc_id)
+        except OSError:
+            logger.exception("Could not delete %s", doc_id)
+    return deleted, later
+
+
 @app.put("/api/workspace")
-def save_workspace(
+async def save_workspace(
     workspace: dict[str, Any],
     services: ServicesDep,
     base: int | None = Query(None, description="The revision the tab last loaded or saved"),
     writer: str | None = Query(None, description="An id for the tab, new on each load"),
+    release: Annotated[
+        list[str] | None, Query(description="PDFs taken out of a topic since the last save")
+    ] = None,
 ) -> dict[str, Any]:
+    """
+    Save the workspace, then delete the PDFs in `release` (backend ids of PDFs taken out of
+    a topic since the last save) that no topic has any more. `later` lists those to send again
+    with a later save (see KEEP_NEW_SECONDS).
+    """
     workspace.pop("revision", None)
     try:
         revision = services.saved.save(workspace, base, writer)
@@ -191,7 +240,8 @@ def save_workspace(
         raise HTTPException(
             status_code=409, detail="Your topics were saved from another tab since."
         ) from error
-    return {"status": "saved", "revision": revision}
+    deleted, later = delete_unused(services, workspace, release or [])
+    return {"status": "saved", "revision": revision, "deleted": deleted, "later": later}
 
 
 @app.get("/api/docs/{doc_id}/index")

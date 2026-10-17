@@ -262,6 +262,8 @@ export class Workspace {
   private following = new Set<string>()
   // Uploads still on their way, so a question can wait for its PDFs' ids.
   private uploads: Record<string, Promise<unknown>> = {}
+  // Backend ids of PDFs taken out of every topic, for the next save to delete (see takeReleased).
+  private released = new Set<string>()
   // Stops each topic's answer that is still arriving. Not state: nothing renders from it.
   private answering = new Map<string, AbortController>()
   /** Where quizzes and notes on what to review come from. Tests swap in a fake. */
@@ -309,12 +311,14 @@ export class Workspace {
     for (const chat of topic.chats) this.answering.get(chat.id)?.abort()
     void this.registerApi.forget(topic.id).catch(() => {})
     void this.forgetDeck(topic.id).catch(() => {})
+    const serverIds = topic.docIds.map((docId) => this.indexing[docId]?.serverId)
     this.docs = omit(this.docs, topic.docIds)
     for (const docId of topic.docIds) {
       delete this.indexing[docId]
       delete this.pages[docId]
       delete this.pdfErrors[docId]
     }
+    for (const serverId of serverIds) this.release(serverId)
     if (this.activeTopicId === id) {
       this.activeTopicId = (this.topics[index] ?? this.topics[index - 1])?.id
     }
@@ -364,6 +368,8 @@ export class Workspace {
       const upload = known ? api.status(known) : api.upload(doc.name, doc.data!)
       this.uploads[docId] = upload.catch(() => {})
       let status = await upload
+      // Removed while it uploaded: the backend now has a PDF no topic may have.
+      if (!known && !(docId in this.docs)) return this.release(status.id)
       if (!known && this.sameAsSaved(docId, status.id)) return
       while (update(status)) {
         await new Promise((resolve) => setTimeout(resolve, pollMs))
@@ -926,10 +932,56 @@ export class Workspace {
     this.closeDoc(id)
     topic.docIds.splice(topic.docIds.indexOf(id), 1)
     if (topic.context?.docId === id) topic.context = undefined
+    const serverId = this.indexing[id]?.serverId
     this.docs = omit(this.docs, [id])
     delete this.indexing[id]
     delete this.pages[id]
     delete this.pdfErrors[id]
+    this.release(serverId)
+  }
+
+  /** The other topics that have the same PDF as the tab `docId`. */
+  otherTopicsWith(docId: string): Topic[] {
+    const serverId = this.indexing[docId]?.serverId
+    const topic = this.topicOf(docId)
+    if (!serverId) return []
+    return this.topics.filter((t) => t !== topic && t.docIds.some((id) => this.indexing[id]?.serverId === serverId))
+  }
+
+  /** Whether a tab in any topic has the PDF the backend knows as `serverId`. */
+  private inUse(serverId: string): boolean {
+    return Object.keys(this.docs).some((id) => this.indexing[id]?.serverId === serverId)
+  }
+
+  // A PDF no topic has any more is deleted on the backend with the next save. The backend keeps
+  // one copy of each PDF for every topic it is in, so one still in another topic stays.
+  private release(serverId: string | undefined) {
+    if (!serverId || this.inUse(serverId)) return
+    this.released.add(serverId)
+    this.onReleased()
+  }
+
+  /** Called when a PDF is released, so a save can delete it. App saves soon after. */
+  onReleased: () => void = () => {}
+
+  /**
+   * The backend ids of PDFs taken out of every topic since this was last called, to send with
+   * the save that leaves them out. Give back with `rerelease` any the save did not delete.
+   */
+  takeReleased(): string[] {
+    const ids = [...this.released].filter((id) => !this.inUse(id))
+    this.released.clear()
+    return ids
+  }
+
+  /** Release again PDFs a save could not delete yet. */
+  rerelease(ids: string[]) {
+    for (const id of ids) this.release(id)
+  }
+
+  /** Whether a save has PDFs to delete. */
+  hasReleased(): boolean {
+    return this.released.size > 0
   }
 
   /**

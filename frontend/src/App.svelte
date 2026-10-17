@@ -47,32 +47,48 @@
   })
 
   let unsaved: string | undefined
+  // What the last save sent, to send again when there is nothing new but PDFs to delete.
+  let lastSaved: string | undefined
   let saveTimer: ReturnType<typeof setTimeout> | undefined
+  let laterTimer: ReturnType<typeof setTimeout> | undefined
   let saving = false
   // Browsers drop a request sent as the page closes (keepalive) if its body is over 64 KB.
   const KEEPALIVE_LIMIT = 60_000
+  // The backend keeps a PDF uploaded in the last 30 s; ask again after that.
+  const DELETE_LATER_MS = 31_000
 
   /**
-   * Send the latest changes. One save is sent at a time, so each builds on the revision the
-   * last one returned; when the page is closing, it goes at once.
+   * Send the latest changes, with the PDFs taken out of every topic since, for the backend to
+   * delete. One save is sent at a time, so each builds on the revision the last one returned;
+   * when the page is closing, it goes at once.
    */
   function saveNow(closing = false) {
     clearTimeout(saveTimer)
-    if (unsaved === undefined || staleTab || (saving && !closing)) return
-    const json = unsaved
+    if (staleTab || (saving && !closing)) return
+    const json = unsaved ?? (workspace.hasReleased() ? lastSaved : undefined)
+    if (json === undefined) return
     unsaved = undefined
     saving = true
+    const release = workspace.takeReleased()
     const keepalive = closing && json.length < KEEPALIVE_LIMIT
-    saveWorkspace(json, { base: revision, writer }, keepalive)
+    saveWorkspace(json, { base: revision, writer }, { keepalive, release })
       .then((saved) => {
-        revision = Math.max(revision, saved)
+        revision = Math.max(revision, saved.revision)
+        lastSaved = json
+        if (saved.later.length) {
+          workspace.rerelease(saved.later)
+          clearTimeout(laterTimer)
+          laterTimer = setTimeout(saveNow, DELETE_LATER_MS)
+        }
         if (error.startsWith('Could not save')) error = ''
       })
       .catch((failure) => {
+        // A tab that has gone stale deletes nothing: the other tab's topics may still have them.
         if (failure instanceof BackendError && failure.status === 409) {
           staleTab = true
           return
         }
+        workspace.rerelease(release)
         unsaved ??= json
         error = 'Could not save your topics. Is the backend running?'
       })
@@ -80,6 +96,13 @@
         saving = false
         if (unsaved !== undefined && !staleTab) saveTimer = setTimeout(saveNow, 500)
       })
+  }
+
+  // A PDF taken out of every topic is deleted with a save, even one with nothing else new to save.
+  workspace.onReleased = () => {
+    if (!restored) return
+    clearTimeout(saveTimer)
+    saveTimer = setTimeout(saveNow, 500)
   }
 
   // Save shortly after each change, and right away when the page is hidden or closed.

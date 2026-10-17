@@ -176,12 +176,23 @@ export async function fetchSavedWorkspace(fetchFn: typeof fetch = fetch): Promis
 /** Where a save comes from: the revision the tab last loaded or saved, and the tab's id. */
 export type SaveFrom = { base: number; writer: string }
 
+/** What a save did: the workspace's new revision, and which released PDFs it deleted. */
+export type Saved = { revision: number; deleted: string[]; later: string[] }
+
 /**
- * Save the workspace (already turned into JSON) on disk, replacing what was saved, and return
- * its new revision. Fails with status 409 when another tab saved since `from.base`.
+ * Save the workspace (already turned into JSON) on disk, replacing what was saved. Fails with
+ * status 409 when another tab saved since `from.base`. `release` names PDFs (backend ids) taken
+ * out of a topic since the last save: the backend deletes those no topic has any more, except
+ * ones uploaded moments ago, which it returns in `later` to send again.
  */
-export async function saveWorkspace(json: string, from: SaveFrom, keepalive = false, fetchFn: typeof fetch = fetch): Promise<number> {
-  const query = `base=${from.base}&writer=${encodeURIComponent(from.writer)}`
+export async function saveWorkspace(
+  json: string,
+  from: SaveFrom,
+  { keepalive = false, release = [] }: { keepalive?: boolean; release?: string[] } = {},
+  fetchFn: typeof fetch = fetch,
+): Promise<Saved> {
+  const query = new URLSearchParams({ base: String(from.base), writer: from.writer })
+  for (const id of release) query.append('release', id)
   const res = await fetchFn(`/api/workspace?${query}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
@@ -189,7 +200,8 @@ export async function saveWorkspace(json: string, from: SaveFrom, keepalive = fa
     keepalive,
   })
   if (!res.ok) throw await backendError(res)
-  return ((await res.json()) as { revision: number }).revision
+  const saved = (await res.json()) as Partial<Saved>
+  return { revision: saved.revision ?? from.base, deleted: saved.deleted ?? [], later: saved.later ?? [] }
 }
 
 /** Have the model write a multiple-choice quiz for the newest turn, which asks for one. */

@@ -1171,6 +1171,83 @@ describe('Workspace saving', () => {
   })
 })
 
+describe('Workspace deleting sources', () => {
+  const ready = (id: string): IndexStatus => ({ id, status: 'ready', pages_done: 1, page_count: 1 })
+  const at = (id: string) => ({ upload: async () => ready(id), status: async () => ready(id) })
+
+  /** A PDF the backend knows as `serverId`, added to a new topic. */
+  async function added(ws: Workspace, topic: string, serverId: string) {
+    ws.createTopic(topic)
+    const doc = ws.addDoc(`${serverId}.pdf`, bytes(serverId.length, 7))
+    await ws.index(doc.id, at(serverId))
+    return doc
+  }
+
+  it('releases a removed PDF for the next save to delete, once', async () => {
+    const ws = new Workspace()
+    const released = vi.fn()
+    ws.onReleased = released
+    const doc = await added(ws, 'Calculus', 'srv1')
+    ws.removeDoc(doc.id)
+    expect(released).toHaveBeenCalledOnce()
+    expect(ws.takeReleased()).toEqual(['srv1'])
+    expect(ws.takeReleased()).toEqual([])
+  })
+
+  it('keeps a PDF that another topic still has, and says which', async () => {
+    const ws = new Workspace()
+    const first = await added(ws, 'Calculus', 'srv1')
+    const second = await added(ws, 'Exam', 'srv1')
+    expect(ws.otherTopicsWith(second.id).map((t) => t.name)).toEqual(['Calculus'])
+    ws.removeDoc(second.id)
+    expect(ws.takeReleased()).toEqual([])
+    expect(ws.topicOf(first.id)?.name).toBe('Calculus')
+    ws.removeDoc(first.id)
+    expect(ws.takeReleased()).toEqual(['srv1'])
+  })
+
+  it('releases the PDFs of a deleted topic that no other topic has', async () => {
+    const ws = new Workspace()
+    await added(ws, 'Calculus', 'shared')
+    const exam = ws.topics.length
+    await added(ws, 'Exam', 'shared')
+    const doc = ws.addDoc('own.pdf', bytes(9, 9))
+    await ws.index(doc.id, at('own'))
+    ws.deleteTopic(ws.topics[exam].id)
+    expect(ws.takeReleased()).toEqual(['own'])
+  })
+
+  it('does not release a PDF that was added again before the save', async () => {
+    const ws = new Workspace()
+    const doc = await added(ws, 'Calculus', 'srv1')
+    ws.removeDoc(doc.id)
+    await added(ws, 'Exam', 'srv1')
+    expect(ws.takeReleased()).toEqual([])
+  })
+
+  it('releases a PDF removed while it was still uploading', async () => {
+    const ws = new Workspace()
+    ws.createTopic('Calculus')
+    const doc = ws.addDoc('slow.pdf', bytes(1))
+    let finish!: (s: IndexStatus) => void
+    const indexing = ws.index(doc.id, { upload: () => new Promise((resolve) => (finish = resolve)), status: async () => ready('slow') })
+    ws.removeDoc(doc.id)
+    expect(ws.takeReleased()).toEqual([])
+    finish(ready('slow'))
+    await indexing
+    expect(ws.takeReleased()).toEqual(['slow'])
+  })
+
+  it('releases again what a save could not delete, unless it is back in a topic', async () => {
+    const ws = new Workspace()
+    await added(ws, 'Calculus', 'kept')
+    ws.rerelease(['gone', 'kept'])
+    expect(ws.hasReleased()).toBe(true)
+    expect(ws.takeReleased()).toEqual(['gone'])
+    expect(ws.hasReleased()).toBe(false)
+  })
+})
+
 describe('Workspace discussions', () => {
   const context = (docId: string, page: number): PageContext => ({ docId, docName: 'notes.pdf', page, pageTexts: [] })
 

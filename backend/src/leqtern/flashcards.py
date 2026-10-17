@@ -22,7 +22,7 @@ from rapidfuzz import fuzz, process
 from .ask import (
     READER_INSTRUCTIONS,
     TOPIC_CONVENTIONS,
-    TOPIC_PURPOSE,
+    TOPIC_SCOPE,
     AnswerModel,
     Context,
     Effort,
@@ -131,7 +131,7 @@ class FlashcardRequest(BaseModel):
     topic_id: str
     docs: list[str] = Field(default=[], description="Backend ids of the topic's PDFs, tab order")
     doc_names: dict[str, str] = Field(default={}, description="Each PDF's name in this topic")
-    purpose: str = ""
+    scope: str = ""
     conventions: str = ""
     instructions: str = Field(default="", description="The reader's instructions, from Settings")
     model: AnswerModel | None = None
@@ -247,8 +247,8 @@ def material(
 
 def system(request: FlashcardRequest, documents: str) -> list[dict[str, Any]]:
     about = [f'The topic is called "{request.topic}".']
-    if request.purpose.strip():
-        about.append(TOPIC_PURPOSE.format(request.purpose.strip()))
+    if request.scope.strip():
+        about.append(TOPIC_SCOPE.format(request.scope.strip()))
     if request.conventions.strip():
         about.append(TOPIC_CONVENTIONS.format(request.conventions.strip()))
     if documents:

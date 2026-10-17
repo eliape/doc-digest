@@ -41,8 +41,8 @@ export type AskRequest = {
   effort?: string
   /** The reader's own instructions for every answer, from Settings. */
   instructions?: string
-  /** What the reader studies the topic for, and the conventions its answers follow, in their words. */
-  purpose?: string
+  /** What the topic covers and what the reader studies it for, and the conventions its answers follow, in their words. */
+  scope?: string
   conventions?: string
 }
 

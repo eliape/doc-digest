@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { AskRequest, DiscussionRequest, IndexStatus, RecommendationRequest, WrittenQuiz } from './api'
 import type { PageContext } from './context'
 import {
@@ -134,7 +134,7 @@ describe('Workspace', () => {
     const json = JSON.parse(JSON.stringify(ws.snapshot()))
     expect(json.topics[1]).not.toHaveProperty('sourcesOpen')
     const back = new Workspace()
-    await back.restore(json, async () => bytes(1))
+    back.restore(json)
     expect(back.topics.map((t) => [t.sourcesOpen, t.discussionsOpen])).toEqual([
       [true, false],
       [undefined, undefined],
@@ -314,11 +314,37 @@ describe('Workspace.ask', () => {
     await ws.ask(topic.id, undefined, async function* (request) {
       sent = request
     })
-    expect(sent?.messages.map((m) => [m.role, m.text])).toEqual([
-      ['user', 'first'],
-      ['assistant', ''],
-      ['user', 'second'],
-    ])
+    // The failed question stays in the chat, but the model only sees the new one.
+    expect(chatOf(topic).messages.map((m) => m.text)).toEqual(['first', 'No API key', 'second', ''])
+    expect(sent?.messages.map((m) => [m.role, m.text])).toEqual([['user', 'second']])
+  })
+
+  it('keeps what had arrived of an answer that failed', async () => {
+    const ws = new Workspace()
+    ws.addDoc('notes.pdf', bytes(1))
+    const topic = ws.activeTopic!
+    topic.draft = 'q'
+    await ws.ask(topic.id, undefined, async function* () {
+      yield { type: 'text', text: 'Half an answer' }
+      throw new Error('Connection lost')
+    })
+    expect(chatOf(topic).messages[1]).toMatchObject({ status: 'error', text: 'Half an answer\n\n*Connection lost*' })
+  })
+
+  it('takes a failed question back into the box to ask it again', async () => {
+    const ws = new Workspace()
+    ws.addDoc('notes.pdf', bytes(1))
+    const topic = ws.activeTopic!
+    topic.draft = 'first'
+    await ws.ask(topic.id, undefined, async function* () {
+      throw new Error('No API key')
+    })
+    const failed = chatOf(topic).messages[1]
+    topic.draft = 'typed since'
+    expect(ws.retry(topic.id, 'not-the-answer')).toBe(false)
+    expect(ws.retry(topic.id, failed.id)).toBe(true)
+    expect(chatOf(topic).messages).toEqual([])
+    expect(topic.draft).toBe('first\n\ntyped since')
   })
 
   it('ignores a new question while an answer is arriving', async () => {
@@ -480,7 +506,7 @@ describe('Workspace.ask', () => {
     await ws.ask(topic.id, undefined, stream)
     expect(sent).toEqual([undefined, 'Answer in Swedish.'])
     const back = new Workspace()
-    await back.restore(JSON.parse(JSON.stringify(ws.snapshot())), async () => bytes(1))
+    back.restore(JSON.parse(JSON.stringify(ws.snapshot())))
     expect(back.instructions).toBe(' Answer in Swedish. ')
   })
 
@@ -924,7 +950,7 @@ describe('Workspace saving', () => {
     expect(askRequest(topic)).not.toHaveProperty('conventions')
     topic.conventions = 'j is the imaginary unit'
     const back = new Workspace()
-    await back.restore(JSON.parse(JSON.stringify(ws.snapshot())), async () => bytes(1, 2))
+    back.restore(JSON.parse(JSON.stringify(ws.snapshot())))
     const restored = back.topics[0]
     expect([restored.scope, restored.conventions]).toEqual([' Exam in TMA4100 ', 'j is the imaginary unit'])
     expect(askRequest(restored)).toMatchObject({ scope: 'Exam in TMA4100', conventions: 'j is the imaginary unit' })
@@ -935,7 +961,7 @@ describe('Workspace saving', () => {
     const old = JSON.parse(JSON.stringify(ws.snapshot()))
     old.topics[0].purpose = 'Exam in December'
     const back = new Workspace()
-    await back.restore(old, async () => bytes(1, 2))
+    back.restore(old)
     expect(back.topics[0].scope).toBe('Exam in December')
     expect(back.snapshot().topics[0]).toMatchObject({ scope: 'Exam in December' })
     expect(back.snapshot().topics[0]).not.toHaveProperty('purpose')
@@ -955,16 +981,15 @@ describe('Workspace saving', () => {
         },
       ],
     })
-    const load = async () => bytes(1)
     const back = new Workspace()
-    await back.restore(saved(['c', 'a']), load)
+    back.restore(saved(['c', 'a']))
     expect(back.activeTopic?.docIds).toEqual(['a', 'b', 'c'])
     expect(back.activeTopic?.openDocIds).toEqual(['c', 'a'])
     expect(back.activeDoc?.id).toBe('c')
     expect(JSON.parse(JSON.stringify(back.snapshot())).topics[0]).toMatchObject({ open: ['c', 'a'] })
 
     const old = new Workspace()
-    await old.restore(saved(), load)
+    old.restore(saved())
     expect(old.activeTopic?.openDocIds).toEqual(['a', 'b', 'c'])
   })
 
@@ -977,17 +1002,22 @@ describe('Workspace saving', () => {
     })
   })
 
-  it('brings a saved workspace back, reloading PDFs from the backend', async () => {
+  it('brings a saved workspace back, fetching a PDF from the backend once it is shown', async () => {
     const { ws, doc, topic } = await saved()
     const json = JSON.parse(JSON.stringify(ws.snapshot()))
     const loaded: string[] = []
     const back = new Workspace()
-    const docIds = await back.restore(json, async (id) => {
+    back.pdfApi = async (id) => {
       loaded.push(id)
       return bytes(1, 2)
-    })
-    expect(loaded).toEqual(['srv1'])
+    }
+    const docIds = back.restore(json)
     expect(docIds).toEqual([doc.id])
+    expect(loaded).toEqual([])
+    expect(back.activeDoc?.data).toBeUndefined()
+    await back.loadPdf(doc.id)
+    await back.loadPdf(doc.id)
+    expect(loaded).toEqual(['srv1'])
     expect(back.activeTopic).toMatchObject({
       name: 'book',
       docIds: [doc.id],
@@ -996,7 +1026,9 @@ describe('Workspace saving', () => {
     expect(chatOf(back.activeTopic!).mode).toBe('socratic')
     expect(back.activeDoc?.data).toEqual(bytes(1, 2))
     expect(back.pages[doc.id]).toBe(12)
-    expect(chatOf(back.activeTopic!).messages.map((m) => m.text)).toEqual(['', 'What do you see?', 'Half an ans'])
+    // An answer still arriving is saved without what had arrived, so it isn't saved for every piece.
+    expect(json.topics[0].chats[0].messages[2]).toEqual({ id: 'b', role: 'assistant', text: '', status: 'streaming' })
+    expect(chatOf(back.activeTopic!).messages.map((m) => m.text)).toEqual(['', 'What do you see?', 'The answer stopped when the app was closed.'])
     // The answer that was arriving when the app closed did not finish.
     expect(chatOf(back.activeTopic!).messages[2].status).toBe('error')
     expect(chatOf(back.activeTopic!).messages[0].context).toMatchObject({
@@ -1025,19 +1057,65 @@ describe('Workspace saving', () => {
     })
   })
 
-  it('drops tabs whose PDF is gone and keeps topics opened while loading', async () => {
-    const { ws } = await saved()
+  it('keeps a tab whose PDF cannot be fetched, says why, and tries again when asked', async () => {
+    const { ws, doc } = await saved()
     const json = JSON.parse(JSON.stringify(ws.snapshot()))
     const back = new Workspace()
     back.addDoc('meanwhile.pdf', bytes(9))
-    await back.restore(json, async () => {
-      throw new Error('404')
-    })
+    back.pdfApi = async () => {
+      throw new Error('The backend returned an error (503). Is it running?')
+    }
+    back.restore(json)
+    await back.loadPdf(doc.id)
     expect(back.topics.map((t) => [t.name, t.docIds.length])).toEqual([
-      ['book', 0],
+      ['book', 1],
       ['meanwhile', 1],
     ])
     expect(back.activeTopic?.name).toBe('meanwhile')
+    expect(back.pdfErrors[doc.id]).toContain('Could not load book.pdf')
+    // Saving now keeps the tab.
+    expect(back.snapshot().topics[0].docs).toEqual(json.topics[0].docs)
+    back.pdfApi = async () => bytes(1, 2)
+    back.retryPdf(doc.id)
+    await vi.waitFor(() => expect(back.docs[doc.id].data).toEqual(bytes(1, 2)))
+    expect(back.pdfErrors[doc.id]).toBeUndefined()
+  })
+
+  it('keeps a PDF that could not be shown in its topic', async () => {
+    const { ws, doc, topic } = await saved()
+    ws.pdfFailed(doc.id, 'Could not show book.pdf.')
+    expect(topic.docIds).toEqual([doc.id])
+    expect(ws.pdfErrors[doc.id]).toBe('Could not show book.pdf.')
+  })
+
+  it('adding a saved PDF again before it was shown goes back to its tab', async () => {
+    const { ws, doc } = await saved()
+    const back = new Workspace()
+    back.restore(JSON.parse(JSON.stringify(ws.snapshot())))
+    const again = back.addDoc('book copy.pdf', bytes(1, 2))
+    await back.index(again.id, { upload: async () => ready('srv1'), status: async () => ready('srv1') })
+    expect(back.activeTopic?.docIds).toEqual([doc.id])
+    expect(back.activeTopic?.activeDocId).toBe(doc.id)
+    expect(back.docs[again.id]).toBeUndefined()
+  })
+
+  it('tries indexing again when asked after it failed', async () => {
+    const { ws, doc } = await saved()
+    ws.indexing[doc.id] = { ...ws.indexing[doc.id], status: 'error', error: 'Rate limited' }
+    const calls: string[] = []
+    await ws.retryIndex(doc.id, {
+      upload: async () => ready('srv1'),
+      status: async (id) => {
+        calls.push(`status ${id}`)
+        return ready(id)
+      },
+      retry: async (id) => {
+        calls.push(`retry ${id}`)
+        return { ...ready(id), status: 'queued' }
+      },
+    })
+    expect(calls).toEqual(['retry srv1', 'status srv1'])
+    expect(ws.indexing[doc.id]).toMatchObject({ status: 'ready', error: undefined })
   })
 
   it('saves quizzes with their answers, and a note still being written comes back as failed', async () => {
@@ -1051,7 +1129,7 @@ describe('Workspace saving', () => {
       quiz: { ...structuredClone(written), picked: [0, 1], reviewing: 'writing' },
     })
     const back = new Workspace()
-    await back.restore(JSON.parse(JSON.stringify(ws.snapshot())), async () => bytes(1))
+    back.restore(JSON.parse(JSON.stringify(ws.snapshot())))
     expect(chatOf(back.activeTopic!).messages.at(-1)!.quiz).toEqual({ ...written, picked: [0, 1], reviewing: 'failed' })
   })
 
@@ -1062,7 +1140,7 @@ describe('Workspace saving', () => {
       titled.push(request.about.text)
       return 'Limits'
     }
-    await back.restore(
+    back.restore(
       {
         version: 1,
         topics: [
@@ -1078,7 +1156,6 @@ describe('Workspace saving', () => {
           },
         ],
       },
-      async () => bytes(),
     )
     const topic = back.activeTopic!
     expect(topic.chats).toHaveLength(1)
@@ -1100,8 +1177,85 @@ describe('Workspace saving', () => {
 
   it('ignores something that is not a saved workspace', async () => {
     const back = new Workspace()
-    expect(await back.restore({}, async () => bytes())).toEqual([])
+    expect(back.restore({})).toEqual([])
     expect(back.topics).toEqual([])
+  })
+})
+
+describe('Workspace deleting sources', () => {
+  const ready = (id: string): IndexStatus => ({ id, status: 'ready', pages_done: 1, page_count: 1 })
+  const at = (id: string) => ({ upload: async () => ready(id), status: async () => ready(id) })
+
+  /** A PDF the backend knows as `serverId`, added to a new topic. */
+  async function added(ws: Workspace, topic: string, serverId: string) {
+    ws.createTopic(topic)
+    const doc = ws.addDoc(`${serverId}.pdf`, bytes(serverId.length, 7))
+    await ws.index(doc.id, at(serverId))
+    return doc
+  }
+
+  it('releases a removed PDF for the next save to delete, once', async () => {
+    const ws = new Workspace()
+    const released = vi.fn()
+    ws.onReleased = released
+    const doc = await added(ws, 'Calculus', 'srv1')
+    ws.removeDoc(doc.id)
+    expect(released).toHaveBeenCalledOnce()
+    expect(ws.takeReleased()).toEqual(['srv1'])
+    expect(ws.takeReleased()).toEqual([])
+  })
+
+  it('keeps a PDF that another topic still has, and says which', async () => {
+    const ws = new Workspace()
+    const first = await added(ws, 'Calculus', 'srv1')
+    const second = await added(ws, 'Exam', 'srv1')
+    expect(ws.otherTopicsWith(second.id).map((t) => t.name)).toEqual(['Calculus'])
+    ws.removeDoc(second.id)
+    expect(ws.takeReleased()).toEqual([])
+    expect(ws.topicOf(first.id)?.name).toBe('Calculus')
+    ws.removeDoc(first.id)
+    expect(ws.takeReleased()).toEqual(['srv1'])
+  })
+
+  it('releases the PDFs of a deleted topic that no other topic has', async () => {
+    const ws = new Workspace()
+    await added(ws, 'Calculus', 'shared')
+    const exam = ws.topics.length
+    await added(ws, 'Exam', 'shared')
+    const doc = ws.addDoc('own.pdf', bytes(9, 9))
+    await ws.index(doc.id, at('own'))
+    ws.deleteTopic(ws.topics[exam].id)
+    expect(ws.takeReleased()).toEqual(['own'])
+  })
+
+  it('does not release a PDF that was added again before the save', async () => {
+    const ws = new Workspace()
+    const doc = await added(ws, 'Calculus', 'srv1')
+    ws.removeDoc(doc.id)
+    await added(ws, 'Exam', 'srv1')
+    expect(ws.takeReleased()).toEqual([])
+  })
+
+  it('releases a PDF removed while it was still uploading', async () => {
+    const ws = new Workspace()
+    ws.createTopic('Calculus')
+    const doc = ws.addDoc('slow.pdf', bytes(1))
+    let finish!: (s: IndexStatus) => void
+    const indexing = ws.index(doc.id, { upload: () => new Promise((resolve) => (finish = resolve)), status: async () => ready('slow') })
+    ws.removeDoc(doc.id)
+    expect(ws.takeReleased()).toEqual([])
+    finish(ready('slow'))
+    await indexing
+    expect(ws.takeReleased()).toEqual(['slow'])
+  })
+
+  it('releases again what a save could not delete, unless it is back in a topic', async () => {
+    const ws = new Workspace()
+    await added(ws, 'Calculus', 'kept')
+    ws.rerelease(['gone', 'kept'])
+    expect(ws.hasReleased()).toBe(true)
+    expect(ws.takeReleased()).toEqual(['gone'])
+    expect(ws.hasReleased()).toBe(false)
   })
 })
 

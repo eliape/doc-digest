@@ -245,7 +245,7 @@ async def test_haiku_adds_new_notes_and_rewrites_the_ones_it_updates(tmp_path) -
 
 async def test_a_question_waits_for_notes_being_written(tmp_path) -> None:
     registers = Registers(tmp_path)
-    lock = registers.lock("t1")
+    lock = registers.noting("t1")
     await lock.acquire()
 
     async def write_then_release():
@@ -257,6 +257,23 @@ async def test_a_question_waits_for_notes_being_written(tmp_path) -> None:
     register = await registers.settled("t1")
     await writer
     assert [n.id for n in register.notes] == ["n1"]
+
+
+async def test_a_question_does_not_wait_for_a_tidy(tmp_path) -> None:
+    registers = Registers(tmp_path)
+    registers.save("t1", Register(notes=[note()]))
+    async with registers.lock("t1"):
+        # The register is locked for a tidy, but no notes are being written.
+        register = await asyncio.wait_for(registers.settled("t1"), 1)
+    assert [n.id for n in register.notes] == ["n1"]
+
+
+def test_an_unreadable_register_is_kept_aside_before_starting_again(tmp_path) -> None:
+    registers = Registers(tmp_path)
+    registers.path("t1").write_text("{not json")
+    assert registers.load("t1").notes == []
+    kept = list(tmp_path.glob("t1.unreadable-*.json"))
+    assert len(kept) == 1 and kept[0].read_text() == "{not json"
 
 
 def test_topic_ids_that_could_name_other_files_are_refused(tmp_path) -> None:

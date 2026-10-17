@@ -37,11 +37,14 @@ const inlineMath: TokenizerAndRendererExtension = {
 }
 
 // Links open in a new tab: following one in place would leave the app and lose the open PDFs.
+// Nothing in an answer may load from elsewhere: text in a PDF could get the model to write an
+// image or style whose address carries what it was shown (the reader's notes, the question).
 DOMPurify.addHook('afterSanitizeAttributes', (node) => {
   if (node.tagName === 'A' && node.getAttribute('href')) {
     node.setAttribute('target', '_blank')
     node.setAttribute('rel', 'noopener noreferrer')
   }
+  if (/url\s*\(/i.test(node.getAttribute('style') ?? '')) node.removeAttribute('style')
 })
 
 const marked = new Marked({ gfm: true, breaks: true, extensions: [blockMath, inlineMath] })
@@ -64,7 +67,12 @@ export type CitableDocs = {
 export function renderMarkdown(source: string, docs?: CitableDocs): string {
   const html = marked.parse(source, { async: false })
   // KaTeX's MathML copy (for screen readers and copying) keeps the LaTeX in <annotation>.
-  const options = { ADD_TAGS: ['semantics', 'annotation'], ADD_ATTR: ['target', 'encoding'] }
+  const options = {
+    ADD_TAGS: ['semantics', 'annotation'],
+    ADD_ATTR: ['target', 'encoding'],
+    FORBID_TAGS: ['img', 'image', 'video', 'audio', 'source', 'picture', 'link', 'style'],
+    FORBID_ATTR: ['srcset', 'background', 'poster'],
+  }
   if (!docs?.names.length) return DOMPurify.sanitize(html, options)
   const root = document.createElement('div')
   root.append(DOMPurify.sanitize(html, { ...options, RETURN_DOM_FRAGMENT: true }))

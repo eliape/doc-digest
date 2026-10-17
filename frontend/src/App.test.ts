@@ -8,8 +8,9 @@ vi.mock('./lib/pdfjs', () => ({ loadPdfjs: () => new Promise(() => {}) }))
 
 /** A backend with nothing saved that is otherwise unreachable, unless a test stands in its own. */
 function offline() {
-  return vi.fn(async (url: string) => {
+  return vi.fn(async (url: string, init?: RequestInit) => {
     if (url === '/api/workspace') return new Response('{}')
+    if (url.startsWith('/api/workspace?') && init?.method === 'PUT') return new Response('{"status": "saved", "revision": 1}')
     throw new Error('offline')
   })
 }
@@ -54,6 +55,137 @@ async function leftClick(target: Element, clientX: number, clientY: number) {
   await fireEvent.pointerDown(target, { button: 0, clientX, clientY, isPrimary: true })
   await fireEvent.pointerUp(target, { button: 0, clientX, clientY })
 }
+
+describe('saving', () => {
+  /** A backend with one saved topic at revision 5 that answers saves with `answer`. */
+  function backend(answer: (url: string) => Response) {
+    const saves: string[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url === '/api/workspace') {
+          return new Response(JSON.stringify({ version: 1, topics: [{ id: 't', name: 'Saved', docs: [], chats: [] }], revision: 5 }))
+        }
+        if (url.startsWith('/api/workspace?') && init?.method === 'PUT') {
+          saves.push(url)
+          return answer(url)
+        }
+        throw new Error('offline')
+      }),
+    )
+    return saves
+  }
+
+  it('says which revision each save builds on, and which tab sent it', async () => {
+    let revision = 5
+    const saves = backend(() => new Response(JSON.stringify({ status: 'saved', revision: ++revision })))
+    render(App)
+    await screen.findByText('Saved')
+    await fireEvent.click(screen.getByRole('button', { name: 'New topic' }))
+    await waitFor(() => expect(saves).toHaveLength(1), { timeout: 2000 })
+    expect(saves[0]).toMatch(/^\/api\/workspace\?base=5&writer=[\w-]+$/)
+    await fireEvent.keyDown(screen.getByRole('textbox', { name: 'Topic name' }), { key: 'Escape' })
+    await waitFor(() => expect(saves).toHaveLength(2), { timeout: 2000 })
+    expect(saves[1]).toContain('base=6&')
+    expect(saves[1].split('writer=')[1]).toBe(saves[0].split('writer=')[1])
+  })
+
+  it('stops saving and asks for a reload once another tab has saved', async () => {
+    const saves = backend(() => new Response(JSON.stringify({ detail: 'Saved from another tab.' }), { status: 409 }))
+    render(App)
+    await screen.findByText('Saved')
+    await fireEvent.click(screen.getByRole('button', { name: 'New topic' }))
+    expect(await screen.findByText(/changed in another tab/, {}, { timeout: 2000 })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Reload' })).toBeInTheDocument()
+    await fireEvent.keyDown(screen.getByRole('textbox', { name: 'Topic name' }), { key: 'Escape' })
+    await new Promise((resolve) => setTimeout(resolve, 700))
+    expect(saves).toHaveLength(1)
+  })
+
+  it('deletes a source from one topic only, and its files once no topic has it', async () => {
+    const saves: string[] = []
+    const doc = (id: string, name: string, serverId: string) => ({ id, name, serverId })
+    const saved = {
+      version: 1,
+      activeTopicId: 'b',
+      topics: [
+        { id: 'a', name: 'Calculus', docs: [doc('d1', 'shared.pdf', 'shared')], chats: [] },
+        { id: 'b', name: 'Exam', docs: [doc('d2', 'shared.pdf', 'shared'), doc('d3', 'own.pdf', 'own')], sourcesOpen: true, chats: [] },
+      ],
+      revision: 1,
+    }
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url === '/api/workspace') return new Response(JSON.stringify(saved))
+        if (url.startsWith('/api/workspace?') && init?.method === 'PUT') {
+          saves.push(url)
+          const deleted = new URL(url, 'http://localhost').searchParams.getAll('release')
+          return new Response(JSON.stringify({ status: 'saved', revision: saves.length + 1, deleted, later: [] }))
+        }
+        const index = url.match(/^\/api\/docs\/(\w+)\/index$/)
+        if (index) return new Response(JSON.stringify({ id: index[1], status: 'ready', pages_done: 1, page_count: 1 }))
+        throw new Error('offline')
+      }),
+    )
+    vi.stubGlobal('confirm', vi.fn().mockReturnValue(true))
+    render(App)
+    const sidebar = within(screen.getByRole('complementary', { name: 'Topics' }))
+
+    await fireEvent.click(await sidebar.findByRole('button', { name: 'Actions for shared.pdf' }))
+    await fireEvent.click(sidebar.getByRole('menuitem', { name: 'Delete' }))
+    expect(confirm).toHaveBeenCalledWith('Delete “shared.pdf” from this topic? The chat will no longer draw on it. It stays in “Calculus”.')
+    await waitFor(() => expect(saves).toHaveLength(1), { timeout: 2000 })
+    expect(saves[0]).not.toContain('release=')
+
+    await fireEvent.click(sidebar.getByRole('button', { name: 'Actions for own.pdf' }))
+    await fireEvent.click(sidebar.getByRole('menuitem', { name: 'Delete' }))
+    expect(confirm).toHaveBeenLastCalledWith('Delete “own.pdf” from this topic? The chat will no longer draw on it.')
+    await waitFor(() => expect(saves).toHaveLength(2), { timeout: 2000 })
+    expect(saves[1]).toContain('&release=own')
+    expect(saves[1]).not.toContain('shared')
+  })
+
+  it('asks again later to delete a PDF the backend kept because it was just added', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      const saves: string[] = []
+      const saved = {
+        version: 1,
+        activeTopicId: 'b',
+        topics: [{ id: 'b', name: 'Exam', docs: [{ id: 'd3', name: 'own.pdf', serverId: 'own' }], sourcesOpen: true, chats: [] }],
+        revision: 1,
+      }
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (url: string, init?: RequestInit) => {
+          if (url === '/api/workspace') return new Response(JSON.stringify(saved))
+          if (url.startsWith('/api/workspace?') && init?.method === 'PUT') {
+            saves.push(url)
+            const later = saves.length === 1 ? ['own'] : []
+            return new Response(JSON.stringify({ status: 'saved', revision: saves.length + 1, deleted: [], later }))
+          }
+          if (url === '/api/docs/own/index') return new Response(JSON.stringify({ id: 'own', status: 'ready', pages_done: 1, page_count: 1 }))
+          throw new Error('offline')
+        }),
+      )
+      vi.stubGlobal('confirm', vi.fn().mockReturnValue(true))
+      render(App)
+      const sidebar = within(screen.getByRole('complementary', { name: 'Topics' }))
+      await fireEvent.click(await sidebar.findByRole('button', { name: 'Actions for own.pdf' }))
+      await fireEvent.click(sidebar.getByRole('menuitem', { name: 'Delete' }))
+      await vi.advanceTimersByTimeAsync(600)
+      expect(saves).toHaveLength(1)
+      expect(saves[0]).toContain('release=own')
+      await vi.advanceTimersByTimeAsync(31_000)
+      expect(saves).toHaveLength(2)
+      expect(saves[1]).toContain('release=own')
+      expect(saves[1]).toContain('base=2&')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
 
 describe('App', () => {
   it('has no header: the title lives in the sidebar and the backend status is gone', () => {

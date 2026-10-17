@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte'
-  import { fetchIndexSections, fetchPdf, fetchSavedWorkspace, saveWorkspace } from './lib/api'
+  import { BackendError, fetchIndexSections, fetchSavedWorkspace, saveWorkspace } from './lib/api'
   import { chatReserve } from './lib/chatWidth'
   import ChatPanel from './lib/ChatPanel.svelte'
   import ContextMenu, { type MenuItem } from './lib/ContextMenu.svelte'
@@ -27,10 +27,18 @@
   // The topics, tabs and chats are saved on disk through the backend and come back on load.
   // Saving only starts once the saved ones are back, so a failed load can't overwrite them.
   let restored = $state(false)
+  // Each save says which revision it builds on and which tab sent it, so a tab working from an
+  // older copy than another tab saved since can't save over it (the backend refuses: 409).
+  let revision = 0
+  const writer = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+  // Set once another tab has saved since: this tab stops saving until it is reloaded.
+  let staleTab = $state(false)
 
   onMount(async () => {
     try {
-      const docIds = await workspace.restore(await fetchSavedWorkspace(), fetchPdf)
+      const saved = await fetchSavedWorkspace()
+      revision = typeof saved.revision === 'number' ? saved.revision : 0
+      const docIds = workspace.restore(saved)
       for (const id of docIds) workspace.index(id)
       restored = true
     } catch {
@@ -39,20 +47,65 @@
   })
 
   let unsaved: string | undefined
+  // What the last save sent, to send again when there is nothing new but PDFs to delete.
+  let lastSaved: string | undefined
   let saveTimer: ReturnType<typeof setTimeout> | undefined
+  let laterTimer: ReturnType<typeof setTimeout> | undefined
+  let saving = false
+  // Browsers drop a request sent as the page closes (keepalive) if its body is over 64 KB.
+  const KEEPALIVE_LIMIT = 60_000
+  // The backend keeps a PDF uploaded in the last 30 s; ask again after that.
+  const DELETE_LATER_MS = 31_000
 
-  function saveNow(keepalive = false) {
+  /**
+   * Send the latest changes, with the PDFs taken out of every topic since, for the backend to
+   * delete. One save is sent at a time, so each builds on the revision the last one returned;
+   * when the page is closing, it goes at once.
+   */
+  function saveNow(closing = false) {
     clearTimeout(saveTimer)
-    if (unsaved === undefined) return
-    const json = unsaved
+    if (staleTab || (saving && !closing)) return
+    const json = unsaved ?? (workspace.hasReleased() ? lastSaved : undefined)
+    if (json === undefined) return
     unsaved = undefined
-    saveWorkspace(json, fetch, keepalive).catch(() => {
-      unsaved ??= json
-      error = 'Could not save your topics. Is the backend running?'
-    })
+    saving = true
+    const release = workspace.takeReleased()
+    const keepalive = closing && json.length < KEEPALIVE_LIMIT
+    saveWorkspace(json, { base: revision, writer }, { keepalive, release })
+      .then((saved) => {
+        revision = Math.max(revision, saved.revision)
+        lastSaved = json
+        if (saved.later.length) {
+          workspace.rerelease(saved.later)
+          clearTimeout(laterTimer)
+          laterTimer = setTimeout(saveNow, DELETE_LATER_MS)
+        }
+        if (error.startsWith('Could not save')) error = ''
+      })
+      .catch((failure) => {
+        // A tab that has gone stale deletes nothing: the other tab's topics may still have them.
+        if (failure instanceof BackendError && failure.status === 409) {
+          staleTab = true
+          return
+        }
+        workspace.rerelease(release)
+        unsaved ??= json
+        error = 'Could not save your topics. Is the backend running?'
+      })
+      .finally(() => {
+        saving = false
+        if (unsaved !== undefined && !staleTab) saveTimer = setTimeout(saveNow, 500)
+      })
   }
 
-  // Save shortly after each change, and right away when the page is closed.
+  // A PDF taken out of every topic is deleted with a save, even one with nothing else new to save.
+  workspace.onReleased = () => {
+    if (!restored) return
+    clearTimeout(saveTimer)
+    saveTimer = setTimeout(saveNow, 500)
+  }
+
+  // Save shortly after each change, and right away when the page is hidden or closed.
   $effect(() => {
     const json = JSON.stringify(workspace.snapshot())
     if (!restored) return
@@ -132,6 +185,11 @@
 
   $effect(() => {
     if (doc && !mounted.includes(doc.id)) mounted.push(doc.id)
+  })
+
+  // A tab brought back from the saved workspace fetches its PDF once it is shown.
+  $effect(() => {
+    for (const id of mounted) if (!workspace.docs[id]?.data) void workspace.loadPdf(id)
   })
 
   // Unmount the panes of closed tabs and deleted topics. A reopened tab starts fresh at its last page.
@@ -534,6 +592,12 @@
 </script>
 
 <svelte:window onkeydown={onKeydown} onpagehide={() => saveNow(true)} />
+<svelte:document
+  onvisibilitychange={() => {
+    // Hidden pages usually keep running, so this save is not limited like one sent on close.
+    if (document.visibilityState === 'hidden') saveNow()
+  }}
+/>
 
 <div
   class="app"
@@ -605,6 +669,13 @@
       }}
     />
 
+    {#if staleTab}
+      <p class="error" role="alert">
+        Your topics were changed in another tab, so this tab stopped saving. Reload it to continue; changes made here since
+        are not saved.
+        <button type="button" class="reload" onclick={() => location.reload()}>Reload</button>
+      </p>
+    {/if}
     {#if error}
       <p class="error" role="alert">{error}</p>
     {/if}
@@ -654,10 +725,12 @@
                 title={tab.name}
                 onclick={() => workspace.selectDoc(id)}>{tab.name}</button
               >
-              {#if indexLabel(id)}
-                <span class="index-status" class:failed={workspace.indexing[id]?.status === 'error'} title={indexTitle(id)}
-                  >{indexLabel(id)}</span
+              {#if workspace.indexing[id]?.status === 'error'}
+                <button type="button" class="index-status failed" title={`${indexTitle(id)} Click to try again.`} onclick={() => workspace.retryIndex(id)}
+                  >{indexLabel(id)}</button
                 >
+              {:else if indexLabel(id)}
+                <span class="index-status" title={indexTitle(id)}>{indexLabel(id)}</span>
               {/if}
               <button type="button" class="close" aria-label={`Close ${tab.name}`} onclick={() => workspace.closeDoc(id)}>
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
@@ -703,14 +776,31 @@
     <main class="stage">
       {#each mounted as id (id)}
         {@const d = workspace.docs[id]}
-        {#if d}
+        {@const failed = workspace.pdfErrors[id]}
+        {#if d && (failed || !d.data)}
+          <div class="tabpanel" class:active={id === doc?.id} inert={id !== doc?.id} role="tabpanel" aria-label={d.name}>
+            <div class="empty">
+              {#if failed}
+                <p>{failed}</p>
+                <button type="button" onclick={() => workspace.retryPdf(id)}>Try again</button>
+                <p class="hint">The PDF stays in the topic. To take it out, delete it from the topic's sources.</p>
+              {:else}
+                <p class="hint">Opening {d.name}…</p>
+              {/if}
+            </div>
+          </div>
+        {:else if d?.data}
           <div class="tabpanel" class:active={id === doc?.id} inert={id !== doc?.id} role="tabpanel" aria-label={d.name}>
             <DocPane
               bind:this={panes[id]}
               data={d.data}
               startPage={workspace.pages[id]}
-              onpagechange={(page) => (workspace.pages[id] = page)}
-              onreadingspot={(spot) => (reading[id] = spot)}
+              onpagechange={(page) => {
+                workspace.pages[id] = page
+              }}
+              onreadingspot={(spot) => {
+                reading[id] = spot
+              }}
               active={id === doc?.id}
               controlsTarget={controlsEl}
               marker={markerFor(id)}
@@ -726,8 +816,14 @@
                 if (topic) workspace.clearContext(topic.id)
               }}
               onerror={() => {
-                error = `Could not open ${d.name}. Is it a valid PDF?`
-                workspace.removeDoc(id)
+                // A PDF the backend has (and may have indexed) stays in its topic; one that never got
+                // that far, like a file that isn't a PDF after all, is taken out again.
+                if (workspace.indexing[id]?.serverId) {
+                  workspace.pdfFailed(id, `Could not show ${d.name}. It may be damaged or password-protected.`)
+                } else {
+                  error = `Could not open ${d.name}. Is it a valid PDF?`
+                  workspace.removeDoc(id)
+                }
               }}
             />
           </div>
@@ -931,6 +1027,19 @@
   }
   .index-status.failed {
     color: #b35900;
+    background: none;
+    border: none;
+    padding: 0;
+    font: inherit;
+    font-size: 0.7rem;
+    cursor: pointer;
+  }
+  .index-status.failed:hover {
+    text-decoration: underline;
+  }
+
+  .reload {
+    margin-left: 0.5rem;
   }
 
   .add-tab {

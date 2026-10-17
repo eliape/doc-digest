@@ -90,13 +90,23 @@ export async function* fetchAnswer(
   }
 }
 
+/** A failed request, with the reason the backend gives and its HTTP status. */
+export class BackendError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message)
+  }
+}
+
 /** The reason the backend gives for a failed request, as an Error. */
-export async function backendError(res: Response): Promise<Error> {
+export async function backendError(res: Response): Promise<BackendError> {
   const detail = await res
     .json()
     .then((body: { detail?: unknown }) => (typeof body.detail === 'string' ? body.detail : undefined))
     .catch(() => undefined)
-  return new Error(detail ?? `The backend returned an error (${res.status}). Is it running?`)
+  return new BackendError(detail ?? `The backend returned an error (${res.status}). Is it running?`, res.status)
 }
 
 /** How far the backend has got with indexing a PDF. */
@@ -115,6 +125,13 @@ export async function uploadDoc(name: string, data: Uint8Array, fetchFn: typeof 
     headers: { 'Content-Type': 'application/pdf' },
     body: data as BodyInit,
   })
+  if (!res.ok) throw await backendError(res)
+  return (await res.json()) as IndexStatus
+}
+
+/** Have the backend try indexing a PDF again after it failed. */
+export async function retryIndex(id: string, fetchFn: typeof fetch = fetch): Promise<IndexStatus> {
+  const res = await fetchFn(`/api/docs/${encodeURIComponent(id)}/index`, { method: 'POST' })
   if (!res.ok) throw await backendError(res)
   return (await res.json()) as IndexStatus
 }
@@ -146,22 +163,45 @@ export async function fetchPdf(id: string, fetchFn: typeof fetch = fetch): Promi
   return new Uint8Array(await res.arrayBuffer())
 }
 
-/** The workspace saved last time, or an empty object before anything was saved. */
-export async function fetchSavedWorkspace(fetchFn: typeof fetch = fetch): Promise<unknown> {
+/**
+ * The workspace saved last time (an empty object before anything was saved), with the
+ * revision the next save is based on.
+ */
+export async function fetchSavedWorkspace(fetchFn: typeof fetch = fetch): Promise<{ revision?: number } & Record<string, unknown>> {
   const res = await fetchFn('/api/workspace')
   if (!res.ok) throw await backendError(res)
   return res.json()
 }
 
-/** Save the workspace (already turned into JSON) on disk, replacing what was saved. */
-export async function saveWorkspace(json: string, fetchFn: typeof fetch = fetch, keepalive = false): Promise<void> {
-  const res = await fetchFn('/api/workspace', {
+/** Where a save comes from: the revision the tab last loaded or saved, and the tab's id. */
+export type SaveFrom = { base: number; writer: string }
+
+/** What a save did: the workspace's new revision, and which released PDFs it deleted. */
+export type Saved = { revision: number; deleted: string[]; later: string[] }
+
+/**
+ * Save the workspace (already turned into JSON) on disk, replacing what was saved. Fails with
+ * status 409 when another tab saved since `from.base`. `release` names PDFs (backend ids) taken
+ * out of a topic since the last save: the backend deletes those no topic has any more, except
+ * ones uploaded moments ago, which it returns in `later` to send again.
+ */
+export async function saveWorkspace(
+  json: string,
+  from: SaveFrom,
+  { keepalive = false, release = [] }: { keepalive?: boolean; release?: string[] } = {},
+  fetchFn: typeof fetch = fetch,
+): Promise<Saved> {
+  const query = new URLSearchParams({ base: String(from.base), writer: from.writer })
+  for (const id of release) query.append('release', id)
+  const res = await fetchFn(`/api/workspace?${query}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: json,
     keepalive,
   })
   if (!res.ok) throw await backendError(res)
+  const saved = (await res.json()) as Partial<Saved>
+  return { revision: saved.revision ?? from.base, deleted: saved.deleted ?? [], later: saved.later ?? [] }
 }
 
 /** Have the model write a multiple-choice quiz for the newest turn, which asks for one. */

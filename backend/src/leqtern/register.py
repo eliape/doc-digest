@@ -57,7 +57,9 @@ WRITER_NOTES = 60
 ANSWER_HEAD = 1200
 ANSWER_TAIL = 300
 # How long a question waits for notes still being written before going without them.
-WAIT_SECONDS = 20.0
+WAIT_SECONDS = 10.0
+# Discussions whose read turns are remembered; the oldest are forgotten after this many.
+MAX_SEEN = 300
 # A struggle that came up in this many discussions keeps coming back: it is never tidied away,
 # and it goes with follow-up questions that touch on it.
 RECURRING = 2
@@ -153,6 +155,7 @@ class Registers:
     def __init__(self, root: Path) -> None:
         self.root = root
         self._locks: dict[str, asyncio.Lock] = {}
+        self._noting: dict[str, asyncio.Lock] = {}
 
     def path(self, topic_id: str) -> Path:
         if not valid_topic_id(topic_id):
@@ -160,8 +163,15 @@ class Registers:
         return self.root / f"{topic_id}.json"
 
     def lock(self, topic_id: str) -> asyncio.Lock:
-        """Held while a topic's notes are being written, so questions can wait for them."""
+        """Held while a topic's register is being changed (notes written, or a tidy)."""
         return self._locks.setdefault(topic_id, asyncio.Lock())
+
+    def noting(self, topic_id: str) -> asyncio.Lock:
+        """
+        Held while new notes are being written, inside `lock`, so questions can wait for them.
+        A tidy only reorganises notes, so questions don't wait for it.
+        """
+        return self._noting.setdefault(topic_id, asyncio.Lock())
 
     def load(self, topic_id: str) -> Register:
         try:
@@ -169,7 +179,14 @@ class Registers:
         except FileNotFoundError:
             return Register()
         except (ValidationError, json.JSONDecodeError):
-            logger.exception("Unreadable register for topic %s; starting it again", topic_id)
+            # Kept aside, so the next save can't overwrite the notes in it.
+            path = self.path(topic_id)
+            aside = path.with_name(f"{topic_id}.unreadable-{int(time.time())}.json")
+            logger.exception(
+                "Unreadable register for topic %s; kept as %s, starting it again", topic_id, aside
+            )
+            if not aside.exists():
+                shutil.copyfile(path, aside)
             return Register()
 
     def save(self, topic_id: str, register: Register) -> None:
@@ -192,11 +209,10 @@ class Registers:
     def delete(self, topic_id: str) -> None:
         self.path(topic_id).unlink(missing_ok=True)
         self.backup_path(topic_id).unlink(missing_ok=True)
-        self._locks.pop(topic_id, None)
 
     async def settled(self, topic_id: str) -> Register:
         """The topic's register once notes being written for it are done, or after a wait."""
-        lock = self.lock(topic_id)
+        lock = self.noting(topic_id)
         if lock.locked():
             try:
                 await asyncio.wait_for(lock.acquire(), WAIT_SECONDS)
@@ -617,7 +633,10 @@ async def write_notes(
     changed = apply(
         register, parsed.notes if parsed else [], request.chat_id, doc_names, time.time()
     )
+    register.seen.pop(request.chat_id, None)
     register.seen[request.chat_id] = keys
+    for chat_id in list(register.seen)[:-MAX_SEEN]:
+        del register.seen[chat_id]
     return changed
 
 

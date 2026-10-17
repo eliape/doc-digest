@@ -8,8 +8,9 @@ vi.mock('./lib/pdfjs', () => ({ loadPdfjs: () => new Promise(() => {}) }))
 
 /** A backend with nothing saved that is otherwise unreachable, unless a test stands in its own. */
 function offline() {
-  return vi.fn(async (url: string) => {
+  return vi.fn(async (url: string, init?: RequestInit) => {
     if (url === '/api/workspace') return new Response('{}')
+    if (url.startsWith('/api/workspace?') && init?.method === 'PUT') return new Response('{"status": "saved", "revision": 1}')
     throw new Error('offline')
   })
 }
@@ -54,6 +55,53 @@ async function leftClick(target: Element, clientX: number, clientY: number) {
   await fireEvent.pointerDown(target, { button: 0, clientX, clientY, isPrimary: true })
   await fireEvent.pointerUp(target, { button: 0, clientX, clientY })
 }
+
+describe('saving', () => {
+  /** A backend with one saved topic at revision 5 that answers saves with `answer`. */
+  function backend(answer: (url: string) => Response) {
+    const saves: string[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url === '/api/workspace') {
+          return new Response(JSON.stringify({ version: 1, topics: [{ id: 't', name: 'Saved', docs: [], chats: [] }], revision: 5 }))
+        }
+        if (url.startsWith('/api/workspace?') && init?.method === 'PUT') {
+          saves.push(url)
+          return answer(url)
+        }
+        throw new Error('offline')
+      }),
+    )
+    return saves
+  }
+
+  it('says which revision each save builds on, and which tab sent it', async () => {
+    let revision = 5
+    const saves = backend(() => new Response(JSON.stringify({ status: 'saved', revision: ++revision })))
+    render(App)
+    await screen.findByText('Saved')
+    await fireEvent.click(screen.getByRole('button', { name: 'New topic' }))
+    await waitFor(() => expect(saves).toHaveLength(1), { timeout: 2000 })
+    expect(saves[0]).toMatch(/^\/api\/workspace\?base=5&writer=[\w-]+$/)
+    await fireEvent.keyDown(screen.getByRole('textbox', { name: 'Topic name' }), { key: 'Escape' })
+    await waitFor(() => expect(saves).toHaveLength(2), { timeout: 2000 })
+    expect(saves[1]).toContain('base=6&')
+    expect(saves[1].split('writer=')[1]).toBe(saves[0].split('writer=')[1])
+  })
+
+  it('stops saving and asks for a reload once another tab has saved', async () => {
+    const saves = backend(() => new Response(JSON.stringify({ detail: 'Saved from another tab.' }), { status: 409 }))
+    render(App)
+    await screen.findByText('Saved')
+    await fireEvent.click(screen.getByRole('button', { name: 'New topic' }))
+    expect(await screen.findByText(/changed in another tab/, {}, { timeout: 2000 })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Reload' })).toBeInTheDocument()
+    await fireEvent.keyDown(screen.getByRole('textbox', { name: 'Topic name' }), { key: 'Escape' })
+    await new Promise((resolve) => setTimeout(resolve, 700))
+    expect(saves).toHaveLength(1)
+  })
+})
 
 describe('App', () => {
   it('has no header: the title lives in the sidebar and the backend status is gone', () => {

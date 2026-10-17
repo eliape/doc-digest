@@ -142,11 +142,12 @@ class Library:
     async def add(self, data: bytes, name: str) -> DocInfo:
         """Store a PDF (once, however often it is added) and read its pages."""
         doc_id = hashlib.sha256(data).hexdigest()[:16]
-        if doc_id in self._docs:
-            return self._docs[doc_id]
         folder = self.folder(doc_id)
-        folder.mkdir(parents=True, exist_ok=True)
         source = folder / "source.pdf"
+        # Read before (and still on disk, in case its folder was deleted meanwhile).
+        if doc_id in self._docs and source.is_file():
+            return self._docs[doc_id]
+        folder.mkdir(parents=True, exist_ok=True)
         if not source.exists():
             _write(source, data)
         doc = self._load(doc_id)

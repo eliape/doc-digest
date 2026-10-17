@@ -7,20 +7,25 @@ import {
   fetchAnswer,
   fetchChatTitle,
   fetchIndexStatus,
+  fetchPdf,
   fetchRecommendation,
   forgetRegister,
   type IndexStatus,
   noteDiscussion,
   type QuizRecord,
   type RecommendationRequest,
+  retryIndex,
   type TitleRequest,
   uploadDoc,
   type WrittenQuiz,
 } from './api'
 import type { PageContext } from './context'
 
-/** A PDF opened in a topic. Each one is a tab. */
-export type Doc = { id: string; name: string; data: Uint8Array }
+/**
+ * A PDF opened in a topic. Each one is a tab. `data` is the PDF itself. A tab brought back from the saved workspace gets it from the backend
+ * once it is shown (see loadPdf), so until then it has none.
+ */
+export type Doc = { id: string; name: string; data?: Uint8Array }
 
 /**
  * A quiz in the chat, with the reader's pick for each question (null until answered) and,
@@ -71,9 +76,14 @@ export type IndexState = {
 export type IndexApi = {
   upload: (name: string, data: Uint8Array) => Promise<IndexStatus>
   status: (serverId: string) => Promise<IndexStatus>
+  retry?: (serverId: string) => Promise<IndexStatus>
 }
 
-const realIndexApi: IndexApi = { upload: (name, data) => uploadDoc(name, data), status: (id) => fetchIndexStatus(id) }
+const realIndexApi: IndexApi = {
+  upload: (name, data) => uploadDoc(name, data),
+  status: (id) => fetchIndexStatus(id),
+  retry: (id) => retryIndex(id),
+}
 
 /** The backend calls quizzes use. Tests pass fakes. */
 export type QuizApi = {
@@ -233,6 +243,14 @@ export class Workspace {
   indexing = $state<Record<string, IndexState>>({})
   /** The page each tab was last on, so it opens there next time. */
   pages = $state<Record<string, number>>({})
+  /** Why a tab's PDF can't be shown (it could not be fetched or opened), by tab id. */
+  pdfErrors = $state<Record<string, string>>({})
+  /** Where saved tabs' PDFs come from. Tests swap in a fake. */
+  pdfApi: (serverId: string) => Promise<Uint8Array> = (id) => fetchPdf(id)
+  // Tabs whose PDF is being fetched.
+  private fetching = new Set<string>()
+  // Tabs whose indexing is being followed.
+  private following = new Set<string>()
   // Uploads still on their way, so a question can wait for its PDFs' ids.
   private uploads: Record<string, Promise<unknown>> = {}
   // Stops each topic's answer that is still arriving. Not state: nothing renders from it.
@@ -283,6 +301,7 @@ export class Workspace {
     for (const docId of topic.docIds) {
       delete this.indexing[docId]
       delete this.pages[docId]
+      delete this.pdfErrors[docId]
     }
     if (this.activeTopicId === id) {
       this.activeTopicId = (this.topics[index] ?? this.topics[index - 1])?.id
@@ -296,7 +315,8 @@ export class Workspace {
    */
   addDoc(name: string, data: Uint8Array): Doc {
     const topic = this.activeTopic ?? this.createTopic(topicNameFor(name))
-    const existing = topic.docIds.map((id) => this.docs[id]).find((d) => sameBytes(d.data, data))
+    // A tab not shown since a reload has no data yet; if it is this file, the upload finds it (see index).
+    const existing = topic.docIds.map((id) => this.docs[id]).find((d) => d.data && sameBytes(d.data, data))
     if (existing) {
       if (!topic.openDocIds.includes(existing.id)) topic.openDocIds.push(existing.id)
       topic.activeDocId = existing.id
@@ -316,19 +336,23 @@ export class Workspace {
    */
   async index(docId: string, api: IndexApi = realIndexApi, pollMs = 1500): Promise<void> {
     const doc = this.docs[docId]
-    if (!doc) return
+    if (!doc || this.following.has(docId)) return
     // A PDF reopened from the saved workspace is already on the backend: just follow it.
     const known = this.indexing[docId]?.serverId
-    this.indexing[docId] = { serverId: known, status: known ? 'queued' : 'uploading', pagesDone: 0, pageCount: 0 }
+    if (!known && !doc.data) return
+    this.following.add(docId)
+    // A known PDF keeps the status it has until the backend gives a new one.
+    if (!known) this.indexing[docId] = { status: 'uploading', pagesDone: 0, pageCount: 0 }
     const update = (s: IndexStatus) => {
       if (!(docId in this.docs)) return false
       this.indexing[docId] = { serverId: s.id, status: s.status, pagesDone: s.pages_done, pageCount: s.page_count, error: s.error }
       return s.status !== 'ready' && s.status !== 'error'
     }
     try {
-      const upload = known ? api.status(known) : api.upload(doc.name, doc.data)
+      const upload = known ? api.status(known) : api.upload(doc.name, doc.data!)
       this.uploads[docId] = upload.catch(() => {})
       let status = await upload
+      if (!known && this.sameAsSaved(docId, status.id)) return
       while (update(status)) {
         await new Promise((resolve) => setTimeout(resolve, pollMs))
         if (!(docId in this.docs)) return
@@ -341,7 +365,74 @@ export class Workspace {
       }
     } finally {
       delete this.uploads[docId]
+      this.following.delete(docId)
     }
+  }
+
+  /**
+   * An upload that turned out to be a PDF already in its topic (one not shown since a reload, so
+   * its bytes couldn't be compared): drop the new tab and show the one it already had.
+   */
+  private sameAsSaved(docId: string, serverId: string): boolean {
+    const topic = this.topicOf(docId)
+    const saved = topic?.docIds.find((id) => id !== docId && this.indexing[id]?.serverId === serverId)
+    if (!topic || !saved) return false
+    const wasActive = topic.activeDocId === docId
+    this.removeDoc(docId)
+    if (!topic.openDocIds.includes(saved)) topic.openDocIds.push(saved)
+    if (wasActive || !topic.activeDocId) topic.activeDocId = saved
+    return true
+  }
+
+  /** Index a PDF again after indexing failed, and follow it. */
+  async retryIndex(docId: string, api: IndexApi = realIndexApi): Promise<void> {
+    const serverId = this.indexing[docId]?.serverId
+    if (!serverId || this.indexing[docId]?.status !== 'error' || !api.retry) return
+    this.indexing[docId] = { ...this.indexing[docId], status: 'queued', error: undefined }
+    try {
+      await api.retry(serverId)
+    } catch (error) {
+      if (docId in this.docs) {
+        const message = error instanceof Error ? error.message : String(error)
+        this.indexing[docId] = { ...this.indexing[docId], status: 'error', error: message }
+      }
+      return
+    }
+    await this.index(docId, api)
+  }
+
+  /**
+   * Fetch a saved tab's PDF from the backend, once it is to be shown. If it can't be fetched,
+   * the tab stays in its topic with the reason in `pdfErrors`, and calling this again retries.
+   */
+  async loadPdf(docId: string): Promise<void> {
+    const doc = this.docs[docId]
+    const serverId = this.indexing[docId]?.serverId
+    if (!doc || doc.data || !serverId || this.fetching.has(docId)) return
+    this.fetching.add(docId)
+    delete this.pdfErrors[docId]
+    try {
+      const data = await this.pdfApi(serverId)
+      if (docId in this.docs) this.docs = { ...this.docs, [docId]: { ...this.docs[docId], data } }
+    } catch (error) {
+      if (docId in this.docs) {
+        const reason = error instanceof Error ? error.message : String(error)
+        this.pdfErrors[docId] = `Could not load ${doc.name} from the backend (${reason}).`
+      }
+    } finally {
+      this.fetching.delete(docId)
+    }
+  }
+
+  /** A PDF that could not be opened: show why in its tab, keeping it in its topic. */
+  pdfFailed(docId: string, reason: string) {
+    if (docId in this.docs) this.pdfErrors[docId] = reason
+  }
+
+  /** Try showing a tab's PDF again after it failed. */
+  retryPdf(docId: string) {
+    delete this.pdfErrors[docId]
+    void this.loadPdf(docId)
   }
 
   /**
@@ -470,6 +561,23 @@ export class Workspace {
   stop(topicId: string) {
     const topic = this.topics.find((t) => t.id === topicId)
     if (topic) this.answering.get(topic.chatId)?.abort(STOPPED)
+  }
+
+  /**
+   * Take a question whose answer failed back out of the open discussion, with the failed answer,
+   * and put it back in the box (with its spot and quote) to send again. Only the latest one.
+   */
+  retry(topicId: string, answerId: string): boolean {
+    const topic = this.topics.find((t) => t.id === topicId)
+    const chat = topic && chatOf(topic)
+    const answer = chat?.messages.at(-1)
+    const question = chat?.messages.at(-2)
+    if (!topic || !chat || answer?.id !== answerId || answer.status !== 'error' || question?.role !== 'user') return false
+    // The open page went with a question that had nothing attached; the retry takes the page it is on then.
+    const pointed = question.context?.point || question.context?.selection
+    const asked = { text: question.text, context: pointed ? question.context : undefined, quote: question.quote, mode: question.mode }
+    this.takeBack(topic, chat, asked, question, answer)
+    return true
   }
 
   /** Whether a discussion's latest answer is still arriving. */
@@ -630,6 +738,10 @@ export class Workspace {
       if (first) void this.nameChat(topic, chat)
       const uploading = topic.docIds.filter((id) => id in this.uploads).map((id) => this.uploads[id])
       if (uploading.length) await Promise.all(uploading)
+      // PDFs whose indexing failed: asking the backend again lets it retry once a while has passed.
+      for (const id of topic.docIds) {
+        if (this.indexing[id]?.status === 'error' && this.indexing[id]?.serverId) void this.index(id)
+      }
       const serverId = (id: string) => this.indexing[id]?.serverId
       const instructions = this.instructions.trim()
       const request = {
@@ -645,7 +757,10 @@ export class Workspace {
     } catch (error) {
       if (controller.signal.reason === STOPPED) return this.takeBack(topic, chat, asked, question, answer)
       answer.status = 'error'
-      answer.text = error instanceof Error ? error.message : String(error)
+      // What had arrived stays, with why the rest didn't.
+      const message = error instanceof Error ? error.message : String(error)
+      const arrived = answer.text.trim()
+      answer.text = arrived ? `${arrived}\n\n*${message}*` : message
     } finally {
       if (this.answering.get(chatId) === controller) this.answering.delete(chatId)
     }
@@ -776,6 +891,7 @@ export class Workspace {
     this.docs = omit(this.docs, [id])
     delete this.indexing[id]
     delete this.pages[id]
+    delete this.pdfErrors[id]
   }
 
   /**
@@ -814,23 +930,18 @@ export class Workspace {
   }
 
   /**
-   * Bring back a saved workspace. `loadPdf` fetches a tab's PDF from the backend; a tab
-   * whose PDF is gone is dropped. Topics opened while it loaded are kept, after the saved
-   * ones. Returns the tabs restored, to follow their indexing.
+   * Bring back a saved workspace. Tabs come back without their PDFs, which are fetched from
+   * the backend when they are shown (see loadPdf), so a PDF that can't be fetched never takes
+   * its tab out of the topic. Topics opened while it loaded are kept, after the saved ones.
+   * Returns the tabs restored, to follow their indexing.
    */
-  async restore(saved: unknown, loadPdf: (serverId: string) => Promise<Uint8Array>): Promise<string[]> {
+  restore(saved: unknown): string[] {
     if (!isSavedWorkspace(saved)) return []
-    const loaded = await Promise.all(
-      saved.topics
-        .flatMap((t) => t.docs)
-        .map(async (d) => [d, await loadPdf(d.serverId).catch(() => undefined)] as const),
-    )
     const docs: Record<string, Doc> = {}
     const indexing: Record<string, IndexState> = {}
     const pages: Record<string, number> = {}
-    for (const [d, data] of loaded) {
-      if (!data) continue
-      docs[d.id] = { id: d.id, name: d.name, data }
+    for (const d of saved.topics.flatMap((t) => t.docs)) {
+      docs[d.id] = { id: d.id, name: d.name }
       indexing[d.id] = { serverId: d.serverId, status: 'queued', pagesDone: 0, pageCount: 0 }
       if (d.page) pages[d.id] = d.page
     }
@@ -897,8 +1008,16 @@ function isSavedWorkspace(value: unknown): value is SavedWorkspace {
   return !!saved && saved.version === 1 && Array.isArray(saved.topics)
 }
 
-/** A message as saved: its spot without the page image and text, which only a new question sends. */
+/**
+ * A message as saved: its spot without the page image and text, which only a new question sends.
+ * An answer still arriving is saved without what has arrived (it comes back as stopped), so the
+ * workspace is not saved again for every piece of it.
+ */
 function savedMessage(message: ChatMessage): ChatMessage {
+  if (message.status === 'streaming') {
+    const { id, role, status, mode } = message
+    return { id, role, text: '', status, ...(mode && { mode }) }
+  }
   const { context, ...rest } = message
   if (!context) return { ...rest }
   const { pageImage: _image, imagePages: _pages, pageTexts: _texts, ...spot } = context
@@ -930,7 +1049,7 @@ export function askRequest(
   chat: Chat = chatOf(topic),
   nameOf: (docId: string) => string | undefined = () => undefined,
 ): AskRequest {
-  const turns = chat.messages.filter((m) => m.status !== 'streaming')
+  const turns = sendable(chat.messages)
   return {
     topic: topic.name,
     topic_id: topic.id,
@@ -961,11 +1080,16 @@ export function discussionRequest(
     ...(chat.title && { title: chat.title }),
     docs: topic.docIds.map(serverId).filter((id): id is string => !!id),
     ...docNames(topic, serverId, nameOf),
-    messages: chat.messages
-      .slice(chat.branch?.at ?? 0)
-      .filter((m) => m.status !== 'streaming')
-      .map((m) => ({ key: turnKey(m), ...requestTurn(m, false, serverId) })),
+    messages: sendable(chat.messages.slice(chat.branch?.at ?? 0)).map((m) => ({ key: turnKey(m), ...requestTurn(m, false, serverId) })),
   }
+}
+
+/**
+ * The messages the model sees: not an answer still arriving, and not a question whose answer
+ * failed, with that answer, so it never sees a question twice when the reader asks it again.
+ */
+function sendable(messages: ChatMessage[]): ChatMessage[] {
+  return messages.filter((m, i) => m.status !== 'streaming' && m.status !== 'error' && !(m.role === 'user' && messages[i + 1]?.status === 'error'))
 }
 
 /** The names the topic's PDFs have here, by backend id, for the request. Left out when none are known. */

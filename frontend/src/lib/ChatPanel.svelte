@@ -290,6 +290,11 @@
     else workspace.ask(topic.id)
   }
 
+  /** Ask a question whose answer failed again, with anything typed since added to it. */
+  function retry(answerId: string) {
+    if (topic && workspace.retry(topic.id, answerId)) send()
+  }
+
   function onComposerKeydown(event: KeyboardEvent) {
     // Enter sends, Shift+Enter starts a new line, as in most chat apps.
     if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
@@ -431,6 +436,11 @@
               <span class="text">{message.text}</span>
             {/if}
           </div>
+          {#if message.role === 'assistant' && message.status === 'error' && index === chat.messages.length - 1}
+            <div class="message-actions last">
+              <button type="button" class="retry" onclick={() => retry(message.id)}>Try again</button>
+            </div>
+          {/if}
           {#if message.role === 'assistant' && message.status === 'done'}
             <div class="message-actions" class:last={index === chat.messages.length - 1}>
               <button
@@ -975,6 +985,23 @@
     position: absolute;
     top: 0.125rem;
     left: 0;
+  }
+  .message-actions .retry {
+    position: absolute;
+    top: 0.25rem;
+    left: 0;
+    padding: 0.125rem 0.5rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: none;
+    color: var(--muted);
+    font: inherit;
+    font-size: 0.8rem;
+    cursor: pointer;
+  }
+  .message-actions .retry:hover {
+    background: var(--hover);
+    color: inherit;
   }
   .icon-button.small {
     width: 1.75rem;

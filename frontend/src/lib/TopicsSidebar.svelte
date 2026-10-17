@@ -1,6 +1,7 @@
 <script lang="ts">
   import { tick } from 'svelte'
   import { slide } from 'svelte/transition'
+  import { FLASHCARD_ICON } from './flashcards'
   import { marquee } from './marquee'
   import { chatOf, chatTitle, discussions, type Workspace } from './workspace.svelte'
 
@@ -18,9 +19,20 @@
     onupload?: () => void
     /** Called by Conventions and purpose in a topic's menu. */
     onopenprofile?: (topicId: string) => void
+    /** Called by Flashcards in a topic's menu: open its deck. */
+    onopenflashcards?: (topicId: string) => void
   }
 
-  let { workspace, open = $bindable(true), onopenchat, chatOpen = false, onopensettings, onupload, onopenprofile }: Props = $props()
+  let {
+    workspace,
+    open = $bindable(true),
+    onopenchat,
+    chatOpen = false,
+    onopensettings,
+    onupload,
+    onopenprofile,
+    onopenflashcards,
+  }: Props = $props()
 
   // A topic's discussions slide open and shut, quickly, unless motion is reduced.
   const listSlide = () => ({
@@ -228,6 +240,17 @@
                   <button
                     type="button"
                     role="menuitem"
+                    onclick={() => {
+                      menuId = undefined
+                      onopenflashcards?.(topic.id)
+                    }}
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d={FLASHCARD_ICON} /></svg>
+                    Flashcards
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
                     class="danger"
                     onclick={() => {
                       menuId = undefined
@@ -431,7 +454,7 @@
     background: color-mix(in srgb, var(--sidebar-bg) 82%, transparent);
     backdrop-filter: blur(14px);
     box-shadow: var(--sidebar-shadow);
-    overflow: hidden auto;
+    overflow: hidden;
     white-space: nowrap;
     /* Slides like the chat panel. */
     transition:
@@ -456,7 +479,11 @@
   /* The list keeps its full width while the sidebar opens, so it is revealed rather than reflowed. */
   .list {
     width: calc(15rem - 0.75rem);
-    flex-shrink: 0;
+    /* Takes what room is left between the buttons, and scrolls when the topics need more. */
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    scrollbar-width: thin;
   }
 
   /*
@@ -473,6 +500,7 @@
 
   .top {
     display: flex;
+    flex-shrink: 0;
     align-items: center;
   }
 
@@ -505,6 +533,7 @@
   }
   .new {
     display: flex;
+    flex-shrink: 0;
     align-items: center;
     width: 100%;
     height: 2.125rem;

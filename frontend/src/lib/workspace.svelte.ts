@@ -20,6 +20,7 @@ import {
   type WrittenQuiz,
 } from './api'
 import type { PageContext } from './context'
+import { type FlashcardRequest, forgetDeck } from './flashcards'
 
 /**
  * A PDF opened in a topic. Each one is a tab. `data` is the PDF itself. A tab brought back from the saved workspace gets it from the backend
@@ -103,6 +104,14 @@ export type RegisterApi = {
 }
 
 const realRegisterApi: RegisterApi = { note: (id, r) => noteDiscussion(id, r), forget: (id) => forgetRegister(id) }
+
+/**
+ * What flashcards are made from: a spot or selection in a PDF (its images may still be rendering),
+ * or a discussion up to one of its answers.
+ */
+export type FlashcardSource =
+  | { kind: 'pick'; context: PageContext; ready?: Promise<PageContext | undefined> }
+  | { kind: 'chat'; chatId: string; messageId: string }
 
 /**
  * How a topic's chat answers: `normal` answers questions; `socratic` has the model
@@ -261,6 +270,8 @@ export class Workspace {
   titleApi: (request: TitleRequest) => Promise<string | null> = (r) => fetchChatTitle(r)
   /** Where the topics' registers are kept. Tests swap in a fake. */
   registerApi: RegisterApi = realRegisterApi
+  /** Deletes a deleted topic's flashcards. Tests swap in a fake. */
+  forgetDeck: (topicId: string) => Promise<void> = (id) => forgetDeck(id)
 
   activeTopic = $derived(this.topics.find((t) => t.id === this.activeTopicId))
   activeDoc = $derived(this.activeTopic?.activeDocId ? this.docs[this.activeTopic.activeDocId] : undefined)
@@ -297,6 +308,7 @@ export class Workspace {
     const [topic] = this.topics.splice(index, 1)
     for (const chat of topic.chats) this.answering.get(chat.id)?.abort()
     void this.registerApi.forget(topic.id).catch(() => {})
+    void this.forgetDeck(topic.id).catch(() => {})
     this.docs = omit(this.docs, topic.docIds)
     for (const docId of topic.docIds) {
       delete this.indexing[docId]
@@ -702,6 +714,32 @@ export class Workspace {
     }
   }
 
+  /**
+   * What the backend needs to make flashcards from `source` in a topic, once its PDFs are
+   * uploaded and a picked spot's images are rendered; undefined if the source is gone.
+   */
+  async flashcardRequest(topicId: string, source: FlashcardSource): Promise<FlashcardRequest | undefined> {
+    const topic = this.topics.find((t) => t.id === topicId)
+    if (!topic) return undefined
+    const uploading = topic.docIds.filter((id) => id in this.uploads).map((id) => this.uploads[id])
+    if (uploading.length) await Promise.all(uploading)
+    const context = source.kind === 'pick' ? ((await source.ready?.catch(() => undefined)) ?? source.context) : undefined
+    const request = flashcardRequest(
+      topic,
+      source.kind === 'pick' ? { kind: 'pick', context: context! } : source,
+      (id) => this.indexing[id]?.serverId,
+      (id) => this.docs[id]?.name,
+    )
+    const instructions = this.instructions.trim()
+    return request && { ...request, ...(instructions && { instructions }) }
+  }
+
+  /** The topic's PDF the backend knows as `serverId`, if it is still in the topic. */
+  docOfServerId(topicId: string, serverId: string): string | undefined {
+    const topic = this.topics.find((t) => t.id === topicId)
+    return topic?.docIds.find((id) => this.indexing[id]?.serverId === serverId)
+  }
+
   /** Switch how the topic's open discussion answers, from the next question on. */
   setMode(topicId: string, mode: Mode) {
     const topic = this.topics.find((t) => t.id === topicId)
@@ -1061,6 +1099,34 @@ export function askRequest(
     ...(topic.conventions?.trim() && { conventions: topic.conventions.trim() }),
     messages: turns.map((m, i) => requestTurn(m, i === turns.length - 1, serverId)),
   }
+}
+
+/**
+ * The topic and the material for making flashcards: a spot with its images, or a discussion's
+ * turns up to the answer picked, without images (the model can read pages itself).
+ */
+export function flashcardRequest(
+  topic: Topic,
+  source: FlashcardSource,
+  serverId: (docId: string) => string | undefined = () => undefined,
+  nameOf: (docId: string) => string | undefined = () => undefined,
+): FlashcardRequest | undefined {
+  const base: FlashcardRequest = {
+    topic: topic.name,
+    topic_id: topic.id,
+    docs: topic.docIds.map(serverId).filter((id): id is string => !!id),
+    ...docNames(topic, serverId, nameOf),
+    ...(topic.purpose?.trim() && { purpose: topic.purpose.trim() }),
+    ...(topic.conventions?.trim() && { conventions: topic.conventions.trim() }),
+  }
+  if (source.kind === 'pick') {
+    return { ...base, context: contextForRequest(source.context, true, serverId(source.context.docId)) }
+  }
+  const chat = topic.chats.find((c) => c.id === source.chatId)
+  const index = chat?.messages.findIndex((m) => m.id === source.messageId) ?? -1
+  if (!chat || index === -1) return undefined
+  const turns = chat.messages.slice(0, index + 1).filter((m) => m.status !== 'streaming' && m.status !== 'error')
+  return { ...base, chat_id: chat.id, messages: turns.map((m) => requestTurn(m, false, serverId)) }
 }
 
 /**

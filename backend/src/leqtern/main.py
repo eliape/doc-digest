@@ -1,17 +1,25 @@
+import asyncio
 import json
 import logging
+import threading
 from collections.abc import AsyncIterator
 from functools import cache
 from typing import Annotated, Any
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 import anthropic
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel
 
+from . import deck as decks
+from .anki import package
 from .ask import AskRequest, Turn, describe, stream_answer, write_quiz
 from .config import Settings, get_settings
+from .deck import CardDraft, Decks
+from .dedup import SentenceEmbedder
+from .flashcards import FlashcardRequest, make_flashcards, sync_vectors
+from .flashcards import Services as FlashcardServices
 from .index import Indexer
 from .library import Library
 from .quiz import QuizRecord, reading_so_far, recommend
@@ -99,6 +107,8 @@ class Services:
         self.usage = UsageLog(settings.data_dir / "usage.jsonl")
         self.saved = SavedWorkspace(settings.data_dir / "workspace.json")
         self.registers = Registers(settings.data_dir / "registers")
+        self.decks = Decks(settings.data_dir / "decks")
+        self.embedder = SentenceEmbedder(settings.embedding_model, settings.embeddings)
         self.indexer = Indexer(self.library, self.usage, lambda: make_client(get_settings()))
 
 
@@ -417,4 +427,170 @@ async def forget_topic(topic_id: str, services: ServicesDep) -> dict[str, str]:
     topic_register_id(topic_id)
     async with services.registers.lock(topic_id):
         services.registers.delete(topic_id)
+    return {"status": "deleted"}
+
+
+# ---- Flashcards ----
+
+
+def deck_view(deck: decks.Deck) -> dict[str, Any]:
+    return {
+        "cards": [c.model_dump() for c in deck.cards],
+        "deleted": [d.model_dump() for d in deck.deleted],
+        "changes": deck.changes(),
+        "exported_at": deck.exported_at,
+    }
+
+
+def warm_embeddings(services: Services) -> None:
+    """Load the embedding model in the background, so it is ready when cards are made."""
+    threading.Thread(target=services.embedder.available, daemon=True).start()
+
+
+@app.get("/api/topics/{topic_id}/deck")
+def topic_deck(topic_id: str, services: ServicesDep) -> dict[str, Any]:
+    """The topic's flashcards and what changed since they were last exported."""
+    deck = services.decks.load(topic_register_id(topic_id))
+    warm_embeddings(services)
+    return deck_view(deck)
+
+
+async def flashcard_events(
+    client: anthropic.AsyncAnthropic, request: FlashcardRequest, services: Services
+) -> AsyncIterator[str]:
+    """Making cards as newline-delimited JSON: lookup steps, then the result or an error."""
+    ids = list(request.docs)
+    doc_id = request.context.doc_id if request.context else None
+    if doc_id and doc_id not in ids:
+        ids.append(doc_id)
+    toolbox = Toolbox(
+        services.library, topic_docs(services.library, services.indexer, ids, request.doc_names)
+    )
+    try:
+        register = await services.registers.settled(request.topic_id)
+        async for event in make_flashcards(
+            client,
+            request,
+            toolbox,
+            register,
+            FlashcardServices(services.decks, services.embedder, services.usage),
+            request.model or services.answer_model,
+        ):
+            yield json.dumps(event) + "\n"
+    except Exception as error:
+        logger.exception("Making flashcards failed")
+        message = str(error) if isinstance(error, RuntimeError) else error_message(error)
+        yield json.dumps({"type": "error", "message": message}) + "\n"
+
+
+@app.post("/api/topics/{topic_id}/flashcards")
+def make_cards(
+    topic_id: str,
+    request: FlashcardRequest,
+    client: Annotated[anthropic.AsyncAnthropic, Depends(get_client)],
+    services: ServicesDep,
+) -> StreamingResponse:
+    """Write flashcards from a spot in a PDF or a discussion, for the reader to preview."""
+    if topic_register_id(topic_id) != request.topic_id:
+        raise HTTPException(status_code=422, detail="The topic ids don't match.")
+    if not request.context and not request.messages:
+        raise HTTPException(status_code=422, detail="Nothing to make cards from.")
+    return StreamingResponse(
+        flashcard_events(client, request, services), media_type="application/x-ndjson"
+    )
+
+
+class AddCards(BaseModel):
+    cards: list[CardDraft]
+    # Basic cards to turn into Basic and reversed, for new cards that were their reverse.
+    upgrades: list[str] = []
+
+
+async def refresh_vectors(services: Services, topic_id: str, deck: decks.Deck) -> None:
+    """Bring the deck's embeddings up to date, when the model is loaded; else the next use does."""
+    if not services.embedder.ready():
+        return
+    try:
+        await asyncio.to_thread(sync_vectors, services.decks, topic_id, deck, services.embedder)
+    except Exception:
+        logger.exception("Could not update the deck's embeddings")
+
+
+@app.post("/api/topics/{topic_id}/deck/cards")
+async def add_cards(topic_id: str, request: AddCards, services: ServicesDep) -> dict[str, Any]:
+    """Add the cards approved in the preview, and turn the cards named in `upgrades` two-way."""
+    topic_register_id(topic_id)
+    async with services.decks.lock(topic_id):
+        deck = services.decks.load(topic_id)
+        added = [decks.new_card(d) for d in request.cards]
+        deck.cards.extend(added)
+        for card_id in request.upgrades:
+            card = deck.get(card_id)
+            if card and card.type == "basic":
+                decks.edit(deck, card_id, card.model_copy(update={"type": "basic_reversed"}))
+        services.decks.save(topic_id, deck)
+    await refresh_vectors(services, topic_id, deck)
+    return {"added": [c.id for c in added], **deck_view(deck)}
+
+
+@app.patch("/api/topics/{topic_id}/deck/cards/{card_id}")
+async def edit_card(
+    topic_id: str, card_id: str, changes: CardDraft, services: ServicesDep
+) -> dict[str, Any]:
+    topic_register_id(topic_id)
+    async with services.decks.lock(topic_id):
+        deck = services.decks.load(topic_id)
+        try:
+            card = decks.edit(deck, card_id, changes)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="No such card.") from error
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        services.decks.save(topic_id, deck)
+    await refresh_vectors(services, topic_id, deck)
+    return {"card": card.model_dump(), **deck_view(deck)}
+
+
+@app.delete("/api/topics/{topic_id}/deck/cards/{card_id}")
+async def delete_card(topic_id: str, card_id: str, services: ServicesDep) -> dict[str, Any]:
+    topic_register_id(topic_id)
+    async with services.decks.lock(topic_id):
+        deck = services.decks.load(topic_id)
+        if not decks.delete(deck, card_id):
+            raise HTTPException(status_code=404, detail="No such card.")
+        services.decks.save(topic_id, deck)
+    return deck_view(deck)
+
+
+class ExportRequest(BaseModel):
+    name: str
+
+
+@app.post("/api/topics/{topic_id}/deck/export")
+async def export_deck(topic_id: str, request: ExportRequest, services: ServicesDep) -> Response:
+    """The deck as an Anki package. Its cards then count as exported."""
+    topic_register_id(topic_id)
+    async with services.decks.lock(topic_id):
+        deck = services.decks.load(topic_id)
+        if not deck.cards:
+            raise HTTPException(status_code=422, detail="The deck has no cards yet.")
+        data = await asyncio.to_thread(package, topic_id, request.name, deck)
+        decks.mark_exported(deck)
+        services.decks.save(topic_id, deck)
+    filename = f"Leqtern - {request.name.strip() or 'Topic'}.apkg"
+    safe = "".join(ch if ch.isascii() and ch not in '"\\' else "_" for ch in filename)
+    return Response(
+        data,
+        media_type="application/octet-stream",
+        headers={
+            "Content-Disposition": f'attachment; filename="{safe}"; '
+            f"filename*=UTF-8''{quote(filename)}"
+        },
+    )
+
+
+@app.delete("/api/topics/{topic_id}/deck")
+def forget_deck(topic_id: str, services: ServicesDep) -> dict[str, str]:
+    """Delete a topic's deck, when the topic is deleted."""
+    services.decks.delete(topic_register_id(topic_id))
     return {"status": "deleted"}

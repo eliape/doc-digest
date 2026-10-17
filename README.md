@@ -49,6 +49,12 @@ rm backend/data/docs/*/index.json
 
 Don't delete the folders in `backend/data/docs/`: they also hold the PDFs your saved tabs open from.
 
+### Flashcards
+
+Each topic has a deck of Anki cards, kept in `backend/data/decks/`. Export it from Flashcards in the topic's ⋮ menu and import the `.apkg` in Anki (File › Import): cards Anki already has are updated and keep their reviews.
+
+New cards are checked against the deck for duplicates by wording and, with the local embedding model ([bge-small-en-v1.5](https://huggingface.co/BAAI/bge-small-en-v1.5)), by meaning. `make install` installs it (the `embeddings` extra, which pulls in PyTorch); the model itself downloads, about 130 MB, the first time a deck is opened. Without it, or with `EMBEDDINGS=false` in `backend/.env`, duplicates are found by wording only.
+
 ## Checking retrieval and cost
 
 To check how well the document index finds the right pages, and what it costs, write a few questions with known answer pages (format in [evaluate.py](backend/src/leqtern/evaluate.py)) and run:

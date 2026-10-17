@@ -101,7 +101,7 @@ export class BackendError extends Error {
 }
 
 /** The reason the backend gives for a failed request, as an Error. */
-async function backendError(res: Response): Promise<BackendError> {
+export async function backendError(res: Response): Promise<BackendError> {
   const detail = await res
     .json()
     .then((body: { detail?: unknown }) => (typeof body.detail === 'string' ? body.detail : undefined))

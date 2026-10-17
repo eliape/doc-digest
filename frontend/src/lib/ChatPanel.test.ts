@@ -431,6 +431,26 @@ describe('ChatPanel', () => {
     expect(log.querySelectorAll('.user')[1].querySelector('.quoted')).toHaveTextContent('two operations')
   })
 
+  it('makes flashcards from the discussion up to an answer, by the cards icon under it', async () => {
+    const workspace = new Workspace()
+    workspace.addDoc('notes.pdf', new Uint8Array([1]))
+    const topic = workspace.activeTopic!
+    chatOf(topic).messages.push(
+      { id: 'q', role: 'user', text: 'First?' },
+      { id: 'a', role: 'assistant', text: 'One.', status: 'done' },
+      { id: 'q2', role: 'user', text: 'Second?' },
+      { id: 'a2', role: 'assistant', text: 'Two.', status: 'streaming' },
+    )
+    const onflashcards = vi.fn()
+    render(ChatPanel, { workspace, open: true, onflashcards })
+    const panel = within(screen.getByRole('complementary', { name: 'Chat' }))
+    // Not under an answer still being written.
+    const buttons = await panel.findAllByRole('button', { name: 'Make flashcards from this discussion' })
+    expect(buttons).toHaveLength(1)
+    await fireEvent.click(buttons[0])
+    expect(onflashcards).toHaveBeenCalledWith(chatOf(topic).id, 'a')
+  })
+
   it('continues the conversation from an answer in a new discussion', async () => {
     const { workspace, topic, panel } = setup()
     chatOf(topic).messages.push(

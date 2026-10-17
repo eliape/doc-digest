@@ -2,7 +2,7 @@
   import type { Topic } from './workspace.svelte'
 
   type Props = {
-    /** The topic whose conventions and purpose are edited. Changes are saved as they are typed. */
+    /** The topic whose scope and conventions are edited. Changes are saved as they are typed. */
     topic: Topic
     onclose: () => void
   }
@@ -36,16 +36,16 @@
   <div bind:this={card} class="card" role="dialog" aria-modal="true" aria-labelledby="topic-profile-title">
     <header>
       <div>
-        <h2 id="topic-profile-title">Conventions and purpose</h2>
+        <h2 id="topic-profile-title">Scope and conventions</h2>
         <p class="topic-name">{topic.name}</p>
       </div>
-      <button type="button" class="chrome-button close" aria-label="Close conventions and purpose" onclick={onclose}>×</button>
+      <button type="button" class="chrome-button close" aria-label="Close scope and conventions" onclick={onclose}>×</button>
     </header>
 
     <label class="field">
-      <span class="label">Purpose</span>
-      <span class="hint">What you study this topic for, like “Exam in TMA4100 on 12 December” or “Background for my thesis”.</span>
-      <textarea rows="3" bind:value={topic.purpose} placeholder="Nothing yet"></textarea>
+      <span class="label">Syllabus / scope</span>
+      <span class="hint">What the topic covers and what you study it for. Paste the course syllabus or the chapters on the exam, or write something like “Exam in TMA4100 on 12 December” or “Background for my thesis”.</span>
+      <textarea rows="7" bind:value={topic.scope} placeholder="Nothing yet"></textarea>
     </label>
 
     <label class="field">
@@ -70,7 +70,7 @@
     display: flex;
     flex-direction: column;
     gap: 1.25rem;
-    width: min(30rem, 100%);
+    width: min(34rem, 100%);
     max-height: 100%;
     box-sizing: border-box;
     overflow-y: auto;

@@ -92,7 +92,7 @@ export type FlashcardRequest = {
   topic_id: string
   docs: string[]
   doc_names?: Record<string, string>
-  purpose?: string
+  scope?: string
   conventions?: string
   instructions?: string
   chat_id?: string

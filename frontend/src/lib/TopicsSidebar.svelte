@@ -17,7 +17,7 @@
     onopensettings?: () => void
     /** Called by the Upload source row: ask for PDFs to add to the open topic. */
     onupload?: () => void
-    /** Called by Conventions and purpose in a topic's menu. */
+    /** Called by Scope and conventions in a topic's menu. */
     onopenprofile?: (topicId: string) => void
     /** Called by Flashcards in a topic's menu: open its deck. */
     onopenflashcards?: (topicId: string) => void
@@ -237,7 +237,7 @@
                     }}
                   >
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h9l4 4v14H6zM14 3v5h5M9 12h7M9 16h7" /></svg>
-                    Conventions and purpose
+                    Scope and conventions
                   </button>
                   <button
                     type="button"

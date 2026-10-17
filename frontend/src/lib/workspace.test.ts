@@ -942,18 +942,29 @@ describe('Workspace saving', () => {
     expect(json).toContain('data:small')
   })
 
-  it('saves the conventions and purpose of a topic and sends them with every question', async () => {
+  it('saves the scope and conventions of a topic and sends them with every question', async () => {
     const { ws, topic } = await saved()
-    topic.purpose = ' Exam in TMA4100 '
+    topic.scope = ' Exam in TMA4100 '
     topic.conventions = '   '
-    expect(askRequest(topic)).toMatchObject({ purpose: 'Exam in TMA4100' })
+    expect(askRequest(topic)).toMatchObject({ scope: 'Exam in TMA4100' })
     expect(askRequest(topic)).not.toHaveProperty('conventions')
     topic.conventions = 'j is the imaginary unit'
     const back = new Workspace()
     back.restore(JSON.parse(JSON.stringify(ws.snapshot())))
     const restored = back.topics[0]
-    expect([restored.purpose, restored.conventions]).toEqual([' Exam in TMA4100 ', 'j is the imaginary unit'])
-    expect(askRequest(restored)).toMatchObject({ purpose: 'Exam in TMA4100', conventions: 'j is the imaginary unit' })
+    expect([restored.scope, restored.conventions]).toEqual([' Exam in TMA4100 ', 'j is the imaginary unit'])
+    expect(askRequest(restored)).toMatchObject({ scope: 'Exam in TMA4100', conventions: 'j is the imaginary unit' })
+  })
+
+  it('brings back the purpose of a topic saved before it had a scope as its scope', async () => {
+    const { ws } = await saved()
+    const old = JSON.parse(JSON.stringify(ws.snapshot()))
+    old.topics[0].purpose = 'Exam in December'
+    const back = new Workspace()
+    back.restore(old)
+    expect(back.topics[0].scope).toBe('Exam in December')
+    expect(back.snapshot().topics[0]).toMatchObject({ scope: 'Exam in December' })
+    expect(back.snapshot().topics[0]).not.toHaveProperty('purpose')
   })
 
   it('keeps the tab order and the closed sources across a reload, and opens all in old saves', async () => {
@@ -1548,7 +1559,7 @@ describe('Workspace flashcards', () => {
     const { ws } = workspace()
     const doc = ws.addDoc('notes.pdf', bytes(1))
     const topic = ws.activeTopic!
-    topic.purpose = ' Exam in December '
+    topic.scope = ' Exam in December '
     ws.instructions = 'Use SI units.'
     const context: PageContext = { docId: doc.id, docName: 'notes.pdf', page: 4, selection: 'A theorem', pageTexts: [] }
     const rendered = Promise.resolve({ ...context, pageImage: 'AAAA', pageTexts: [{ page: 4, text: 'A theorem.' }] })
@@ -1556,7 +1567,7 @@ describe('Workspace flashcards', () => {
     expect(request).toMatchObject({
       topic: topic.name,
       topic_id: topic.id,
-      purpose: 'Exam in December',
+      scope: 'Exam in December',
       instructions: 'Use SI units.',
       context: { page: 4, selection: 'A theorem', page_image: 'AAAA' },
     })

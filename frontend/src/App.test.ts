@@ -410,7 +410,7 @@ describe('App', () => {
     await fireEvent.click(dots)
     expect(dots).toHaveAttribute('aria-expanded', 'true')
     const items = screen.getAllByRole('menuitem')
-    expect(items.map((i) => i.textContent?.trim())).toEqual(['Rename', 'Conventions and purpose', 'Flashcards', 'Delete'])
+    expect(items.map((i) => i.textContent?.trim())).toEqual(['Rename', 'Scope and conventions', 'Flashcards', 'Delete'])
     expect(items.every((i) => i.querySelector('svg'))).toBe(true)
     expect(items[3]).toHaveClass('danger')
 
@@ -421,27 +421,27 @@ describe('App', () => {
     expect(screen.queryByRole('menu')).not.toBeInTheDocument()
   })
 
-  it('edits the conventions and purpose of a topic from its menu, keeping the sidebar open', async () => {
+  it('edits the scope and conventions of a topic from its menu, keeping the sidebar open', async () => {
     renderOffline()
     await pick(pdf('slides.pdf'))
     await screen.findByRole('tab', { name: 'slides.pdf' })
     await showTopics()
     await fireEvent.click(screen.getByRole('button', { name: 'Actions for slides' }))
-    await fireEvent.click(screen.getByRole('menuitem', { name: 'Conventions and purpose' }))
-    const dialog = within(screen.getByRole('dialog', { name: 'Conventions and purpose' }))
-    const purpose = dialog.getByRole('textbox', { name: /^Purpose/ })
-    expect(purpose).toHaveFocus()
-    await fireEvent.pointerDown(purpose)
-    await fireEvent.input(purpose, { target: { value: 'Exam in December' } })
+    await fireEvent.click(screen.getByRole('menuitem', { name: 'Scope and conventions' }))
+    const dialog = within(screen.getByRole('dialog', { name: 'Scope and conventions' }))
+    const scope = dialog.getByRole('textbox', { name: /^Syllabus \/ scope/ })
+    expect(scope).toHaveFocus()
+    await fireEvent.pointerDown(scope)
+    await fireEvent.input(scope, { target: { value: 'Chapters 1-6, exam in December' } })
     await fireEvent.input(dialog.getByRole('textbox', { name: /^Conventions/ }), { target: { value: 'j is the imaginary unit' } })
-    await fireEvent.keyDown(purpose, { key: 'Escape' })
+    await fireEvent.keyDown(scope, { key: 'Escape' })
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Hide topics' })).toBeInTheDocument()
 
     // It comes back with what was typed.
     await fireEvent.click(screen.getByRole('button', { name: 'Actions for slides' }))
-    await fireEvent.click(screen.getByRole('menuitem', { name: 'Conventions and purpose' }))
-    expect(screen.getByRole('textbox', { name: /^Purpose/ })).toHaveValue('Exam in December')
+    await fireEvent.click(screen.getByRole('menuitem', { name: 'Scope and conventions' }))
+    expect(screen.getByRole('textbox', { name: /^Syllabus \/ scope/ })).toHaveValue('Chapters 1-6, exam in December')
     expect(screen.getByRole('textbox', { name: /^Conventions/ })).toHaveValue('j is the imaginary unit')
   })
 

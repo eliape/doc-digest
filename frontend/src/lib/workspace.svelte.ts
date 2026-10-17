@@ -161,8 +161,11 @@ export type Topic = {
   draft: string
   context?: PageContext
   quote?: string
-  /** What the reader studies the topic for, in their words (Conventions and purpose, in the topic's ⋮ menu). */
-  purpose?: string
+  /**
+   * What the topic covers and what the reader studies it for, like a syllabus or "Exam in
+   * December", in their words (Scope and conventions, in the topic's ⋮ menu).
+   */
+  scope?: string
   /** Conventions the topic's answers follow, like notation and sign conventions, in the reader's words. */
   conventions?: string
 }
@@ -177,7 +180,8 @@ export type SavedDoc = {
 
 /**
  * One saved topic. Its chats are saved without the page images, which only the newest question
- * needs. Workspaces saved before a topic had several discussions have one `chat` and `mode`.
+ * needs. Workspaces saved before a topic had several discussions have one `chat` and `mode`, and
+ * ones saved before its scope have a `purpose` in its place.
  */
 export type SavedTopic = Omit<Topic, 'docIds' | 'openDocIds' | 'draft' | 'context' | 'quote' | 'chats' | 'chatId'> & {
   docs: SavedDoc[]
@@ -187,6 +191,7 @@ export type SavedTopic = Omit<Topic, 'docIds' | 'openDocIds' | 'draft' | 'contex
   chatId?: string
   chat?: ChatMessage[]
   mode?: Mode
+  purpose?: string
 }
 
 /** What is saved on disk (through the backend) so the workspace is back after a reload. */
@@ -1008,7 +1013,7 @@ export class Workspace {
           activeDocId: topic.openDocIds.includes(topic.activeDocId ?? '') && docs.some((d) => d.id === topic.activeDocId) ? topic.activeDocId : topic.openDocIds.find((id) => docs.some((d) => d.id === id)),
           ...(topic.sourcesOpen && { sourcesOpen: true }),
           ...(topic.discussionsOpen === false && { discussionsOpen: false }),
-          ...(topic.purpose?.trim() && { purpose: topic.purpose }),
+          ...(topic.scope?.trim() && { scope: topic.scope }),
           ...(topic.conventions?.trim() && { conventions: topic.conventions }),
           chatId: topic.chatId,
           chats: topic.chats
@@ -1050,7 +1055,7 @@ export class Workspace {
         ...(t.sourcesOpen && { sourcesOpen: true }),
         ...(t.discussionsOpen === false && { discussionsOpen: false }),
         ...restoredChats(t),
-        ...(typeof t.purpose === 'string' && t.purpose && { purpose: t.purpose }),
+        ...restoredScope(t),
         ...(typeof t.conventions === 'string' && t.conventions && { conventions: t.conventions }),
         draft: '',
       }
@@ -1087,6 +1092,12 @@ function restoredChats(saved: SavedTopic): Pick<Topic, 'chats' | 'chatId'> {
   if (!chats.length) chats.push(emptyChat())
   const chatId = chats.some((c) => c.id === saved.chatId) ? saved.chatId! : chats[0].id
   return { chats, chatId }
+}
+
+/** A saved topic's scope. One saved when it had a purpose instead brings that back as its scope. */
+function restoredScope(saved: SavedTopic): Pick<Topic, 'scope'> {
+  const scope = [saved.scope, saved.purpose].find((s) => typeof s === 'string' && s)
+  return scope ? { scope } : {}
 }
 
 function validMode(mode: unknown): Mode {
@@ -1147,7 +1158,7 @@ export function askRequest(
     ...(model && { model }),
     docs: topic.docIds.map(serverId).filter((id): id is string => !!id),
     ...docNames(topic, serverId, nameOf),
-    ...(topic.purpose?.trim() && { purpose: topic.purpose.trim() }),
+    ...(topic.scope?.trim() && { scope: topic.scope.trim() }),
     ...(topic.conventions?.trim() && { conventions: topic.conventions.trim() }),
     messages: turns.map((m, i) => requestTurn(m, i === turns.length - 1, serverId)),
   }
@@ -1168,7 +1179,7 @@ export function flashcardRequest(
     topic_id: topic.id,
     docs: topic.docIds.map(serverId).filter((id): id is string => !!id),
     ...docNames(topic, serverId, nameOf),
-    ...(topic.purpose?.trim() && { purpose: topic.purpose.trim() }),
+    ...(topic.scope?.trim() && { scope: topic.scope.trim() }),
     ...(topic.conventions?.trim() && { conventions: topic.conventions.trim() }),
   }
   if (source.kind === 'pick') {

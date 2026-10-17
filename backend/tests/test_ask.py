@@ -508,18 +508,20 @@ def test_the_readers_instructions_come_between_the_fixed_prompt_and_the_topic() 
     assert topic["cache_control"] == {"type": "ephemeral", "ttl": "1h"}
 
 
-def test_a_topics_purpose_and_conventions_go_with_its_name_in_the_cached_prompt() -> None:
-    _, topic = system_blocks("Mechanics", "", " Exam on 12 Dec ", "Clockwise torque is positive.")
+def test_a_topics_scope_and_conventions_go_with_its_name_in_the_cached_prompt() -> None:
+    _, topic = system_blocks(
+        "Mechanics", "", " Chapters 1-6, exam on 12 Dec ", "Clockwise torque is positive."
+    )
     assert topic["text"].startswith('The topic is called "Mechanics".')
-    assert "<topic_purpose>\nExam on 12 Dec\n</topic_purpose>" in topic["text"]
+    assert "<topic_scope>\nChapters 1-6, exam on 12 Dec\n</topic_scope>" in topic["text"]
     assert (
         "<topic_conventions>\nClockwise torque is positive.\n</topic_conventions>" in topic["text"]
     )
     assert topic["cache_control"] == {"type": "ephemeral", "ttl": "1h"}
     # Left empty, they add nothing.
     assert system_blocks("Mechanics", "", " ", "")[-1]["text"] == 'The topic is called "Mechanics".'
-    request = AskRequest(topic="Mechanics", purpose="Exam", messages=[Turn(role="user", text="?")])
-    assert "<topic_purpose>\nExam\n</topic_purpose>" in request_system(request)[-1]["text"]
+    request = AskRequest(topic="Mechanics", scope="Exam", messages=[Turn(role="user", text="?")])
+    assert "<topic_scope>\nExam\n</topic_scope>" in request_system(request)[-1]["text"]
 
 
 def test_the_mistake_behind_a_wrong_answer_goes_into_the_history() -> None:

@@ -223,7 +223,7 @@ class AskRequest(BaseModel):
     model: AnswerModel | None = Field(default=None, description="Defaults to ANSWER_MODEL")
     effort: Effort = Field(default=EFFORT, description="For answers and quizzes only")
     instructions: str = Field(default="", description="The reader's instructions, from Settings")
-    purpose: str = Field(default="", description="What the reader studies the topic for")
+    scope: str = Field(default="", description="The topic's syllabus or scope, and its purpose")
     conventions: str = Field(default="", description="Conventions answers in the topic follow")
 
 
@@ -371,20 +371,20 @@ def build_messages(request: AskRequest, aliases: dict[str, str] | None = None) -
 def system_blocks(
     topic: str,
     instructions: str = "",
-    purpose: str = "",
+    scope: str = "",
     conventions: str = "",
     documents: str = "",
 ) -> list[dict[str, Any]]:
     """
     Fixed instructions, the reader's own (set once in Settings, so they rarely change and
     stay cached with the rest), and the topic: its name, what the reader wrote about what
-    they study it for and the conventions it follows, and its indexed documents (see
-    `catalogue`), all cached.
+    it covers and what they study it for, the conventions it follows, and its indexed
+    documents (see `catalogue`), all cached.
     """
     own = instructions.strip()
     about = [f'The topic is called "{topic}".']
-    if purpose.strip():
-        about.append(TOPIC_PURPOSE.format(purpose.strip()))
+    if scope.strip():
+        about.append(TOPIC_SCOPE.format(scope.strip()))
     if conventions.strip():
         about.append(TOPIC_CONVENTIONS.format(conventions.strip()))
     if documents:
@@ -398,16 +398,18 @@ def system_blocks(
 
 def request_system(request: AskRequest, documents: str = "") -> list[dict[str, Any]]:
     return system_blocks(
-        request.topic, request.instructions, request.purpose, request.conventions, documents
+        request.topic, request.instructions, request.scope, request.conventions, documents
     )
 
 
-TOPIC_PURPOSE = """\
-What they study this topic for, in their words. Let it shape your answers, e.g. exam-style \
+TOPIC_SCOPE = """\
+What this topic covers and what they study it for, in their words, such as a course syllabus, \
+the chapters an exam covers or a research question. Keep to what it covers: when a question goes \
+beyond it, still answer, but say so briefly. Let the purpose shape your answers, e.g. exam-style \
 practice for an exam, more depth and sources for research:
-<topic_purpose>
+<topic_scope>
 {}
-</topic_purpose>"""
+</topic_scope>"""
 
 TOPIC_CONVENTIONS = """\
 Conventions this topic follows, in their words. Use them in your answers (notation, signs, \

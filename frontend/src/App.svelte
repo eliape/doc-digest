@@ -66,7 +66,7 @@
   let settingsOpen = $state(false)
   // Whether the PDF's zoom follows the chat opening and closing. Set in Settings.
   let zoomFollowsChat = $state(savedZoomFollowsChat())
-  // The topic whose Conventions and purpose are being edited, if any.
+  // The topic whose Scope and conventions are being edited, if any.
   let profileTopicId = $state<string>()
   const profileTopic = $derived(workspace.topics.find((t) => t.id === profileTopicId))
   // The Make flashcards menu, while open: the topic, what the cards are made from, and that in words.

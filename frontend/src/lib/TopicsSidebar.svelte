@@ -431,7 +431,7 @@
     background: color-mix(in srgb, var(--sidebar-bg) 82%, transparent);
     backdrop-filter: blur(14px);
     box-shadow: var(--sidebar-shadow);
-    overflow: hidden auto;
+    overflow: hidden;
     white-space: nowrap;
     /* Slides like the chat panel. */
     transition:
@@ -456,7 +456,11 @@
   /* The list keeps its full width while the sidebar opens, so it is revealed rather than reflowed. */
   .list {
     width: calc(15rem - 0.75rem);
-    flex-shrink: 0;
+    /* Takes what room is left between the buttons, and scrolls when the topics need more. */
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    scrollbar-width: thin;
   }
 
   /*
@@ -473,6 +477,7 @@
 
   .top {
     display: flex;
+    flex-shrink: 0;
     align-items: center;
   }
 
@@ -505,6 +510,7 @@
   }
   .new {
     display: flex;
+    flex-shrink: 0;
     align-items: center;
     width: 100%;
     height: 2.125rem;

@@ -5,6 +5,8 @@ from fakes import FakeIndexClient
 from pdfs import filler, make_pdf
 
 from leqtern.index import (
+    AUTO_RETRIES,
+    RETRY_AFTER_SECONDS,
     ChunkIndex,
     ChunkRecord,
     DocIndex,
@@ -178,3 +180,46 @@ async def test_an_index_made_before_kinds_gets_its_kind_and_keeps_its_summary(
     # Once it has a kind it is not queued again.
     indexer.enqueue(doc.id)
     assert len(client.requests) == 1
+
+
+async def wait_for_error(indexer: Indexer, doc_id: str) -> None:
+    for _ in range(50):
+        await asyncio.sleep(0.01)
+        if indexer.doc_status(doc_id)["status"] == "error":
+            return
+
+
+async def test_a_failure_is_tried_again_a_few_times_and_whenever_the_reader_asks(
+    library, tmp_path
+) -> None:
+    doc = await library.add(make_pdf([filler("x")]), "a.pdf")
+    indexer = Indexer(library, UsageLog(None), lambda: None)
+    indexer.enqueue(doc.id)
+    await wait_for_error(indexer, doc.id)
+    for _ in range(AUTO_RETRIES):
+        # As if the failure was a while ago.
+        indexer.status[doc.id]["failed_at"] -= RETRY_AFTER_SECONDS
+        indexer.resume(doc.id)
+        assert indexer.doc_status(doc.id)["status"] == "queued"
+        await wait_for_error(indexer, doc.id)
+    indexer.status[doc.id]["failed_at"] -= RETRY_AFTER_SECONDS
+    indexer.resume(doc.id)
+    assert indexer.doc_status(doc.id)["status"] == "error"
+    indexer.retry(doc.id)
+    assert indexer.doc_status(doc.id)["status"] == "queued"
+
+
+async def test_a_damaged_index_file_is_indexed_again(library, tmp_path) -> None:
+    doc = await library.add(make_pdf([filler("x")]), "a.pdf")
+    indexer = Indexer(library, UsageLog(None), lambda: None)
+    indexer.index_path(doc.id).write_text('{"doc_id": "')
+    assert indexer.get(doc.id) is None
+    assert indexer.doc_status(doc.id)["status"] == "queued"
+
+
+async def test_damaged_pages_are_read_again_from_the_pdf(tmp_path) -> None:
+    doc = await Library(tmp_path).add(make_pdf([filler("limits")]), "a.pdf")
+    (tmp_path / "docs" / doc.id / "pages.json").write_text('{"id": ')
+    again = Library(tmp_path).get(doc.id)
+    assert again is not None and "limits" in again.pages[0].text
+    assert Library(tmp_path).get("../docs") is None

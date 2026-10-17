@@ -7,11 +7,15 @@ import asyncio
 import hashlib
 import io
 import json
+import logging
+import os
 import threading
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 import pypdfium2 as pdfium
+
+logger = logging.getLogger(__name__)
 
 # PDFium is not thread-safe, so every call into it goes through this lock.
 _pdfium = threading.Lock()
@@ -118,6 +122,13 @@ def _render(path: Path, page_number: int, longest_side: int) -> bytes:
     return out.getvalue()
 
 
+def _write(path: Path, data: bytes) -> None:
+    """Write a file via a temporary one, so a crash can't leave half a file."""
+    temporary = path.with_suffix(".tmp")
+    temporary.write_bytes(data)
+    os.replace(temporary, path)
+
+
 class Library:
     """PDFs on disk under `root`, one folder per document, named by a hash of its bytes."""
 
@@ -137,23 +148,40 @@ class Library:
         folder.mkdir(parents=True, exist_ok=True)
         source = folder / "source.pdf"
         if not source.exists():
-            source.write_bytes(data)
-        pages_file = folder / "pages.json"
-        if pages_file.exists():
-            doc = _load_doc(json.loads(pages_file.read_text()))
-        else:
+            _write(source, data)
+        doc = self._load(doc_id)
+        if doc is None:
             doc = await asyncio.to_thread(_read, source, doc_id, name)
-            pages_file.write_text(json.dumps(asdict(doc), ensure_ascii=False))
+            _write(folder / "pages.json", json.dumps(asdict(doc), ensure_ascii=False).encode())
         doc.name = name
         self._docs[doc_id] = doc
         return doc
 
     def get(self, doc_id: str) -> DocInfo | None:
+        # Ids are hex digests; anything else could name a path outside the library.
+        if not doc_id.isalnum():
+            return None
         if doc_id not in self._docs:
-            pages_file = self.folder(doc_id) / "pages.json"
-            if pages_file.exists():
-                self._docs[doc_id] = _load_doc(json.loads(pages_file.read_text()))
+            doc = self._load(doc_id)
+            if doc:
+                self._docs[doc_id] = doc
         return self._docs.get(doc_id)
+
+    def _load(self, doc_id: str) -> DocInfo | None:
+        """The pages read earlier, or None if they weren't, or their file is damaged."""
+        pages_file = self.folder(doc_id) / "pages.json"
+        try:
+            return _load_doc(json.loads(pages_file.read_text()))
+        except FileNotFoundError:
+            return None
+        except (ValueError, KeyError, TypeError):
+            logger.exception("Unreadable pages for %s; reading the PDF again", doc_id)
+        source = self.folder(doc_id) / "source.pdf"
+        if not source.is_file():
+            return None
+        doc = _read(source, doc_id, "document.pdf")
+        _write(pages_file, json.dumps(asdict(doc), ensure_ascii=False).encode())
+        return doc
 
     async def render(self, doc_id: str, page: int, longest_side: int = 1568) -> bytes:
         """A page as a JPEG whose longer side is `longest_side` pixels."""

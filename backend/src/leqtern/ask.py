@@ -35,6 +35,9 @@ MAX_ROUNDS = 8
 # more than 5 minutes apart, and rewriting them after the default 5-minute cache expires costs more
 # than the hour's higher write price (2x input instead of 1.25x).
 LONG_CACHE = {"type": "ephemeral", "ttl": "1h"}
+# Quizzes send no tools, so their prefix never matches the answers' cache: only another quiz
+# soon after could read what they cache, which the default 5 minutes covers at a lower price.
+SHORT_CACHE = {"type": "ephemeral"}
 
 SYSTEM_PROMPT = """\
 You help someone learn from PDFs they are studying, such as textbooks, papers and lecture \
@@ -315,7 +318,11 @@ def question_text(turn: Turn, starts_session: bool = False, ends_session: bool =
     return f"{SOCRATIC_END}\n{question}" if ends_session else question
 
 
-def build_messages(request: AskRequest, aliases: dict[str, str] | None = None) -> list[dict]:
+def build_messages(
+    request: AskRequest,
+    aliases: dict[str, str] | None = None,
+    cache: dict[str, str] = LONG_CACHE,
+) -> list[dict]:
     """
     The conversation for the model. Earlier questions keep a line saying where they were
     asked; only the newest one carries images and page text, to keep requests small.
@@ -364,7 +371,7 @@ def build_messages(request: AskRequest, aliases: dict[str, str] | None = None) -
     # Cache the history before the newest question. Its images are dropped on the next
     # question, so the request-wide cache entry never matches again, but this one does.
     if len(messages) > 1 and messages[-2]["role"] == "assistant":
-        messages[-2]["content"][-1]["cache_control"] = {**LONG_CACHE}
+        messages[-2]["content"][-1]["cache_control"] = {**cache}
     return messages
 
 
@@ -374,6 +381,7 @@ def system_blocks(
     purpose: str = "",
     conventions: str = "",
     documents: str = "",
+    cache: dict[str, str] = LONG_CACHE,
 ) -> list[dict[str, Any]]:
     """
     Fixed instructions, the reader's own (set once in Settings, so they rarely change and
@@ -392,13 +400,15 @@ def system_blocks(
     return [
         {"type": "text", "text": SYSTEM_PROMPT},
         *([{"type": "text", "text": READER_INSTRUCTIONS.format(own)}] if own else []),
-        {"type": "text", "text": "\n\n".join(about), "cache_control": {**LONG_CACHE}},
+        {"type": "text", "text": "\n\n".join(about), "cache_control": {**cache}},
     ]
 
 
-def request_system(request: AskRequest, documents: str = "") -> list[dict[str, Any]]:
+def request_system(
+    request: AskRequest, documents: str = "", cache: dict[str, str] = LONG_CACHE
+) -> list[dict[str, Any]]:
     return system_blocks(
-        request.topic, request.instructions, request.purpose, request.conventions, documents
+        request.topic, request.instructions, request.purpose, request.conventions, documents, cache
     )
 
 
@@ -452,7 +462,7 @@ async def write_quiz(
     the section the quiz covers when they gave nothing to focus on, and `notes` the
     register's notes for it.
     """
-    messages = build_messages(request)
+    messages = build_messages(request, cache=SHORT_CACHE)
     if reading:
         # Before the request itself, which stays last.
         messages[-1]["content"][-1:-1] = reading
@@ -463,7 +473,7 @@ async def write_quiz(
     response: Any = await client.messages.parse(
         model=model,
         max_tokens=16000,
-        system=request_system(request),  # type: ignore[arg-type]
+        system=request_system(request, cache=SHORT_CACHE),  # type: ignore[arg-type]
         messages=messages,  # type: ignore[arg-type]
         output_format=WrittenQuiz,
         output_config={"effort": request.effort},

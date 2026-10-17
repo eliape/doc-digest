@@ -3,10 +3,11 @@ import logging
 from collections.abc import AsyncIterator
 from functools import cache
 from typing import Annotated, Any
+from urllib.parse import urlsplit
 
 import anthropic
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from .ask import AskRequest, Turn, describe, stream_answer, write_quiz
@@ -24,7 +25,7 @@ from .register import (
     valid_topic_id,
     write_notes,
 )
-from .saved import SavedWorkspace
+from .saved import SaveConflict, SavedWorkspace
 from .title import title_chat
 from .tools import Toolbox, topic_docs
 from .usage import UsageLog
@@ -32,6 +33,31 @@ from .usage import UsageLog
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Leqtern")
+
+# The backend runs on the reader's own computer and answers only to pages served from it.
+# Checking Host stops a web page from reaching it through a DNS name it points at 127.0.0.1;
+# checking Origin stops a page on another site from sending it requests that change things
+# (a plain cross-site form or fetch can POST without asking first). "testserver" is the
+# Host FastAPI's test client sends.
+LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1", "testserver"}
+SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+
+
+def local(netloc: str) -> bool:
+    return urlsplit(f"//{netloc}").hostname in LOCAL_HOSTS
+
+
+@app.middleware("http")
+async def only_local_pages(request: Request, call_next):
+    host = request.headers.get("host", "")
+    if not local(host):
+        return JSONResponse({"detail": "Unknown host."}, status_code=403)
+    origin = request.headers.get("origin")
+    if request.method not in SAFE_METHODS and origin and not local(urlsplit(origin).netloc):
+        return JSONResponse(
+            {"detail": "Requests from other sites are not allowed."}, status_code=403
+        )
+    return await call_next(request)
 
 
 @app.get("/api/health")
@@ -91,6 +117,9 @@ ServicesDep = Annotated[Services, Depends(get_services)]
 @app.post("/api/docs")
 async def add_doc(request: Request, services: ServicesDep, name: str = Query("document.pdf")):
     """Store a PDF (sent as the request body) and start indexing it in the background."""
+    # Sent as application/pdf, which a page on another site can't do without asking first.
+    if request.headers.get("content-type", "").split(";")[0].strip() != "application/pdf":
+        raise HTTPException(status_code=415, detail="Send the PDF as application/pdf.")
     data = await request.body()
     if not data.startswith(b"%PDF"):
         raise HTTPException(status_code=415, detail="That is not a PDF.")
@@ -111,6 +140,15 @@ async def doc_status(doc_id: str, services: ServicesDep) -> dict[str, Any]:
     return {"id": doc_id, **services.indexer.doc_status(doc_id)}
 
 
+@app.post("/api/docs/{doc_id}/index")
+async def retry_index(doc_id: str, services: ServicesDep) -> dict[str, Any]:
+    """Try indexing a document again after it failed."""
+    if services.library.get(doc_id) is None:
+        raise HTTPException(status_code=404, detail="No such document.")
+    services.indexer.retry(doc_id)
+    return {"id": doc_id, **services.indexer.doc_status(doc_id)}
+
+
 @app.get("/api/docs/{doc_id}/pdf")
 def doc_pdf(doc_id: str, services: ServicesDep) -> FileResponse:
     """The PDF itself, for reopening a saved tab."""
@@ -122,14 +160,28 @@ def doc_pdf(doc_id: str, services: ServicesDep) -> FileResponse:
 
 @app.get("/api/workspace")
 def load_workspace(services: ServicesDep) -> dict[str, Any]:
-    """The saved topics, tabs and chats, or an empty object before anything was saved."""
-    return services.saved.load() or {}
+    """
+    The saved topics, tabs and chats (an empty workspace before anything was saved), with the
+    revision to send back with the next save.
+    """
+    return {**(services.saved.load() or {}), "revision": services.saved.revision()}
 
 
 @app.put("/api/workspace")
-def save_workspace(workspace: dict[str, Any], services: ServicesDep) -> dict[str, str]:
-    services.saved.save(workspace)
-    return {"status": "saved"}
+def save_workspace(
+    workspace: dict[str, Any],
+    services: ServicesDep,
+    base: int | None = Query(None, description="The revision the tab last loaded or saved"),
+    writer: str | None = Query(None, description="An id for the tab, new on each load"),
+) -> dict[str, Any]:
+    workspace.pop("revision", None)
+    try:
+        revision = services.saved.save(workspace, base, writer)
+    except SaveConflict as error:
+        raise HTTPException(
+            status_code=409, detail="Your topics were saved from another tab since."
+        ) from error
+    return {"status": "saved", "revision": revision}
 
 
 @app.get("/api/docs/{doc_id}/index")
@@ -180,11 +232,11 @@ async def events(
     client: anthropic.AsyncAnthropic, request: AskRequest, services: Services
 ) -> AsyncIterator[str]:
     """The answer as newline-delimited JSON: text pieces and lookup steps, then done or an error."""
-    toolbox = Toolbox(
-        services.library,
-        topic_docs(services.library, services.indexer, request.docs, request.doc_names),
-    )
     try:
+        toolbox = Toolbox(
+            services.library,
+            topic_docs(services.library, services.indexer, request.docs, request.doc_names),
+        )
         notes = await register_notes(request, services)
         async for event in stream_answer(
             client,
@@ -322,23 +374,25 @@ async def note_discussion(
     """
     Note what is new in a discussion the reader left in the topic's register, and tidy the
     register once enough has changed since the last tidy (keeping a copy from before it).
-    Questions asked meanwhile in the topic wait for it, so a new discussion starts with these notes.
+    Questions asked meanwhile in the topic wait for the notes (not the tidy), so a new
+    discussion starts with them.
     """
     topic_register_id(topic_id)
     registers = services.registers
     async with registers.lock(topic_id):
-        register = registers.load(topic_id)
         names = {}
         for doc_id in request.docs:
             info = services.library.get(doc_id)
             if info:
                 names[request.doc_names.get(doc_id) or info.name] = doc_id
-        try:
-            changed = await write_notes(client, register, request, names, services.usage)
-        except Exception as error:
-            logger.exception("Noting the discussion failed")
-            raise HTTPException(status_code=502, detail=error_message(error)) from error
-        registers.save(topic_id, register)
+        async with registers.noting(topic_id):
+            register = registers.load(topic_id)
+            try:
+                changed = await write_notes(client, register, request, names, services.usage)
+            except Exception as error:
+                logger.exception("Noting the discussion failed")
+                raise HTTPException(status_code=502, detail=error_message(error)) from error
+            registers.save(topic_id, register)
         if changed and register.pending() >= TIDY_AFTER:
             try:
                 registers.backup(topic_id)
@@ -358,7 +412,9 @@ def topic_register(topic_id: str, services: ServicesDep) -> dict[str, Any]:
 
 
 @app.delete("/api/topics/{topic_id}/register")
-def forget_topic(topic_id: str, services: ServicesDep) -> dict[str, str]:
-    """Delete a topic's register, when the topic is deleted."""
-    services.registers.delete(topic_register_id(topic_id))
+async def forget_topic(topic_id: str, services: ServicesDep) -> dict[str, str]:
+    """Delete a topic's register, when the topic is deleted, after notes still being written."""
+    topic_register_id(topic_id)
+    async with services.registers.lock(topic_id):
+        services.registers.delete(topic_id)
     return {"status": "deleted"}

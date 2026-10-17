@@ -394,6 +394,8 @@ async def test_write_quiz_uses_the_chosen_model_and_drops_broken_questions() -> 
     *_, section, asked = sent["messages"][-1]["content"]
     assert section == reading[0]
     assert asked["text"] == f"[Quiz] {QUIZ_SECTION}"
+    # Only another quiz could read what a quiz caches, so it is cached for 5 minutes, not an hour.
+    assert sent["system"][-1]["cache_control"] == {"type": "ephemeral"}
 
 
 def test_the_right_answer_lands_evenly_among_the_choices() -> None:

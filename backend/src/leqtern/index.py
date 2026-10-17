@@ -7,13 +7,14 @@ with their pages. A cheap model writes it, 20 pages at a time.
 import asyncio
 import base64
 import logging
+import os
 import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Literal
 
 from anthropic import AsyncAnthropic
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from .library import DocInfo, Library, page_name
 from .usage import UsageLog, call_from_response
@@ -26,6 +27,11 @@ PAGES_PER_CHUNK = 20
 INDEX_IMAGE_SIDE = 1400
 # How many chunks of one document are indexed at the same time.
 PARALLEL_CHUNKS = 3
+# After indexing fails (a rate limit, a dropped connection), it is tried again when the
+# document is next asked about this long after, at most this many times per backend run.
+# The reader can always try again by hand.
+RETRY_AFTER_SECONDS = 60.0
+AUTO_RETRIES = 2
 
 EntryKind = Literal["term", "acronym", "definition", "equation", "figure", "table"]
 # What a document is, so the answering model knows what to use it for.
@@ -239,6 +245,8 @@ class Indexer:
         self._queue: asyncio.Queue[str] = asyncio.Queue()
         self._worker: asyncio.Task | None = None
         self._indexes: dict[str, DocIndex] = {}
+        # Automatic retries so far, per document that failed.
+        self._retries: dict[str, int] = {}
 
     def index_path(self, doc_id: str) -> Path:
         return self.library.folder(doc_id) / "index.json"
@@ -248,12 +256,21 @@ class Indexer:
         if doc_id not in self._indexes:
             path = self.index_path(doc_id)
             if path.exists():
-                self._indexes[doc_id] = DocIndex.model_validate_json(path.read_text())
+                try:
+                    self._indexes[doc_id] = DocIndex.model_validate_json(path.read_text())
+                except ValidationError:
+                    # A damaged file is indexed again from the start, which replaces it.
+                    logger.exception("Unreadable index for %s; it will be indexed again", doc_id)
+                    return None
         return self._indexes.get(doc_id)
 
     def _save(self, index: DocIndex) -> None:
+        """Write the index via a temporary file, so a crash can't leave half a file."""
         self._indexes[index.doc_id] = index
-        self.index_path(index.doc_id).write_text(index.model_dump_json())
+        path = self.index_path(index.doc_id)
+        temporary = path.with_suffix(".tmp")
+        temporary.write_text(index.model_dump_json())
+        os.replace(temporary, path)
 
     def doc_status(self, doc_id: str) -> dict[str, Any]:
         index = self.get(doc_id)
@@ -273,7 +290,21 @@ class Indexer:
         Pick a half-indexed document back up after the backend restarted (as `make dev`
         does on every backend edit), since its queue and status lived only in memory.
         """
-        if doc_id not in self.status:
+        status = self.status.get(doc_id)
+        if status is None:
+            self.enqueue(doc_id)
+        elif (
+            status.get("status") == "error"
+            and time.time() - status.get("failed_at", 0) >= RETRY_AFTER_SECONDS
+            and self._retries.get(doc_id, 0) < AUTO_RETRIES
+        ):
+            self._retries[doc_id] = self._retries.get(doc_id, 0) + 1
+            self.enqueue(doc_id)
+
+    def retry(self, doc_id: str) -> None:
+        """Index a document that failed again now, because the reader asked to."""
+        if self.status.get(doc_id, {}).get("status") == "error":
+            self._retries.pop(doc_id, None)
             self.enqueue(doc_id)
 
     def enqueue(self, doc_id: str) -> None:
@@ -299,6 +330,7 @@ class Indexer:
                     **self.status.get(doc_id, {}),
                     "status": "error",
                     "error": str(error) or type(error).__name__,
+                    "failed_at": time.time(),
                 }
 
     async def index(self, doc_id: str) -> DocIndex:
@@ -347,7 +379,12 @@ class Indexer:
                 self._save(index)
                 self.status[doc_id]["pages_done"] += end - start + 1
 
-        await asyncio.gather(*(run(s, e) for s, e in todo))
+        # Every chunk finishes (and is saved) before a failure is reported, so a retry never
+        # runs alongside chunks still in progress.
+        results = await asyncio.gather(*(run(s, e) for s, e in todo), return_exceptions=True)
+        failed = next((r for r in results if isinstance(r, BaseException)), None)
+        if failed:
+            raise failed
         summary = await self.summarize(client, doc, index)
         index.title, index.summary, index.complete = summary.title, summary.summary, True
         index.kind = summary.kind

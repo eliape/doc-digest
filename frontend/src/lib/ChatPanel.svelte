@@ -5,6 +5,7 @@
   import { contextLabel, type PageContext, type Pick } from './context'
   import Dropdown from './Dropdown.svelte'
   import { type CitableDocs, renderMarkdown, selectedMarkdown } from './markdown'
+  import { FLASHCARD_ICON } from './flashcards'
   import { EFFORTS, MODELS, savedEffort, saveEffort, savedModel, saveModel } from './models'
   import { MODES } from './modes'
   import ChatSwitcher from './ChatSwitcher.svelte'
@@ -25,9 +26,11 @@
     onsend?: (topicId: string) => void
     /** Show where a context chip or a citation points: switch to its tab, go to the page and flash the spot. */
     onreveal?: (target: Pick & { docId: string }) => void
+    /** Make flashcards from a discussion, up to one of its answers. */
+    onflashcards?: (chatId: string, messageId: string) => void
   }
 
-  let { workspace, open = $bindable(false), onclose, onsend, onreveal }: Props = $props()
+  let { workspace, open = $bindable(false), onclose, onsend, onreveal, onflashcards }: Props = $props()
 
   let topic = $derived(workspace.activeTopic)
   /** The topic's open discussion. */
@@ -445,6 +448,17 @@
                 <path d="M7 12h3c3 0 3-6 7-6M10 12c3 0 3 6 7 6" />
                 </svg>
               </button>
+              {#if onflashcards}
+                <button
+                  type="button"
+                  class="icon-button small"
+                  aria-label="Make flashcards from this discussion"
+                  title="Make flashcards from the discussion up to this answer"
+                  onclick={() => onflashcards(chat.id, message.id)}
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d={FLASHCARD_ICON} /></svg>
+                </button>
+              {/if}
             </div>
           {/if}
           {#if chat.branch && index === chat.branch.at - 1}
@@ -975,6 +989,9 @@
     position: absolute;
     top: 0.125rem;
     left: 0;
+  }
+  .message-actions .icon-button + .icon-button {
+    left: 2rem;
   }
   .icon-button.small {
     width: 1.75rem;

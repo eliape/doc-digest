@@ -324,6 +324,20 @@ def report(
                 costs = [c.cost for c in mine if c.model == model]
                 out(f"  {short(model)}: {len(costs)}, {cents(average(costs))} each")
 
+    flashcards = [c for c in calls if c.kind == "flashcards"]
+    if flashcards:
+        out("")
+        out("Flashcard batches (writing, lookups and the duplicate check)")
+        batches: dict[str, list[Call]] = defaultdict(list)
+        for c in flashcards:
+            batches[c.question or f"{c.at}"].append(c)
+        by_model: dict[str, list[float]] = defaultdict(list)
+        for mine in batches.values():
+            writer = next((c.model for c in mine if c.mode == "write"), mine[0].model)
+            by_model[writer].append(sum(c.cost for c in mine))
+        for model, costs in sorted(by_model.items()):
+            out(f"  {short(model)}: {len(costs)}, {cents(average(costs))} each")
+
     indexing = [c for c in calls if c.kind.startswith("index")]
     if indexing:
         out("")
@@ -336,7 +350,7 @@ def report(
             size = f", {pages} pages" if pages else ""
             out(f"  {name}{size}: {cents(sum(c.cost for c in mine))}")
 
-    known = {"answer", "quiz", "quiz_recommendation", "register", "register_tidy"}
+    known = {"answer", "quiz", "quiz_recommendation", "register", "register_tidy", "flashcards"}
     others = [c for c in calls if c.kind not in known and not c.kind.startswith("index")]
     if others:
         out("")

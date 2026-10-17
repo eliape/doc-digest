@@ -278,9 +278,9 @@ describe('App', () => {
     await fireEvent.click(dots)
     expect(dots).toHaveAttribute('aria-expanded', 'true')
     const items = screen.getAllByRole('menuitem')
-    expect(items.map((i) => i.textContent?.trim())).toEqual(['Rename', 'Conventions and purpose', 'Delete'])
+    expect(items.map((i) => i.textContent?.trim())).toEqual(['Rename', 'Conventions and purpose', 'Flashcards', 'Delete'])
     expect(items.every((i) => i.querySelector('svg'))).toBe(true)
-    expect(items[2]).toHaveClass('danger')
+    expect(items[3]).toHaveClass('danger')
 
     await fireEvent.keyDown(window, { key: 'Escape' })
     expect(screen.queryByRole('menu')).not.toBeInTheDocument()
@@ -693,7 +693,7 @@ describe('App', () => {
     const labels = within(menu)
       .getAllByRole('menuitem')
       .map((item) => item.querySelector('.text > span')?.textContent)
-    expect(labels).toEqual(['Ask', 'Socratic', 'Quiz me'])
+    expect(labels).toEqual(['Ask', 'Socratic', 'Quiz me', 'Make flashcards'])
     expect(within(menu).getByRole('menuitem', { name: /^Quiz me/ })).not.toHaveAttribute('aria-disabled')
     await fireEvent.click(within(menu).getByRole('menuitem', { name: /^Socratic/ }))
     expect(screen.queryByRole('menu')).not.toBeInTheDocument()
@@ -715,6 +715,28 @@ describe('App', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Click to ask' }))
     await leftClick(page, 100, 300)
     expect(within(panel).getByRole('button', { name: 'Mode: Normal' })).toBeInTheDocument()
+  })
+
+  it('opens Make flashcards for a right-clicked spot, and the deck from the topic’s menu', async () => {
+    renderOffline()
+    await pick(pdf('slides.pdf'))
+    await screen.findByRole('tab', { name: 'slides.pdf' })
+    const page = standInPage(3)
+    await fireEvent.contextMenu(page, { clientX: 200, clientY: 150 })
+    await fireEvent.click(screen.getByRole('menuitem', { name: /^Make flashcards/ }))
+    const dialog = within(screen.getByRole('dialog', { name: 'Make flashcards' }))
+    expect(dialog.getByText('The spot you right-clicked on p. 3 of slides.pdf')).toBeInTheDocument()
+    // The chat stays as it was: nothing is attached to it.
+    expect(page.querySelector('.context-marker')).toBeNull()
+    await fireEvent.keyDown(dialog.getByRole('textbox', { name: /Focus/ }), { key: 'Escape' })
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+
+    await showTopics()
+    await fireEvent.click(screen.getByRole('button', { name: 'Actions for slides' }))
+    await fireEvent.click(screen.getByRole('menuitem', { name: 'Flashcards' }))
+    expect(screen.getByRole('dialog', { name: 'Flashcards' })).toHaveTextContent('slides')
+    // The sidebar stays open behind it.
+    expect(screen.getByRole('button', { name: 'Actions for slides' })).toBeInTheDocument()
   })
 
   it('asks about a right-clicked spot from the menu, as a click with Click to ask would', async () => {

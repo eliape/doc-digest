@@ -27,6 +27,8 @@ def separate_data(tmp_path, monkeypatch):
     from leqtern import main
 
     monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
+    # Never load the real embedding model in tests (it downloads on first use).
+    monkeypatch.setenv("EMBEDDINGS", "false")
     main._services.cache_clear()
     yield
     main._services.cache_clear()

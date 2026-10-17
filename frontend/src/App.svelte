@@ -5,6 +5,9 @@
   import ChatPanel from './lib/ChatPanel.svelte'
   import ContextMenu, { type MenuItem } from './lib/ContextMenu.svelte'
   import DocPane from './lib/DocPane.svelte'
+  import FlashcardDialog from './lib/FlashcardDialog.svelte'
+  import FlashcardManager from './lib/FlashcardManager.svelte'
+  import { FLASHCARD_ICON } from './lib/flashcards'
   import type { Heading, PageContext, Pick } from './lib/context'
   import { ASK_ICON, QUIZ_ICON, SOCRATIC_ICON } from './lib/modes'
   import { currentEntry, fromIndex, type ReadingSpot } from './lib/outline'
@@ -15,7 +18,7 @@
   import { savedZoomFollowsChat } from './lib/chatZoom'
   import TopicProfileDialog from './lib/TopicProfileDialog.svelte'
   import TopicsSidebar from './lib/TopicsSidebar.svelte'
-  import { type Mode, Workspace } from './lib/workspace.svelte'
+  import { chatTitle, type FlashcardSource, type Mode, Workspace } from './lib/workspace.svelte'
 
   const workspace = new Workspace()
   let error = $state('')
@@ -66,6 +69,11 @@
   // The topic whose Conventions and purpose are being edited, if any.
   let profileTopicId = $state<string>()
   const profileTopic = $derived(workspace.topics.find((t) => t.id === profileTopicId))
+  // The Make flashcards menu, while open: the topic, what the cards are made from, and that in words.
+  let making = $state.raw<{ topicId: string; source: FlashcardSource; about: string }>()
+  // The topic whose deck the flashcard manager shows, if it is open.
+  let deckTopicId = $state<string>()
+  const deckTopic = $derived(workspace.topics.find((t) => t.id === deckTopicId))
   // Whether each topic's chat is showing, so a topic opens the way it was left. Not saved:
   // the chat starts hidden on every load.
   let chatOpenBy = $state<Record<string, boolean>>({})
@@ -302,6 +310,12 @@
         hint: 'Test yourself with a few questions',
         onselect: () => onPick(docId, pick, 'quiz'),
       },
+      {
+        label: 'Make flashcards',
+        icon: FLASHCARD_ICON,
+        hint: 'Write Anki cards on it for the topic’s deck',
+        onselect: () => flashcardsFromPick(docId, pick),
+      },
     ]
     const text = pick.selection
     if (text) {
@@ -314,6 +328,30 @@
       })
     }
     return items
+  }
+
+  /** Open the Make flashcards menu for a spot or selection; its images render meanwhile. */
+  function flashcardsFromPick(docId: string, pick: Pick) {
+    const picked = workspace.docs[docId]
+    const topic = workspace.topicOf(docId)
+    if (!picked || !topic) return
+    const context: PageContext = { ...pick, docId, docName: picked.name, pageTexts: [] }
+    const ready = (panes[docId]?.capture(pick) ?? Promise.resolve(undefined)).then(
+      (captured) => captured && { ...captured, docId, docName: picked.name },
+    )
+    const where = `p. ${pick.page} of ${picked.name}`
+    const about = pick.selection ? `Your selection on ${where}` : `The spot you right-clicked on ${where}`
+    making = { topicId: topic.id, source: { kind: 'pick', context, ready }, about }
+  }
+
+  /** Open the Make flashcards menu for a discussion, up to one of its answers. */
+  function flashcardsFromChat(chatId: string, messageId: string) {
+    const topic = workspace.topics.find((t) => t.chats.some((c) => c.id === chatId))
+    const chat = topic?.chats.find((c) => c.id === chatId)
+    if (!topic || !chat) return
+    const last = chat.messages.at(-1)?.id === messageId
+    const about = `The discussion “${chatTitle(chat)}”${last ? '' : ', up to the answer you picked'}`
+    making = { topicId: topic.id, source: { kind: 'chat', chatId, messageId }, about }
   }
 
   /** The topic's open page as context, for a question asked without clicking anything. */
@@ -515,7 +553,9 @@
     // Pressing anywhere but the sidebar (the PDF, the tabs, the chat) folds the topics away.
     // A pointer shortcut: the menu button does the same by keyboard.
     const target = e.target as Element
-    if (!target.closest('#topics-sidebar, .settings-dialog, .topic-profile-dialog')) sidebarOpen = false
+    if (!target.closest('#topics-sidebar, .settings-dialog, .topic-profile-dialog, .flashcard-dialog, .flashcard-manager')) {
+      sidebarOpen = false
+    }
     // The outline closes too, unless the press is in it or on its button.
     if (!target.closest('#topics-sidebar, #doc-outline, .outline-toggle')) outlineOpen = false
   }}
@@ -528,9 +568,28 @@
     onopensettings={() => (settingsOpen = true)}
     onupload={() => fileInput.click()}
     onopenprofile={(id) => (profileTopicId = id)}
+    onopenflashcards={(id) => (deckTopicId = id)}
   />
   {#if settingsOpen}<SettingsDialog {workspace} bind:zoomFollowsChat onclose={() => (settingsOpen = false)} />{/if}
   {#if profileTopic}<TopicProfileDialog topic={profileTopic} onclose={() => (profileTopicId = undefined)} />{/if}
+  {#if making && workspace.topics.some((t) => t.id === making?.topicId)}
+    {@const { topicId } = making}
+    <FlashcardDialog
+      {workspace}
+      {topicId}
+      source={making.source}
+      about={making.about}
+      onclose={() => (making = undefined)}
+      onreveal={reveal}
+      onopendeck={() => {
+        making = undefined
+        deckTopicId = topicId
+      }}
+    />
+  {/if}
+  {#if deckTopic}
+    <FlashcardManager {workspace} topic={deckTopic} onclose={() => (deckTopicId = undefined)} onreveal={reveal} />
+  {/if}
 
   <div class="main">
     <input
@@ -712,6 +771,7 @@
     onclose={() => tick().then(() => chatToggle?.focus())}
     onsend={send}
     onreveal={reveal}
+    onflashcards={flashcardsFromChat}
   />
 
   {#if menu}

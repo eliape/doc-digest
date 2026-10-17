@@ -9,6 +9,7 @@ import {
   chatTitle,
   discussionRequest,
   discussions,
+  flashcardRequest,
   topicNameFor,
 } from './workspace.svelte'
 
@@ -1367,6 +1368,64 @@ describe('Workspace register', () => {
     expect(key()).toBe(`${quiz.id}/2+`)
     expect(discussionRequest(topic, chatOf(topic)).messages[0]).not.toHaveProperty('context.page_image')
 
+    ws.deleteTopic(topic.id)
+    expect(forgotten).toEqual([topic.id])
+  })
+})
+
+describe('Workspace flashcards', () => {
+  async function talked(ws: Workspace, topicId: string, text: string) {
+    ws.topics.find((t) => t.id === topicId)!.draft = text
+    await ws.ask(topicId, undefined, async function* () {
+      yield { type: 'text', text: `About ${text}` }
+    })
+  }
+
+  function workspace() {
+    const ws = new Workspace()
+    ws.titleApi = async () => null
+    ws.registerApi = { note: async () => {}, forget: async () => {} }
+    const forgotten: string[] = []
+    ws.forgetDeck = async (id) => void forgotten.push(id)
+    return { ws, forgotten }
+  }
+
+  it('makes cards from a picked spot with its images, and the topic around it', async () => {
+    const { ws } = workspace()
+    const doc = ws.addDoc('notes.pdf', bytes(1))
+    const topic = ws.activeTopic!
+    topic.purpose = ' Exam in December '
+    ws.instructions = 'Use SI units.'
+    const context: PageContext = { docId: doc.id, docName: 'notes.pdf', page: 4, selection: 'A theorem', pageTexts: [] }
+    const rendered = Promise.resolve({ ...context, pageImage: 'AAAA', pageTexts: [{ page: 4, text: 'A theorem.' }] })
+    const request = await ws.flashcardRequest(topic.id, { kind: 'pick', context, ready: rendered })
+    expect(request).toMatchObject({
+      topic: topic.name,
+      topic_id: topic.id,
+      purpose: 'Exam in December',
+      instructions: 'Use SI units.',
+      context: { page: 4, selection: 'A theorem', page_image: 'AAAA' },
+    })
+    expect(request).not.toHaveProperty('messages')
+  })
+
+  it('makes cards from a discussion up to the answer picked, without images', async () => {
+    const { ws } = workspace()
+    ws.addDoc('notes.pdf', bytes(1))
+    const topic = ws.activeTopic!
+    await talked(ws, topic.id, 'one')
+    await talked(ws, topic.id, 'two')
+    const chat = chatOf(topic)
+    const request = flashcardRequest(topic, { kind: 'chat', chatId: chat.id, messageId: chat.messages[1].id })
+    expect(request?.chat_id).toBe(chat.id)
+    expect((request?.messages as { text: string }[]).map((m) => m.text)).toEqual(['one', 'About one'])
+    expect(flashcardRequest(topic, { kind: 'chat', chatId: chat.id, messageId: 'gone' })).toBeUndefined()
+  })
+
+  it('deletes a deleted topic’s deck', () => {
+    const { ws, forgotten } = workspace()
+    ws.addDoc('notes.pdf', bytes(1))
+    const topic = ws.activeTopic!
     ws.deleteTopic(topic.id)
     expect(forgotten).toEqual([topic.id])
   })
